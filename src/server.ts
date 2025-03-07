@@ -6,6 +6,7 @@ import { errorHandler } from "./middleware/error";
 import { notFound } from "./middleware/not_found";
 import authRoutes from "./routes/authRoutes";
 import userRoutes from "./routes/userRoutes";
+import leadRoutes from "./routes/leadRoutes";
 import User from "./models/User";
 require("dotenv").config();
 
@@ -34,6 +35,7 @@ app.get('/', async (req, res) => {
 // Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
+app.use('/api/leads', leadRoutes);
 
 // Middleware for handling 404s and errors
 // app.use(notFound);
