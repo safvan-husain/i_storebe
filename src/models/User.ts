@@ -5,22 +5,14 @@ import bcrypt from 'bcryptjs';
 export type UserPrivilege = 'admin' | 'manager' | 'staff';
 
 export interface IUser extends Document {
-  email: string;
   phone: string;
   password: string;
-  privileges: UserPrivilege[];
+  privilege: UserPrivilege;
   comparePassword(candidatePassword: string): Promise<boolean>;
 }
 
 const UserSchema = new mongoose.Schema(
   {
-    email: {
-      type: String,
-      required: [true, 'Email is required'],
-      unique: true,
-      trim: true,
-      lowercase: true,
-    },
     phone: {
       type: String,
       required: [true, 'Phone number is required'],
@@ -31,10 +23,10 @@ const UserSchema = new mongoose.Schema(
       required: [true, 'Password is required'],
       minlength: [6, 'Password must be at least 6 characters long'],
     },
-    privileges: {
-      type: [String],
+    privilege: {
+      type: String,
       enum: ['admin', 'manager', 'staff'],
-      default: ['staff'],
+      default: 'staff',
     },
   },
   {

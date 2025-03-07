@@ -3,14 +3,13 @@ import jwt from 'jsonwebtoken';
 import { IUser } from '../models/User';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
-const JWT_EXPIRES_IN = '7d';
+const JWT_EXPIRES_IN = '200d';
 
 export const generateToken = (user: IUser): string => {
   return jwt.sign(
     {
       id: user._id,
-      email: user.email,
-      privileges: user.privileges,
+      privilege: user.privilege,
     },
     JWT_SECRET,
     {

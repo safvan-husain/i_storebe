@@ -18,10 +18,9 @@ const createAdminUser = async () => {
     
     // Create admin user
     const admin = await User.create({
-      email: 'admin@example.com',
       phone: '1234567890',
       password: 'admin123', // Will be hashed automatically by the pre-save hook
-      privileges: ['admin'],
+      privilege: 'admin',
     });
     
     console.log('Admin user created:', admin);

@@ -1,17 +1,16 @@
-
 import express from 'express';
-import { createUser, getUsers, getUserById } from '../controllers/authController';
-import { protect, authorize } from '../middleware/auth';
+import { createUser, getUsers, getUserById } from '../controllers/auth/authController';
+import { protect } from '../middleware/auth';
 
 const router = express.Router();
 
 router
   .route('/')
-  .post(protect, authorize(['admin', 'manager']), createUser)
-  .get(protect, authorize(['admin', 'manager']), getUsers);
+  .post(protect, createUser)
+  .get(protect, getUsers);
 
 router
   .route('/:id')
-  .get(protect, authorize(['admin', 'manager']), getUserById);
+  .get(protect, getUserById);
 
 export default router;

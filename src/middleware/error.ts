@@ -1,4 +1,5 @@
 import { Request, Response } from "express";
+import { z } from "zod";
 
 
 export const errorHandler = (err: Error, _: Request, res: Response) => {
@@ -11,4 +12,15 @@ export const errorHandler = (err: Error, _: Request, res: Response) => {
     stack: process.env.NODE_ENV === "production" ? null : err.stack,
   });
 };
+
+export const onCatchError = (error: any, res: Response) => {
+    if (error instanceof z.ZodError) {
+        res.status(400).json({
+            message: "Validation error",
+            errors: error.errors
+        });
+        return;
+    }
+    res.status(500).json({ message: "Internal server error", error });
+}
   
