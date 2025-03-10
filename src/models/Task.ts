@@ -1,6 +1,7 @@
 import mongoose, { Document } from 'mongoose';
+import { IUser } from './User';
 
-export interface ILead extends Document {
+export interface ITask extends Document {
   phone: string;
   name: string;
   email?: string;
@@ -13,7 +14,7 @@ export interface ILead extends Document {
   product: string;
 }
 
-const LeadSchema = new mongoose.Schema(
+const TaskSchema = new mongoose.Schema(
   {
     phone: {
       type: String,
@@ -69,6 +70,6 @@ const LeadSchema = new mongoose.Schema(
   }
 );
 
-const Lead = mongoose.model<ILead>('Lead', LeadSchema);
+const Task = mongoose.model<ITask>('Lead', TaskSchema);
 
-export default Lead;
+export default Task;

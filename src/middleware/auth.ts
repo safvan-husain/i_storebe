@@ -1,7 +1,7 @@
 
 import { Request, Response, NextFunction } from 'express';
 import { verifyToken } from '../utils/jwtUtils';
-import { UserPrivilege } from '../models/User';
+import { UserPrivilege } from '../enums/enums';
 
 // // Extend Express Request type to include user
 declare global {
@@ -21,15 +21,15 @@ export const protect = async (req: Request, res: Response, next: NextFunction) =
     }
 
     if (!token) {
-      res.status(401);
-      throw new Error('Not authorized, no token provided');
+      res.status(401).json({ message: 'Not authorized, no token provided'});
+      return;
     }
 
     const decoded = verifyToken(token);
     
     if (!decoded) {
-      res.status(401);
-      throw new Error('Not authorized, token failed');
+      res.status(401).json({ message: 'Not authorized, token failed'});
+      return;
     }
 
     req.userId = decoded.id;

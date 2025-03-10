@@ -16,7 +16,7 @@ export const errorHandler = (err: Error, _: Request, res: Response) => {
 export const onCatchError = (error: any, res: Response) => {
     if (error instanceof z.ZodError) {
         res.status(400).json({
-            message: "Validation error",
+            message: error.errors.length > 0 ?  `${error.errors[0].path[0]}: ${error.errors[0].message}` : "Validation error",
             errors: error.errors
         });
         return;

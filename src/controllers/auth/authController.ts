@@ -1,6 +1,6 @@
 
 import { Request, Response } from 'express';
-import User, { UserPrivilege } from '../../models/User';
+import User from '../../models/User';
 import { generateToken } from '../../utils/jwtUtils';
 import asyncHandler from 'express-async-handler';
 import { loginSchema, UserRequestSchema } from './validation';
@@ -40,45 +40,54 @@ export const loginUser = asyncHandler(async (req: Request, res: Response) => {
 
 export const createUser = asyncHandler(async (req: Request, res: Response) => {
   try {
-    const { phone, password, privilege } = UserRequestSchema.parse(req.body);
-    // Determine which privileges the requester can assign
+    let { phone, privilege, manager, ...rest } = UserRequestSchema.parse(req.body);
+
+    // Validate requester permissions
     const admin = await User.findById(req.userId);
-    if (admin?.privilege !== 'admin' && admin?.privilege !== 'manager') {
+    if (!['admin', 'manager'].includes(admin?.privilege ?? "")) {
       res.status(403).json({ message: "You don't have permission to create users" });
       return;
     }
 
+    // Handle admin creating manager without specifying a [manager]branch
+    if (admin?.privilege === 'admin' && privilege === 'staff' && !manager) {
+      res.status(400).json({ message: "Admin should provide manager(branch) when creating staff" });
+      return;
+    }
+
+    // Enforce manager permissions
     if (admin?.privilege === 'manager') {
       if (privilege !== 'staff') {
         res.status(403).json({ message: "You only have permission to create staff" });
         return;
       }
+      manager = admin.id;
     }
 
-    if (!phone || !password) {
-      res.status(400).json({ message: 'Please provide phone and password' });
-      return;
-    }
-
+    // Check if user already exists
     const userExists = await User.findOne({ phone });
-
     if (userExists) {
-      res.status(400).json({ message: "user already exist" });
+      res.status(400).json({ message: "User already exists" });
       return;
     }
 
-    const user = await User.create({
-      phone,
-      password,
-      privilege: privilege,
-    });
+    // Set manager ID for staff creation
+    const managerId = privilege === 'staff' ? manager : undefined;
 
+    // Create user
+    const user = (await User.create({
+      phone,
+      privilege,
+      manager: managerId,
+      ...rest,
+    }));
+
+    let userObject: any = user.toObject();
+    delete userObject.password;
     if (user) {
       res.status(201).json({
-        _id: user._id,
-        phone: user.phone,
-        privilege: user.privilege,
         token: generateToken(user),
+        ...userObject
       });
     } else {
       res.status(200).json({ message: "Failed to create user" });

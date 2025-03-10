@@ -18,6 +18,7 @@ const createAdminUser = async () => {
     
     // Create admin user
     const admin = await User.create({
+      name: "Admin",
       phone: '1234567890',
       password: 'admin123', // Will be hashed automatically by the pre-save hook
       privilege: 'admin',
@@ -31,4 +32,4 @@ const createAdminUser = async () => {
   }
 };
 
-createAdminUser();
+createAdminUser().catch(err => console.log("error seeding admin", err));

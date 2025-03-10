@@ -4,18 +4,29 @@ import mongoose, { Types } from 'mongoose';
 import asyncHandler from 'express-async-handler';
 import Lead from '../../models/Lead';
 import User from '../../models/User';
-import { LeadRequestSchema, LeadFilterSchema } from '../../utils/validation';
+import { crateLeadSchema, LeadFilterSchema } from './validations';
 import { onCatchError } from '../../middleware/error';
 
-// @desc    Create new lead
-// @route   POST /api/leads
-// @access  Private (admin, manager, staff)
 export const createLead = asyncHandler(async (req: Request, res: Response) => {
   try {
-    const leadData = LeadRequestSchema.parse(req.body);
-    
+    let leadData = crateLeadSchema.parse(req.body);
+    const requestedPrivilege = req.privilege;
+
+    if (requestedPrivilege === 'admin' && !leadData.manager) {
+      res.status(401).json({ message: "manager: required"});
+      return;
+    } else if (req.privilege === 'manager') {
+        leadData.manager = req.userId;
+    } else {
+      let staff = await User.findById(req.userId, { manager: true }).lean();
+      if (!staff) {
+        res.status(401).json({ message: "User not found"})
+        return;
+      }
+      leadData.manager = staff!.manager?.toString();
+    }
     // Verify manager exists
-    if(!Types.ObjectId.isValid(leadData.manager)) {
+    if(!Types.ObjectId.isValid(leadData.manager ?? "")) {
       res.status(400).json({ message: 'Invalid manager id' });
       return;
     }
@@ -38,9 +49,6 @@ export const createLead = asyncHandler(async (req: Request, res: Response) => {
   }
 });
 
-// @desc    Get all leads with optional filtering
-// @route   GET /api/leads
-// @access  Private (admin, manager, staff)
 export const getLeads = asyncHandler(async (req: Request, res: Response) => {
   try {
     const filter = LeadFilterSchema.parse(req.query);
@@ -110,9 +118,6 @@ export const getLeads = asyncHandler(async (req: Request, res: Response) => {
   }
 });
 
-// @desc    Get lead by ID
-// @route   GET /api/leads/:id
-// @access  Private (admin, manager, staff)
 export const getLeadById = asyncHandler(async (req: Request, res: Response) => {
   try {
     if(!Types.ObjectId.isValid(req.params.id)) {
@@ -129,7 +134,7 @@ export const getLeadById = asyncHandler(async (req: Request, res: Response) => {
     }
     
     // Check if user has access to this lead
-    if (req.privilege === 'manager' && lead.manager._id.toString() !== req.userId) {
+    if (req.privilege === 'manager' && lead.manager.toString() !== req.userId) {
       res.status(403).json({ message: 'Not authorized to access this lead' });
       return;
     }
@@ -140,9 +145,6 @@ export const getLeadById = asyncHandler(async (req: Request, res: Response) => {
   }
 });
 
-// @desc    Update lead
-// @route   PUT /api/leads/:id
-// @access  Private (admin, manager)
 export const updateLead = asyncHandler(async (req: Request, res: Response) => {
   try {
     if(!Types.ObjectId.isValid(req.params.id)) {
@@ -195,9 +197,6 @@ export const updateLead = asyncHandler(async (req: Request, res: Response) => {
   }
 });
 
-// @desc    Delete lead
-// @route   DELETE /api/leads/:id
-// @access  Private (admin)
 export const deleteLead = asyncHandler(async (req: Request, res: Response) => {
   try {
     if(!Types.ObjectId.isValid(req.params.id)) {
@@ -211,15 +210,12 @@ export const deleteLead = asyncHandler(async (req: Request, res: Response) => {
       return;
     }
     
-    const lead = await Lead.findById(req.params.id);
+    const lead = await Lead.findByIdAndDelete(req.params.id);
     
     if (!lead) {
       res.status(404).json({ message: 'Lead not found' });
       return;
     }
-    
-    await lead.remove();
-    
     res.status(200).json({ message: 'Lead removed' });
   } catch (error) {
     onCatchError(error, res);
