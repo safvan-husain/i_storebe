@@ -1,11 +1,11 @@
 
 import express from 'express';
-import { 
-  createLead, 
-  getLeads, 
-  getLeadById, 
-  updateLead, 
-  deleteLead 
+import {
+  createLead,
+  getLeads,
+  getLeadById,
+  updateLead,
+  updateLeadStatus
 } from '../controllers/leads/leadController';
 import { protect } from '../middleware/auth';
 
@@ -16,10 +16,12 @@ router
   .post(protect, createLead)
   .get(protect, getLeads);
 
+router.route('/status/:id').put(protect, updateLeadStatus);
+
 router
   .route('/:id')
   .get(protect, getLeadById)
-  .put(protect, updateLead)
-  .delete(protect, deleteLead);
+  .put(protect, updateLead);
+
 
 export default router;

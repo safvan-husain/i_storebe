@@ -13,11 +13,14 @@ const activitySchema = new Schema<IActivity>(
     {
         activator: {type: Schema.Types.ObjectId, ref: 'User', required: true},
         lead: {type: Schema.Types.ObjectId, ref: 'Lead', required: true},
-        task: {type: Schema.Types.ObjectId, ref: 'Task', required: true},
+        task: {type: Schema.Types.ObjectId, ref: 'Task'},
         action: {type: String, required: true},
         optionalMessage: {type: String, required: false},
         timestamp: {type: Date, required: true},
     },
+    {
+        timestamps: true,
+    }
 );
 
 const Activity = mongoose.model<IActivity>('Activity', activitySchema);
