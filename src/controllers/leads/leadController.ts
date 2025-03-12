@@ -1,5 +1,5 @@
 import {Request, Response} from 'express';
-import mongoose, {Types} from 'mongoose';
+import mongoose, {Schema, Types} from 'mongoose';
 import asyncHandler from 'express-async-handler';
 import Lead from '../../models/Lead';
 import User from '../../models/User';
@@ -13,8 +13,8 @@ import {
 } from './validations';
 import {onCatchError} from '../../middleware/error';
 import Activity from "../../models/Activity";
-import {getISTDate} from "../../utils/ist_time";
-import Task from "../../models/Task";
+import {convertToIstMillie, getISTDate} from "../../utils/ist_time";
+import {ActivityType} from "../activity/validation";
 
 export const createLead = asyncHandler(async (req: Request, res: Response) => {
     try {
@@ -50,10 +50,10 @@ export const createLead = asyncHandler(async (req: Request, res: Response) => {
 
         if (lead) {
             await Activity.create({
+                type: 'lead_added',
                 activator: req.userId,
                 lead: lead._id,
                 action: "Created Lead",
-                timestamp: getISTDate(),
             });
             lead = lead.toObject();
             delete lead.createdAt;
@@ -91,17 +91,21 @@ export const updateLeadStatus = asyncHandler(async (req: Request, res: Response)
         }
 
         let isAnyNewValue = false;
+        let activityType: ActivityType = 'lead_updated';
         let message = `${requestedUser.name} Changed `;
         //if the given value is not null update accordingly and create new activity.
         if (updateData.enquireStatus && updateData.enquireStatus !== lead.enquireStatus) {
+            activityType = 'status_updated';
             isAnyNewValue = true;
             lead.enquireStatus = updateData.enquireStatus;
             message = message + getUpdateStatusMessage('status', updateData.enquireStatus);
         } else if (updateData.source && updateData.source !== lead.source) {
+            activityType = 'lead_updated'
             isAnyNewValue = true;
             lead.source = updateData.source;
             message = message + getUpdateStatusMessage('source', updateData.source);
         } else if (updateData.purpose && updateData.purpose !== lead.purpose) {
+            activityType = 'purpose_updated';
             isAnyNewValue = true;
             lead.purpose = updateData.purpose;
             message = message + getUpdateStatusMessage('purpose', updateData.purpose);
@@ -109,10 +113,10 @@ export const updateLeadStatus = asyncHandler(async (req: Request, res: Response)
 
         if (isAnyNewValue) {
             await Activity.create({
+                type: activityType,
                 activator: req.userId,
                 lead: lead._id,
                 action: message,
-                timestamp: getISTDate(),
             });
             lead = await lead.save();
         }
@@ -135,6 +139,15 @@ export const getLeads = asyncHandler(async (req: Request, res: Response) => {
         let query: any = {};
 
         // Apply filters if provided
+        if (filter.searchTerm) {
+            let searchRegex = {$regex: filter.searchTerm, $options: 'i'}
+            query = {
+                $or: [
+                    {name: searchRegex},
+                    {phone: searchRegex}
+                ]
+            }
+        }
         if (filter.startDate && filter.endDate) {
             query.createdAt = {
                 $gte: filter.startDate,
@@ -162,10 +175,6 @@ export const getLeads = asyncHandler(async (req: Request, res: Response) => {
             query.purpose = filter.purpose;
         }
 
-        if (filter.phone) {
-            query.phone = {$regex: filter.phone, $options: 'i'};
-        }
-
         // If user is a manager, only show leads assigned to them
         if (req.privilege === 'manager') {
             query.manager = req.userId;
@@ -180,7 +189,7 @@ export const getLeads = asyncHandler(async (req: Request, res: Response) => {
         res.status(200).json(leads.map((e) => ({
             ...e,
             dob: e.dob ? e.dob.getTime() : null,
-            createdAt: undefined,
+            createdAt: convertToIstMillie(e.createdAt),
             updatedAt: undefined,
             __v: undefined
         })));
@@ -196,7 +205,7 @@ export const getLeadById = asyncHandler(async (req: Request, res: Response) => {
             return;
         }
 
-        const lead = await Lead.findById(req.params.id).populate('manager', 'phone privilege');
+        const lead = await Lead.findById(req.params.id).populate('manager', 'phone privilege').lean();
 
         // Check if lead exists
         if (!lead) {
@@ -226,30 +235,14 @@ export const updateLead = asyncHandler(async (req: Request, res: Response) => {
 
         const lead = await Lead.findById(req.params.id);
 
-        // Check if lead exists
         if (!lead) {
             res.status(404).json({message: 'Lead not found'});
             return;
         }
 
-        // Check if user has permission to update
-        if (req.privilege === 'manager' && lead.manager.toString() !== req.userId) {
+        if (req.privilege !== 'admin') {
             res.status(403).json({message: 'Not authorized to update this lead'});
             return;
-        }
-
-        if (req.privilege === 'staff') {
-            delete updateData.manager;
-        }
-
-        // If manager field is being updated, verify it exists
-        if (req.privilege === 'admin' && updateData.manager && !Types.ObjectId.isValid(updateData.manager ?? "")) {
-            res.status(400).json({message: 'Invalid manager id'});
-            return;
-        }
-
-        if (req.privilege === 'manager') {
-            updateData.manager = req.userId;
         }
 
         if (updateData.manager) {
@@ -265,16 +258,23 @@ export const updateLead = asyncHandler(async (req: Request, res: Response) => {
             updateData,
             {new: true, runValidators: true}
         ).populate('manager', 'name');
+
         if (!updatedLead) {
             res.status(404).json({message: 'Lead not found'});
             return;
         }
+        //TODO: correct messages.
+        await Activity.create({
+            activator: req.userId,
+            lead: updatedLead._id,
+            action: "Updated Lead",
+            type: 'lead_updated',
+        });
         updatedLead = updatedLead.toObject();
-        delete updatedLead.createdAt;
         delete updatedLead.updatedAt;
         delete updatedLead.__v;
         updatedLead.dob = updatedLead.dob ? updatedLead.dob.getTime() : null;
-
+        updatedLead.createdAt = convertToIstMillie(updatedLead.createdAt);
         res.status(200).json(updatedLead);
     } catch (error) {
         onCatchError(error, res);

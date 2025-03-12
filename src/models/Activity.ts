@@ -1,12 +1,16 @@
 import mongoose, {Document, Schema, Types} from 'mongoose';
+import {ActivityType} from "../controllers/activity/validation";
+
+
 
 export interface IActivity extends Document {
     activator: Types.ObjectId;
     lead: Types.ObjectId;
     action: string;
+    type: ActivityType;
     optionalMessage?: string;
     task?: Types.ObjectId,
-    timestamp: Date;
+    createdAt: Date;
 }
 
 const activitySchema = new Schema<IActivity>(
@@ -16,7 +20,7 @@ const activitySchema = new Schema<IActivity>(
         task: {type: Schema.Types.ObjectId, ref: 'Task'},
         action: {type: String, required: true},
         optionalMessage: {type: String, required: false},
-        timestamp: {type: Date, required: true},
+        type: {type: String, required: true }
     },
     {
         timestamps: true,

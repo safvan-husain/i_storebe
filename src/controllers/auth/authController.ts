@@ -44,25 +44,25 @@ export const createUser = asyncHandler(async (req: Request, res: Response) => {
         let {phone, privilege, manager, ...rest} = UserRequestSchema.parse(req.body);
 
         // Validate requester permissions
-        const admin = await User.findById(req.userId);
-        if (!['admin', 'manager'].includes(admin?.privilege ?? "")) {
+        // const admin = await User.findById(req.userId);
+        if (!['admin', 'manager'].includes(req?.privilege ?? "")) {
             res.status(403).json({message: "You don't have permission to create users"});
             return;
         }
 
         // Handle admin creating manager without specifying a [manager]branch
-        if (admin?.privilege === 'admin' && privilege === 'staff' && !manager) {
+        if (req?.privilege === 'admin' && privilege === 'staff' && !manager) {
             res.status(400).json({message: "Admin should provide manager(branch) when creating staff"});
             return;
         }
 
         // Enforce manager permissions
-        if (admin?.privilege === 'manager') {
+        if (req?.privilege === 'manager') {
             if (privilege !== 'staff') {
                 res.status(403).json({message: "You only have permission to create staff"});
                 return;
             }
-            manager = admin.id;
+            manager = req.userId;
         }
 
         // Check if user already exists

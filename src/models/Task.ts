@@ -1,11 +1,17 @@
 import mongoose, {Document} from 'mongoose';
 import {IUser} from './User';
+import {Category} from "../controllers/tasks/validation";
 
 export interface ITask extends Document {
     lead: mongoose.Types.ObjectId;
     due: Date;
-    timestamp: Date;
+    // timestamp: Date;
     assigned: mongoose.Types.ObjectId;
+    category: Category;
+    title?: string;
+    description?: string;
+    isCompleted: boolean;
+    createdAt: Date;
 }
 
 const TaskSchema = new mongoose.Schema(
@@ -19,15 +25,27 @@ const TaskSchema = new mongoose.Schema(
             type: mongoose.Schema.Types.ObjectId,
             ref: 'User',
             required: [true, 'lead is required'],
+        }, title: {
+            type: String,
+        }, description: {
+            type: String,
+        },
+        category: {
+            type: String,
+            required: true
         },
         due: {
             type: Date,
             required: true,
         },
-        timestamp: {
-            type: Date,
-            required: true,
-        },
+        // timestamp: {
+        //     type: Date,
+        //     required: true,
+        // },
+        isCompleted: {
+            type: Boolean,
+            default: false,
+        }
     },
     {
         timestamps: true,

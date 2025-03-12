@@ -1,10 +1,10 @@
 import {z} from 'zod';
-import {ObjectIdSchema} from "../auth/validation";
+import {ObjectIdSchema, paginationSchema, dateFiltersSchema} from "../../common/types";
 
 export const EnquireSource = z.enum(['call', 'facebook', 'instagram', 'previous customer', 'wabis', 'walkin', 'whatsapp']);
 export const Purpose = z.enum(['inquire', 'purchase', 'sales', 'service request']);
 export const EnquireStatus = z.enum(['empty', 'contacted', 'interested', 'lost', 'new', 'none', 'pending', 'quotation shared', 'visit store', 'won']);
-export const Type = z.enum(['fresh', 'new']);
+export const Type = z.enum(['fresh', 'used']);
 
 
 export type EnquireStatusType = z.infer<typeof EnquireStatus>;
@@ -46,30 +46,12 @@ export const updateLeadData = crateLeadSchema.partial().refine(
         message: "At least one field must be provided.",
     });
 
-const istUtcOffset = 19800000;
-
-function transformDate(val: string | undefined): (Date | undefined) {
-    if (!val) {
-        return undefined;
-    }
-    let millisecondInIst = parseInt(val);
-    if (isNaN(millisecondInIst)) {
-        return undefined;
-    }
-    return new Date(millisecondInIst - istUtcOffset);
-}
-
-const ISToUTCFromStringSchema = z.string().optional().refine(val => !(val && !/^-?\d+$/.test(val)), { message: "should be milliseconds since epoch"}).transform(transformDate);
-
 export const LeadFilterSchema = z.object({
-    startDate: ISToUTCFromStringSchema,
-    endDate: ISToUTCFromStringSchema,
     manager: ObjectIdSchema.optional(),
     enquireStatus: EnquireStatus.optional(),
     source: EnquireSource.optional(),
     type: Type.optional(),
     purpose: z.string().optional(),
     phone: z.string().optional(),
-    skip: z.string().optional().transform(val => val ? parseInt(val) : 0),
-    limit: z.string().optional().transform(val => val ? parseInt(val) : 20)
-})
+    searchTerm: z.string().optional(),
+}).merge(paginationSchema).merge(dateFiltersSchema);

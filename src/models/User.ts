@@ -1,6 +1,6 @@
 import mongoose, {Document, Types} from 'mongoose';
 import bcrypt from 'bcryptjs';
-import {UserPrivilege} from '../enums/enums';
+import {UserPrivilege} from '../common/types';
 
 
 export interface IUser extends Document {

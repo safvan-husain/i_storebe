@@ -12,6 +12,7 @@ export interface ILead extends Document {
     type: string;
     dob?: Date;
     product: string;
+    createdAt: Date;
 }
 
 const LeadSchema = new mongoose.Schema(

@@ -5,7 +5,6 @@ import {
   getTasks, 
   getTaskById, 
   updateTask, 
-  deleteTask 
 } from '../controllers/tasks/taskController';
 import { protect } from '../middleware/auth';
 
@@ -22,6 +21,6 @@ router.route('/')
 router.route('/:id')
   .get(getTaskById)
   .put(updateTask)
-  .delete(deleteTask);
+  // .delete(deleteTask);
 
 export default router;

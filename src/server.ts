@@ -9,27 +9,19 @@ import userRoutes from "./routes/userRoutes";
 import leadRoutes from "./routes/leadRoutes";
 import taskRoutes from "./routes/taskRoutes";
 import User from "./models/User";
+import {activityRoutes} from "./routes/activityRoutes";
 require("dotenv").config();
 
 const PORT = 3000;
 
 const app = express();
 
-connectDb();
+connectDb().catch(err => console.log(err));
 app.use(express.urlencoded({ extended: true }));
 app.use(cors());
 app.use(express.json());
 
 app.get('/', async (req, res) => {
-    // console.log(
-    // User.collection.listIndexes()
-    // );
-    console.log(await User.collection.listIndexes().toArray(
-
-    ));
-
-
-    // throw Error("Something went wrong");
     res.send('API is running');
 });
 
@@ -38,6 +30,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/leads', leadRoutes);
 app.use('/api/tasks', taskRoutes);
+app.use('/api/activity', activityRoutes);
 
 // Middleware for handling 404s and errors
 // app.use(notFound);
