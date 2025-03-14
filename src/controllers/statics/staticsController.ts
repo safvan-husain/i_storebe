@@ -2,7 +2,6 @@ import {Request, Response} from 'express';
 import asyncHandler from "express-async-handler";
 import Lead from "../../models/Lead";
 import {onCatchError} from "../../middleware/error";
-import {dateFiltersSchema, UserPrivilege} from "../../common/types";
 import {Schema, Types} from "mongoose";
 import {staticsFilterSchema} from "./validation";
 

@@ -5,24 +5,27 @@ export const EnquireSource = z.enum(['call', 'facebook', 'instagram', 'previous 
 export const Purpose = z.enum(['inquire', 'purchase', 'sales', 'service request']);
 export const EnquireStatus = z.enum(['empty', 'contacted', 'interested', 'lost', 'new', 'none', 'pending', 'quotation shared', 'visit store', 'won']);
 export const Type = z.enum(['fresh', 'used']);
+export const callStatusSchema = z.enum(['not-updated', 'connected', 'busy', 'switched-off', 'call_back-requested', 'follow-up-scheduled', 'not-reachable', 'connected-on-whatsapp']);
 
 
 export type EnquireStatusType = z.infer<typeof EnquireStatus>;
 export type EnquireSourceType = z.infer<typeof EnquireSource>;
 export type PurposeType = z.infer<typeof Purpose>;
 export type TypeType = z.infer<typeof Type>;
+export type CallStatus = z.infer<typeof callStatusSchema>;
 
 
 const LeadStatus = z.object({
     source: EnquireSource,
     enquireStatus: EnquireStatus,
-    purpose: Purpose
+    purpose: Purpose,
+    callStatus: callStatusSchema.optional(),
 });
 
 export const updateLeadStatusSchema = LeadStatus.partial().refine(
     (data) => Object.keys(data).length > 0,
     {
-        message: "At least one field (source, enquireStatus, or purpose) must be provided.",
+        message: "At least one field (source, enquireStatus, or purpose, callStatus) must be provided.",
     }
 );
 

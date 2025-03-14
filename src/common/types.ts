@@ -12,6 +12,7 @@ export const paginationSchema = z.object({
 
 const istUtcOffset = 19800000;
 
+//transforming from milliseconds to date (from flutter app it will be IST so converting it into UTC, since mongodb use UTC by default.
 function transformDate(val: string | undefined): (Date | undefined) {
     if (!val) {
         return undefined;

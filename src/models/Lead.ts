@@ -1,12 +1,14 @@
 import mongoose, {Document} from 'mongoose';
+import {CallStatus, EnquireSourceType, EnquireStatusType, PurposeType} from "../controllers/leads/validations";
 
 export interface ILead extends Document {
     phone: string;
     name: string;
     email?: string;
-    source: string;
-    enquireStatus: string;
-    purpose: string;
+    source: EnquireSourceType;
+    enquireStatus: EnquireStatusType;
+    purpose: PurposeType;
+    callStatus: CallStatus;
     address: string;
     manager: mongoose.Types.ObjectId;
     type: string;
@@ -51,6 +53,10 @@ const LeadSchema = new mongoose.Schema(
         type: {
             type: String,
             required: [true, 'type is required'],
+        },
+        callStatus: {
+            type: String,
+            default: "not-updated"
         },
         product: {
             type: String,
