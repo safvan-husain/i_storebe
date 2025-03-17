@@ -2,7 +2,7 @@ import {Request, Response} from 'express';
 import asyncHandler from "express-async-handler";
 import Lead from "../../models/Lead";
 import {onCatchError} from "../../middleware/error";
-import {Schema, Types} from "mongoose";
+import {Types} from "mongoose";
 import {staticsFilterSchema} from "./validation";
 import Task from "../../models/Task";
 
@@ -10,13 +10,15 @@ export const getLeadsStatics = asyncHandler(
     async (req: Request, res: Response) => {
         try {
             let { startDate, endDate, managerId } = staticsFilterSchema.parse(req.query);
-            let manager = managerId ? new Types.ObjectId(managerId) : undefined;
+            let manager ;
             if (req.privilege === 'staff') {
                 res.status(403).json({ message: "staffs not allowed not access analytics"});
                 return;
             }
             if(req.privilege === 'manager') {
                 manager = new Types.ObjectId(req.userId);
+            } else if(req.privilege === 'admin' && managerId) {
+                manager = new Types.ObjectId(managerId);
             }
             const analytics = await _getLeadsAnalytics({ startDate, endDate, managerId: manager });
             res.status(200).json(analytics);
