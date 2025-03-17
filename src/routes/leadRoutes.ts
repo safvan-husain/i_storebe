@@ -14,7 +14,10 @@ const router = express.Router();
 router
   .route('/')
   .post(protect, createLead)
+    //TODO: remove this.
   .get(protect, getLeads);
+
+router.route('/filter').post(protect, getLeads);
 
 router.route('/status/:id').put(protect, updateLeadStatus);
 

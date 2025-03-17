@@ -29,7 +29,7 @@ export const getStaffs = asyncHandler(async (req: Request, res: Response) => {
 export const getManagers = asyncHandler(async (req: Request, res: Response) => {
     try {
         if(req.privilege === 'staff' || req.privilege === 'manager') {
-            res.status(403).json({ message: "Not allowed"})
+            res.status(403).json({ message: "Not allowed"});
             return;
         }
         let staffs = await User.find({ privilege: 'manager' }).lean();

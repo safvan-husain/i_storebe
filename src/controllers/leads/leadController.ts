@@ -134,7 +134,7 @@ export const updateLeadStatus = asyncHandler(async (req: Request, res: Response)
 
 export const getLeads = asyncHandler(async (req: Request, res: Response) => {
     try {
-        const filter = LeadFilterSchema.parse(req.query);
+        const filter = LeadFilterSchema.parse(req.body);
 
         let query: any = {};
 
@@ -163,21 +163,29 @@ export const getLeads = asyncHandler(async (req: Request, res: Response) => {
             query.manager = filter.manager;
         }
 
-        if (filter.enquireStatus) {
-            query.enquireStatus = filter.enquireStatus;
+        if (filter.enquireStatus?.length ?? 0 > 0) {
+            query.enquireStatus = { $all: filter.enquireStatus};
         }
 
-        if (filter.source) {
-            query.source = filter.source;
+        if (filter.source?.length ?? 0 > 0) {
+            query.source = { $all: filter.source};
         }
 
-        if (filter.purpose) {
-            query.purpose = filter.purpose;
+        if (filter.purpose?.length ?? 0 > 0) {
+            query.purpose = { $all: filter.purpose };
         }
 
         // If user is a manager, only show leads assigned to them
         if (req.privilege === 'manager') {
             query.manager = req.userId;
+        } else if (req.privilege === 'staff') {
+            //if it is a staff only show specific to his branch (manager)
+            const staff = await User.findById(req.userId, { manager: true });
+            if (!staff || !staff.manager) {
+                res.status(401).json({message: "could not find branch for the staff"});
+                return;
+            }
+            query.manager = staff.manager;
         }
 
         const leads = await Lead.find(query)
