@@ -175,6 +175,10 @@ export const getLeads = asyncHandler(async (req: Request, res: Response) => {
             query.purpose = { $all: filter.purpose };
         }
 
+        if (filter.type?.length ?? 0 > 0) {
+            query.type = { $all: filter.type };
+        }
+
         // If user is a manager, only show leads assigned to them
         if (req.privilege === 'manager') {
             query.manager = req.userId;
@@ -186,6 +190,10 @@ export const getLeads = asyncHandler(async (req: Request, res: Response) => {
                 return;
             }
             query.manager = staff.manager;
+        } else if(req.privilege === 'admin') {
+            if(filter.managers?.length ?? 0 > 0) {
+                query.manager = { $in: filter.managers };
+            }
         }
 
         const leads = await Lead.find(query)

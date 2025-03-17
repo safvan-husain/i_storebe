@@ -50,11 +50,11 @@ export const updateLeadData = crateLeadSchema.partial().refine(
     });
 
 export const LeadFilterSchema = z.object({
-    manager: ObjectIdSchema.optional(),
     enquireStatus: z.array(EnquireStatus).optional(),
     source: z.array(EnquireSource).optional(),
     type: z.array(Type).optional(),
     purpose: z.array(Purpose).optional(),
     phone: z.string().optional(),
     searchTerm: z.string().optional(),
+    managers: z.array(ObjectIdSchema).optional(),
 }).merge(paginationSchema).merge(dateFiltersSchema);
