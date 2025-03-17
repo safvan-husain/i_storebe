@@ -18,7 +18,7 @@ export const updateSchema = TaskCreateSchema.partial();
 
 export const TaskFilterSchema = z.object({
     lead: ObjectIdSchema.optional(),
-    assigned: ObjectIdSchema.optional(),
-    manager: ObjectIdSchema.optional(),
+    assigned: z.array(ObjectIdSchema).optional(),
+    managers: z.array(ObjectIdSchema).optional(),
     category: categorySchema.optional(),
 }).merge(paginationSchema).merge(dateFiltersSchema);

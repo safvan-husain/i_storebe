@@ -70,32 +70,30 @@ export const createTask = asyncHandler(async (req: Request, res: Response) => {
 // Get tasks with filters
 export const getTasks = asyncHandler(async (req: Request, res: Response) => {
     try {
-        const {lead, assigned, startDate, endDate, skip, limit, manager, category } = TaskFilterSchema.parse(req.query);
+        const {lead, assigned, startDate, endDate, skip, limit, managers, category } = TaskFilterSchema.parse(req.query);
+
+        // let query = {};
 
         let staffs: any[] = []
         //if requested by staff only show tasks assigned to him
         if(req.privilege === 'staff') {
             staffs = [req.userId];
         } else if (assigned) {
-            staffs = [assigned];
+            staffs = assigned;
         }
 
         if(req.privilege === 'manager' || req.privilege === 'admin' ) {
+            let staffQuery: any = {};
             let tManager;
             //when admin filter with specific manager.
-            if(req.privilege === 'admin' && manager) {
-                tManager = manager;
+            if(req.privilege === 'admin' && managers) {
+                staffQuery.manager = { $in: managers };
             } else if (req.privilege === 'manager') {
                 //when manager make the request
-                tManager = req.userId;
+                staffQuery.manager = req.userId;
             }
 
-            let users = await User.find({ manager: tManager }, {}).lean();
-            staffs = users.map(e => e._id);
-        }
-
-        if(req.privilege === 'admin' && manager ) {
-            let users = await User.find({ manager: manager }, {}).lean();
+            let users = await User.find(staffQuery, {}).lean();
             staffs = users.map(e => e._id);
         }
 
@@ -103,7 +101,7 @@ export const getTasks = asyncHandler(async (req: Request, res: Response) => {
 
         if (lead) query.lead = new mongoose.Types.ObjectId(lead);
         //filter with staff only when there is no filter for manager.
-        if(!manager && staffs.length > 0) query.assigned = { $in: staffs };
+        if(staffs.length > 0) query.assigned = { $in: staffs };
         if(category) query.category = category;
 
         // Date range filter
