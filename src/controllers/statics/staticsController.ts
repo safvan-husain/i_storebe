@@ -4,6 +4,7 @@ import Lead from "../../models/Lead";
 import {onCatchError} from "../../middleware/error";
 import {Schema, Types} from "mongoose";
 import {staticsFilterSchema} from "./validation";
+import Task from "../../models/Task";
 
 export const getLeadsStatics = asyncHandler(
     async (req: Request, res: Response) => {
@@ -29,9 +30,11 @@ const _getLeadsAnalytics = async ({startDate, endDate, managerId }: { startDate?
     let match: any = {};
     //if start and end date provided, filter with them first.
     if (startDate) {
+        match.createdAt = match.createdAt || {};
         match.createdAt.$gte = startDate;
     }
     if (endDate) {
+        match.createdAt = match.createdAt || {};
         match.createdAt.$lte = endDate;
     }
 
@@ -41,10 +44,10 @@ const _getLeadsAnalytics = async ({startDate, endDate, managerId }: { startDate?
 
     let pipeline = [];
     if (Object.keys(match).length > 0) {
-        pipeline.push(match);
+        pipeline.push({$match: match});
     }
     let result = await Lead.aggregate([
-        ...pipeline,
+         ...pipeline,
         {
             $facet: {
                 status: [
@@ -64,13 +67,13 @@ const _getLeadsAnalytics = async ({startDate, endDate, managerId }: { startDate?
                             won: {$sum: {$cond: [{$eq: ["$enquireStatus", "won"]}, 1, 0]}},
 
                             // EnquireSource counts
-                            call: {$sum: {$cond: [{$eq: ["$enquireSource", "call"]}, 1, 0]}},
-                            facebook: {$sum: {$cond: [{$eq: ["$enquireSource", "facebook"]}, 1, 0]}},
-                            instagram: {$sum: {$cond: [{$eq: ["$enquireSource", "instagram"]}, 1, 0]}},
-                            previous_customer: {$sum: {$cond: [{$eq: ["$enquireSource", "previous customer"]}, 1, 0]}},
-                            wabis: {$sum: {$cond: [{$eq: ["$enquireSource", "wabis"]}, 1, 0]}},
-                            walkin: {$sum: {$cond: [{$eq: ["$enquireSource", "walkin"]}, 1, 0]}},
-                            whatsapp: {$sum: {$cond: [{$eq: ["$enquireSource", "whatsapp"]}, 1, 0]}},
+                            call: {$sum: {$cond: [{$eq: ["$source", "call"]}, 1, 0]}},
+                            facebook: {$sum: {$cond: [{$eq: ["$source", "facebook"]}, 1, 0]}},
+                            instagram: {$sum: {$cond: [{$eq: ["$source", "instagram"]}, 1, 0]}},
+                            previous_customer: {$sum: {$cond: [{$eq: ["$source", "previous customer"]}, 1, 0]}},
+                            wabis: {$sum: {$cond: [{$eq: ["$source", "wabis"]}, 1, 0]}},
+                            walkin: {$sum: {$cond: [{$eq: ["$source", "walkin"]}, 1, 0]}},
+                            whatsapp: {$sum: {$cond: [{$eq: ["$source", "whatsapp"]}, 1, 0]}},
 
                             // Purpose counts
                             inquire: {$sum: {$cond: [{$eq: ["$purpose", "inquire"]}, 1, 0]}},
@@ -100,7 +103,26 @@ const _getLeadsAnalytics = async ({startDate, endDate, managerId }: { startDate?
         ...e,
         date: new Date(e._id).getTime()
     }));
+    let tasks = await Task.aggregate([
+        ...pipeline,
+        {
+            $group: {
+                _id: null,
+                completed: { $sum: { $cond: [{ $eq: ["$isCompleted", true] }, 1, 0] }},
+                overDue: { $sum: { $cond: [{ $lt: ["$due", new Date()] }, 1, 0]}},
+                total: { $sum: 1 }
+            }
+        }
+    ]);
+    const taskData = tasks.length > 0 ? tasks[0] : { completed: 0, overDue: 0, total: 0 };
+    const taskStatus = {
+        completed: taskData.completed,
+        overDue: taskData.overDue,
+        total: taskData.total,
+        pending: taskData.total - (taskData.overDue + taskData.completed)
+    };
     return {
+        taskStatus,
         enquireStatus: {
             empty: status.empty,
             contacted: status.contacted,
