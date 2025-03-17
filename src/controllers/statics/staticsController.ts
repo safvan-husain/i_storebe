@@ -5,6 +5,7 @@ import {onCatchError} from "../../middleware/error";
 import {Types} from "mongoose";
 import {staticsFilterSchema} from "./validation";
 import Task from "../../models/Task";
+import {convertToIstMillie} from "../../utils/ist_time";
 
 export const getLeadsStatics = asyncHandler(
     async (req: Request, res: Response) => {
@@ -105,13 +106,14 @@ const _getLeadsAnalytics = async ({startDate, endDate, managerId }: { startDate?
         ...e,
         date: new Date(e._id).getTime()
     }));
+    let IstNowInMillie = convertToIstMillie(new Date());
     let tasks = await Task.aggregate([
         ...pipeline,
         {
             $group: {
                 _id: null,
                 completed: { $sum: { $cond: [{ $eq: ["$isCompleted", true] }, 1, 0] }},
-                overDue: { $sum: { $cond: [{ $lt: ["$due", new Date()] }, 1, 0]}},
+                overDue: { $sum: { $cond: [{ $lt: ["$due", new Date(IstNowInMillie)] }, 1, 0]}},
                 total: { $sum: 1 }
             }
         }

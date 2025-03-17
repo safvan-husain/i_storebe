@@ -2,13 +2,10 @@
 import express from "express";
 import connectDb from "./config/db";
 import cors from "cors";
-import { errorHandler } from "./middleware/error";
-import { notFound } from "./middleware/not_found";
 import authRoutes from "./routes/authRoutes";
 import userRoutes from "./routes/userRoutes";
 import leadRoutes from "./routes/leadRoutes";
 import taskRoutes from "./routes/taskRoutes";
-import User from "./models/User";
 import {activityRoutes} from "./routes/activityRoutes";
 import {staticsRoutes} from "./routes/staticsRoutes";
 import Lead from "./models/Lead";
@@ -41,7 +38,7 @@ const random10DigitNumber = (): number => {
     return Math.floor(1000000000 + Math.random() * 9000000000);
 };
 
-app.get('/api/transform', async (req, res) => {
+app.get('/api/transform', async (_, res) => {
     try {
         let leads = await Lead.find();
         let customers = await Promise.all(leads.map(async (lead) => {

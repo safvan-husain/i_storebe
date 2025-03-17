@@ -5,7 +5,7 @@ import asyncHandler from 'express-async-handler';
 import mongoose from 'mongoose';
 import {TaskCreateSchema, TaskFilterSchema, updateSchema} from './validation';
 import {onCatchError} from "../../middleware/error";
-import {convertToIstMillie, getISTDate} from "../../utils/ist_time";
+import {convertToIstMillie} from "../../utils/ist_time";
 import User from "../../models/User";
 import Lead from "../../models/Lead";
 
@@ -22,18 +22,18 @@ export const createTask = asyncHandler(async (req: Request, res: Response) => {
 
         const {assigned, ...rest} = TaskCreateSchema.parse(req.body);
 
-        // if(!rest.title) {
-        //     const customer = await Lead.findById(rest.lead, { name: true }).lean();
-        //     if(!customer) {
-        //         res.status(404).json({ message: 'Lead not found'});
-        //         return;
-        //     }
-        //     rest.title = `${rest.category} with ${customer.name}`;
-        // }
-        //
-        // if(!rest.description) {
-        //     rest.description = rest.title;
-        // }
+        if(!rest.title) {
+            const lead: any = await Lead.findById(rest.lead, { "customer.name": true }).lean();
+            if(!lead?.customer) {
+                res.status(404).json({ message: 'Lead not found'});
+                return;
+            }
+            rest.title = `${rest.category} with ${lead.customer.name}`;
+        }
+
+        if(!rest.description) {
+            rest.description = rest.title;
+        }
 
         let staff = await User.findById(assigned, { name: true }).lean();
 
@@ -84,7 +84,6 @@ export const getTasks = asyncHandler(async (req: Request, res: Response) => {
 
         if(req.privilege === 'manager' || req.privilege === 'admin' ) {
             let staffQuery: any = {};
-            let tManager;
             //when admin filter with specific manager.
             if(req.privilege === 'admin' && managers) {
                 staffQuery.manager = { $in: managers };

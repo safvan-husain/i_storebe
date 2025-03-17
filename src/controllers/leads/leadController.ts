@@ -310,7 +310,7 @@ export const updateLead = asyncHandler(async (req: Request, res: Response) => {
         await Activity.create({
             activator: req.userId,
             lead: updatedLead._id,
-            action: "Updated Lead",
+            action: "Updated Lead data",
             type: 'lead_updated',
         });
         updatedLead = updatedLead.toObject();

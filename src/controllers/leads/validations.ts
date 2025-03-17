@@ -38,6 +38,7 @@ export const crateLeadSchema = z.object({
     address: z.string().min(1, {message: 'Address is required'}),
     type: Type,
     manager: ObjectIdSchema.optional(),
+    //this would be IST since getting from client
     dob: z.number().optional().transform(val => val ? new Date(val) : undefined)
 }).merge(LeadStatus);
 
