@@ -22,18 +22,18 @@ export const createTask = asyncHandler(async (req: Request, res: Response) => {
 
         const {assigned, ...rest} = TaskCreateSchema.parse(req.body);
 
-        if(!rest.title) {
-            const customer = await Lead.findById(rest.lead, { name: true }).lean();
-            if(!customer) {
-                res.status(404).json({ message: 'Lead not found'});
-                return;
-            }
-            rest.title = `${rest.category} with ${customer.name}`;
-        }
-
-        if(!rest.description) {
-            rest.description = rest.title;
-        }
+        // if(!rest.title) {
+        //     const customer = await Lead.findById(rest.lead, { name: true }).lean();
+        //     if(!customer) {
+        //         res.status(404).json({ message: 'Lead not found'});
+        //         return;
+        //     }
+        //     rest.title = `${rest.category} with ${customer.name}`;
+        // }
+        //
+        // if(!rest.description) {
+        //     rest.description = rest.title;
+        // }
 
         let staff = await User.findById(assigned, { name: true }).lean();
 

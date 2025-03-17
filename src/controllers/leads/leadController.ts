@@ -15,6 +15,7 @@ import {onCatchError} from '../../middleware/error';
 import Activity from "../../models/Activity";
 import {convertToIstMillie, getISTDate} from "../../utils/ist_time";
 import {ActivityType} from "../activity/validation";
+import Customer from "../../models/Customer";
 
 export const createLead = asyncHandler(async (req: Request, res: Response) => {
     try {
@@ -45,8 +46,19 @@ export const createLead = asyncHandler(async (req: Request, res: Response) => {
             res.status(404).json({message: 'Manager not found'});
             return;
         }
-
-        let lead: any = await Lead.create(leadData);
+        let customer  = await Customer.findOne({ phone: leadData.phone })
+        //keeping separate lead and customer data, so that there will be only customer even they need two leads.
+        if(!customer) {
+            customer = await Customer.create(leadData);
+        }
+        if(!customer?._id) {
+            res.status(401).json({message: "Could not create customer"});
+            return;
+        }
+        let lead: any = await Lead.create({
+            customer: customer._id,
+            ...leadData,
+        });
 
         if (lead) {
             await Activity.create({
@@ -59,9 +71,13 @@ export const createLead = asyncHandler(async (req: Request, res: Response) => {
             delete lead.createdAt;
             delete lead.updatedAt;
             delete lead.__v;
-            lead.dob = lead.dob ? lead.dob.getTime() : null;
+            lead.dob = customer?.dob ? customer.dob.getTime() : null;
             res.status(201).json({
                 ...lead,
+                name: customer?.name,
+                phone: customer?.phone,
+                address: customer?.address,
+                email: customer?.email,
                 manager: managerExists,
             });
         } else {
@@ -192,15 +208,20 @@ export const getLeads = asyncHandler(async (req: Request, res: Response) => {
             }
         }
 
-        const leads = await Lead.find(query)
+        const leads: any[] = await Lead.find(query)
             .populate('manager', 'name')
+            .populate('customer')
             .skip(filter.skip)
             .limit(filter.limit)
             .sort({createdAt: -1}).lean();
 
         res.status(200).json(leads.map((e) => ({
             ...e,
-            dob: e.dob ? e.dob.getTime() : null,
+            name: e.customer?.name ?? "",
+            phone: e.customer?.phone ?? "",
+            email: e.customer?.email ?? "",
+            address: e.customer?.address ?? "",
+            dob: e.customer.dob ? e.customer.dob.getTime() : null,
             createdAt: convertToIstMillie(e.createdAt),
             updatedAt: undefined,
             __v: undefined

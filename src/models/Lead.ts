@@ -1,43 +1,20 @@
-import mongoose, {Document} from 'mongoose';
+import mongoose, {Document, ObjectId} from 'mongoose';
 import {CallStatus, EnquireSourceType, EnquireStatusType, PurposeType} from "../controllers/leads/validations";
 
 export interface ILead extends Document {
-    phone: string;
-    name: string;
-    email?: string;
     source: EnquireSourceType;
     enquireStatus: EnquireStatusType;
     purpose: PurposeType;
     callStatus: CallStatus;
-    address: string;
     manager: mongoose.Types.ObjectId;
     type: string;
-    dob?: Date;
+    customer: ObjectId,
     product: string;
     createdAt: Date;
 }
 
 const LeadSchema = new mongoose.Schema(
     {
-        phone: {
-            type: String,
-            required: [true, 'Phone number is required'],
-            trim: true,
-        },
-        name: {
-            type: String,
-            required: [true, 'Name is required'],
-            trim: true,
-        },
-        email: {
-            type: String,
-            trim: true,
-            match: [
-                /^\w+([\.-]?\w+)*@\w+([\.-]?\w+)*(\.\w{2,3})+$/,
-                'Please add a valid email',
-            ],
-            optional: true,
-        },
         source: {
             type: String,
             required: [true, 'Source is required'],
@@ -62,18 +39,15 @@ const LeadSchema = new mongoose.Schema(
             type: String,
             required: [true, 'Product is required'],
         },
-        address: {
-            type: String,
-            required: [true, 'Address is required'],
-        },
         manager: {
             type: mongoose.Schema.Types.ObjectId,
             ref: 'User',
             required: [true, 'Manager is required'],
         },
-        dob: {
-            type: Date,
-            optional: true,
+        customer: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'Customer',
+            required: [true, 'Customer is required'],
         },
     },
     {
