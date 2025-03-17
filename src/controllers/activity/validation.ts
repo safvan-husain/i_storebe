@@ -12,17 +12,20 @@ export const activityTypeSchema = z.enum(
 export type ActivityType = z.infer<typeof activityTypeSchema>;
 
 export const activityFilterSchema = z.object({
-    manager: ObjectIdSchema.optional(),
-    activityType: activityTypeSchema.optional(),
-    staff: ObjectIdSchema.optional(),
+    manager: z.array(ObjectIdSchema).optional(),
+    activityType: z.array(activityTypeSchema).optional(),
+    staff: z.array(ObjectIdSchema).optional(),
+    //the lead will be used only on specific lead, it is not actually filtering.
     lead: ObjectIdSchema.optional(),
 })
     .merge(paginationSchema).merge(dateFiltersSchema)
-    .refine(v =>
-            !(v.manager && v.staff),
-        {message: "pass either manager or staff"})
     .refine(e => {
             console.log(e);
             return !(e.lead && Object.keys(e).length > 3);
         },
         {message: "on lead no other filters applicable"});
+
+export const createNoteSchema = z.object({
+    note: z.string().min(1, { message: "at least one character required"}),
+    leadId: ObjectIdSchema
+})
