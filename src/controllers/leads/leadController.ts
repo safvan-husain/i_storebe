@@ -219,9 +219,10 @@ export const getLeads = asyncHandler(async (req: Request, res: Response) => {
             ...e,
             name: e.customer?.name ?? "",
             phone: e.customer?.phone ?? "",
-            email: e.customer?.email ?? "",
+            email: e.customer?.email,
             address: e.customer?.address ?? "",
-            dob: e.customer.dob ? e.customer.dob.getTime() : null,
+            dob: e.customer.dob ? e.customer.dob.getTime() : undefined,
+            customer: undefined,
             createdAt: convertToIstMillie(e.createdAt),
             updatedAt: undefined,
             __v: undefined
