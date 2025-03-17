@@ -159,10 +159,6 @@ export const getLeads = asyncHandler(async (req: Request, res: Response) => {
             query.createdAt = {$lte: filter.endDate};
         }
 
-        if (filter.manager && Types.ObjectId.isValid(filter.manager)) {
-            query.manager = filter.manager;
-        }
-
         if (filter.enquireStatus?.length ?? 0 > 0) {
             query.enquireStatus = { $all: filter.enquireStatus};
         }
