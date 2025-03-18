@@ -58,4 +58,5 @@ export const LeadFilterSchema = z.object({
     phone: z.string().optional(),
     searchTerm: z.string().optional(),
     managers: z.array(ObjectIdSchema).optional(),
+    staffs: z.array(ObjectIdSchema).optional(),
 }).merge(paginationSchema).merge(dateFiltersSchema);

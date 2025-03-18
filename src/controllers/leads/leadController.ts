@@ -55,8 +55,9 @@ export const createLead = asyncHandler(async (req: Request, res: Response) => {
             return;
         }
         let lead: any = await Lead.create({
-            customer: customer._id,
             ...leadData,
+            customer: customer._id,
+            createdBy: req.userId
         });
 
         if (lead) {
@@ -147,70 +148,177 @@ export const getLeads = asyncHandler(async (req: Request, res: Response) => {
     try {
         const filter = LeadFilterSchema.parse(req.body);
 
-        let query: any = {};
+        // Start building the aggregation pipeline
+        const pipeline: any[] = [];
+
+        // Match stage (for filtering)
+        const matchStage: any = {};
 
         // Apply filters if provided
         if (filter.searchTerm) {
-            let searchRegex = {$regex: filter.searchTerm, $options: 'i'}
-            query = {
-                $or: [
-                    {name: searchRegex},
-                    {phone: searchRegex}
-                ]
-            }
+            const searchRegex = {$regex: filter.searchTerm, $options: 'i'};
+            matchStage.$or = [
+                {name: searchRegex},
+                {phone: searchRegex}
+            ];
         }
+
         if (filter.startDate && filter.endDate) {
-            query.createdAt = {
+            matchStage.createdAt = {
                 $gte: filter.startDate,
                 $lte: filter.endDate
             };
         } else if (filter.startDate) {
-            query.createdAt = {$gte: filter.startDate};
+            matchStage.createdAt = {$gte: filter.startDate};
         } else if (filter.endDate) {
-            query.createdAt = {$lte: filter.endDate};
+            matchStage.createdAt = {$lte: filter.endDate};
         }
 
-        if (filter.enquireStatus?.length ?? 0 > 0) {
-            query.enquireStatus = {$all: filter.enquireStatus};
+        if ((filter.enquireStatus?.length ?? 0) > 0) {
+            matchStage.enquireStatus = {$all: filter.enquireStatus};
         }
 
-        if (filter.source?.length ?? 0 > 0) {
-            query.source = {$all: filter.source};
+        if ((filter.source?.length ?? 0) > 0) {
+            matchStage.source = {$all: filter.source};
         }
 
-        if (filter.purpose?.length ?? 0 > 0) {
-            query.purpose = {$all: filter.purpose};
+        if ((filter.purpose?.length ?? 0) > 0) {
+            matchStage.purpose = {$all: filter.purpose};
         }
 
-        if (filter.type?.length ?? 0 > 0) {
-            query.type = {$all: filter.type};
+        if ((filter.type?.length ?? 0) > 0) {
+            matchStage.type = {$all: filter.type};
         }
 
-        // If user is a manager, only show leads assigned to them
-        if (req.privilege === 'manager') {
-            query.manager = req.userId;
+        if (filter.staffs?.length ?? 0 > 0) matchStage.createdBy = {$in: filter.staffs!.map(e => new Types.ObjectId(e))};
+
+        // Role-based filtering
+        if (req.privilege === 'manager' && (filter.staffs?.length ?? 0) === 0) { //when manager filter with staffs, it is necessary to filter with manager.
+            //when manager provide all the leads created by his staff.
+            matchStage.manager = new Types.ObjectId(req.userId!);
         } else if (req.privilege === 'staff') {
-            //if it is a staff only show specific to his branch (manager)
-            const staff = await User.findById(req.userId, {manager: true});
-            if (!staff || !staff.manager) {
-                res.status(401).json({message: "could not find branch for the staff"});
-                return;
-            }
-            query.manager = staff.manager;
-        } else if (req.privilege === 'admin') {
-            if (filter.managers?.length ?? 0 > 0) {
-                query.manager = {$in: filter.managers};
-            }
+            //when staff make request, only provide what he created.
+            matchStage.createdBy = new Types.ObjectId(req.userId!);
+        } else if (req.privilege === 'admin' && (filter.managers?.length ?? 0) > 0) {
+            //when admin pass managers.
+            matchStage.manager = {$in: filter.managers!.map(e => new Types.ObjectId(e))};
         }
 
-        const leads: any[] = await Lead.find(query)
-            .populate('manager', 'name')
-            .populate('customer')
-            .skip(filter.skip)
-            .limit(filter.limit)
-            .sort({createdAt: -1}).lean();
 
-        res.status(200).json(leads.map((e) => ({
+        // Add match stage to pipeline if there are any conditions
+        if (Object.keys(matchStage).length > 0) {
+            pipeline.push({$match: matchStage});
+        }
+        console.log(pipeline);
+
+
+        pipeline.push(
+            {$sort: {createdAt: -1}},
+            //
+            {
+                $facet: {
+                    data: [
+                        {$skip: filter.skip},
+                        {$limit: filter.limit},
+                        // Add lookup stages for populating related data
+                        {
+                            $lookup: {
+                                from: 'users',
+                                localField: 'manager',
+                                foreignField: '_id',
+                                as: 'managerData'
+                            }
+                        },
+                        {
+                            $lookup: {
+                                from: 'customers',
+                                localField: 'customer',
+                                foreignField: '_id',
+                                as: 'customerData'
+                            }
+                        },
+                        // Unwind arrays to objects, with preserveNullAndEmptyArrays to handle missing data
+                        {
+                            $unwind: {
+                                path: '$managerData',
+                                preserveNullAndEmptyArrays: true
+                            }
+                        },
+                        {
+                            $unwind: {
+                                path: '$customerData',
+                                preserveNullAndEmptyArrays: true
+                            }
+                        },
+                        // Project to format output as needed
+                        {
+                            $project: {
+                                _id: 1,
+                                name: 1,
+                                phone: 1,
+                                createdAt: 1,
+                                enquireStatus: 1,
+                                source: 1,
+                                purpose: 1,
+                                type: 1,
+                                // Other fields you need
+                                manager: {
+                                    _id: '$managerData._id',
+                                    name: '$managerData.name'
+                                },
+                                customer: '$customerData'
+                            }
+                        },
+                    ],
+                    totalCount: [
+                        {$count: 'count'}
+                    ],
+                    // Today's count
+                    todayCount: [
+                        {
+                            $match: {
+                                createdAt: {
+                                    $gte: new Date(new Date().setHours(0, 0, 0, 0))
+                                }
+                            }
+                        },
+                        {$count: "count"}
+                    ],
+
+                    // This week's count
+                    weekCount: [
+                        {
+                            $match: {
+                                createdAt: {
+                                    $gte: new Date(new Date().setDate(new Date().getDate() - new Date().getDay()))
+                                }
+                            }
+                        },
+                        {$count: "count"}
+                    ],
+
+                    // This month's count
+                    monthCount: [
+                        {
+                            $match: {
+                                createdAt: {
+                                    $gte: new Date(new Date().setDate(1))
+                                }
+                            }
+                        },
+                        {$count: "count"}
+                    ]
+                }
+            }
+        );
+
+        // Execute the aggregation pipeline
+        const result: any[] = await Lead.aggregate(pipeline);
+        if (result.length < 1) {
+            res.status(401).json({message: "unexpected db behavior"});
+            return;
+        }
+        const leads = (result[0]['data'] ?? []).map((e: any) => ({
             ...e,
             name: e.customer?.name ?? "",
             phone: e.customer?.phone ?? "",
@@ -221,7 +329,19 @@ export const getLeads = asyncHandler(async (req: Request, res: Response) => {
             createdAt: convertToIstMillie(e.createdAt),
             updatedAt: undefined,
             __v: undefined
-        })));
+        }));
+        const totalCount = result[0]['totalCount'][0]?.count ?? 0;
+        const todayCount = result[0]['todayCount'][0]?.count ?? 0;
+        const weekCount = result[0]['weekCount'][0]?.count ?? 0;
+        const monthCount = result[0]['monthCount'][0]?.count ?? 0;
+
+        res.status(200).json({
+            leads,
+            totalCount,
+            todayCount,
+            weekCount,
+            monthCount
+        });
     } catch (error) {
         onCatchError(error, res);
     }

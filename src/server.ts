@@ -11,6 +11,8 @@ import {staticsRoutes} from "./routes/staticsRoutes";
 import Lead from "./models/Lead";
 import Customer from "./models/Customer";
 import {ObjectId} from "mongoose";
+import User from "./models/User";
+import {generateToken} from "./utils/jwtUtils";
 require("dotenv").config();
 
 const PORT = 3000;
@@ -40,19 +42,17 @@ const random10DigitNumber = (): number => {
 
 app.get('/api/transform', async (_, res) => {
     try {
-        let leads = await Lead.find();
-        let customers = await Promise.all(leads.map(async (lead) => {
-            let customer = await Customer.create({
-                ...lead.toObject(),
-                phone: random10DigitNumber().toString(),
-                _id: undefined,
-
-            });
-            lead.customer = customer._id as ObjectId;
-            await lead.save();
-            return customer;
+        let leads = await Lead.find({ createdBy: { $exists: false}});
+        await Promise.all(leads.map(async (e: any) => {
+            e.createdBy = e.toObject().manager;
+            return await e.save();
         }));
-        res.status(200).json({ leads, customers });
+        let users = await User.find({ token: { $exists: false }});
+        await Promise.all(users.map(async (e) => {
+            e.token = generateToken(e);
+            return await e.save();
+        }))
+        res.status(200).json({});
     } catch (e) {
         console.log(e);
         res.status(500).json(e)

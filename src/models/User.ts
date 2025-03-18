@@ -10,7 +10,8 @@ export interface IUser extends Document {
     privilege: UserPrivilege;
     //if the user is staff, they should have a manager
     manager?: Types.ObjectId;
-
+    //TODO: remove this later.
+    token?:  string;
     comparePassword(candidatePassword: string): Promise<boolean>;
 }
 
@@ -19,6 +20,9 @@ const UserSchema = new mongoose.Schema(
         name: {
             type: String,
             required: true,
+        },
+        token: {
+            type: String,
         },
         phone: {
             type: String,

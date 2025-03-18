@@ -6,6 +6,7 @@ export interface ILead extends Document {
     enquireStatus: EnquireStatusType;
     purpose: PurposeType;
     callStatus: CallStatus;
+    createdBy: mongoose.Types.ObjectId;
     manager: mongoose.Types.ObjectId;
     type: string;
     customer: ObjectId,
@@ -39,10 +40,15 @@ const LeadSchema = new mongoose.Schema(
             type: String,
             required: [true, 'Product is required'],
         },
+        createdBy: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'User',
+            required: true,
+        },
         manager: {
             type: mongoose.Schema.Types.ObjectId,
             ref: 'User',
-            required: [true, 'Manager is required'],
+            required: true,
         },
         customer: {
             type: mongoose.Schema.Types.ObjectId,
