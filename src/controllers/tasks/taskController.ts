@@ -18,27 +18,27 @@ export const createTask = asyncHandler(async (req: Request, res: Response) => {
             return;
         }
         //manager or admin
-        let assigner = await User.findById(req.userId, { name: true }).lean();
+        let assigner = await User.findById(req.userId, {name: true}).lean();
 
         const {assigned, ...rest} = TaskCreateSchema.parse(req.body);
 
-        if(!rest.title) {
-            const lead: any = await Lead.findById(rest.lead, { "customer.name": true }).lean();
-            if(!lead?.customer) {
-                res.status(404).json({ message: 'Lead not found'});
+        if (!rest.title) {
+            const lead: any = await Lead.findById(rest.lead, {"customer.name": true}).lean();
+            if (!lead?.customer) {
+                res.status(404).json({message: 'Lead not found'});
                 return;
             }
             rest.title = `${rest.category} with ${lead.customer.name}`;
         }
 
-        if(!rest.description) {
+        if (!rest.description) {
             rest.description = rest.title;
         }
 
-        let staff = await User.findById(assigned, { name: true }).lean();
+        let staff = await User.findById(assigned, {name: true}).lean();
 
-        if(!staff || !assigner) {
-            res.status(404).json({ message: 'User not found (assigner or staff)'});
+        if (!staff || !assigner) {
+            res.status(404).json({message: 'User not found (assigner or staff)'});
             return;
         }
 
@@ -70,23 +70,23 @@ export const createTask = asyncHandler(async (req: Request, res: Response) => {
 // Get tasks with filters
 export const getTasks = asyncHandler(async (req: Request, res: Response) => {
     try {
-        const {lead, assigned, startDate, endDate, skip, limit, managers, category } = TaskFilterSchema.parse(req.query);
+        const {lead, assigned, startDate, endDate, skip, limit, managers, category} = TaskFilterSchema.parse(req.query);
 
         // let query = {};
 
         let staffs: any[] = []
         //if requested by staff only show tasks assigned to him
-        if(req.privilege === 'staff') {
+        if (req.privilege === 'staff') {
             staffs = [req.userId];
         } else if (assigned) {
             staffs = assigned;
         }
 
-        if(req.privilege === 'manager' || req.privilege === 'admin' ) {
+        if (req.privilege === 'manager' || req.privilege === 'admin') {
             let staffQuery: any = {};
             //when admin filter with specific manager.
-            if(req.privilege === 'admin' && managers) {
-                staffQuery.manager = { $in: managers };
+            if (req.privilege === 'admin' && managers) {
+                staffQuery.manager = {$in: managers};
             } else if (req.privilege === 'manager') {
                 //when manager make the request
                 staffQuery.manager = req.userId;
@@ -100,8 +100,8 @@ export const getTasks = asyncHandler(async (req: Request, res: Response) => {
 
         if (lead) query.lead = new mongoose.Types.ObjectId(lead);
         //filter with staff only when there is no filter for manager.
-        if(staffs.length > 0) query.assigned = { $in: staffs };
-        if(category) query.category = category;
+        if (staffs.length > 0) query.assigned = {$in: staffs};
+        if (category) query.category = category;
 
         // Date range filter
         if (startDate || endDate) {
@@ -158,8 +158,8 @@ export const updateTask = asyncHandler(async (req: Request, res: Response) => {
             {new: true, runValidators: true}
         );
 
-        if(!task) {
-            res.status(404).json({ message: 'Task not found'});
+        if (!task) {
+            res.status(404).json({message: 'Task not found'});
             return;
         }
         task = task.toObject();
