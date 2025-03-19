@@ -8,6 +8,7 @@ export interface IUser extends Document {
     phone: string;
     password: string;
     privilege: UserPrivilege;
+    isSuperAdmin: boolean;
     //if the user is staff, they should have a manager
     manager?: Types.ObjectId;
     //TODO: remove this later.
@@ -42,6 +43,10 @@ const UserSchema = new mongoose.Schema(
         manager: {
             type: mongoose.Schema.Types.ObjectId,
             ref: 'User',
+        },
+        isSuperAdmin: {
+            type: Boolean,
+            default: false,
         },
     },
     {
