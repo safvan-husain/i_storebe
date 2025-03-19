@@ -274,6 +274,8 @@ export const getLeads = asyncHandler(async (req: Request, res: Response) => {
                                 source: 1,
                                 purpose: 1,
                                 type: 1,
+                                callStatus: 1,
+                                product: 1,
                                 // Other fields you need
                                 manager: {
                                     _id: '$managerData._id',
