@@ -39,7 +39,7 @@ export const getActivity = asyncHandler(
                 query.manager = undefined;
             }
 
-            const activities = await Activity.find(query, {createdAt: false, updatedAt: false, __v: false}).populate([
+            const activities = await Activity.find(query, {updatedAt: false, __v: false}).populate([
                 {
                     path: 'task',
                     select: 'isCompleted due title description assigned timestamp',

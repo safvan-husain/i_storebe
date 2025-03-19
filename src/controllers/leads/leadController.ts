@@ -152,6 +152,7 @@ export const updateLeadStatus = asyncHandler(async (req: Request, res: Response)
         lead.email = lead.customer.email;
         lead.phone = lead.customer.phone;
         lead.address = lead.customer.address;
+        delete lead.customer;
         res.status(200).json(lead);
     } catch (error) {
         onCatchError(error, res);
