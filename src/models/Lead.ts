@@ -8,6 +8,10 @@ export interface ILead extends Document {
     callStatus: CallStatus;
     createdBy: mongoose.Types.ObjectId;
     manager: mongoose.Types.ObjectId;
+    //useful when call center staff transfer the lead.
+    isAvailableForAllUnderManager: boolean;
+    //when transferring this would be useful.
+    handledBy: ObjectId;
     type: string;
     customer: ObjectId,
     product: string;
@@ -49,6 +53,15 @@ const LeadSchema = new mongoose.Schema(
             type: mongoose.Schema.Types.ObjectId,
             ref: 'User',
             required: true,
+        },
+        handledBy: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'User',
+            required: true,
+        },
+        isAvailableForAllUnderManager: {
+          type: Boolean,
+          default: false,
         },
         customer: {
             type: mongoose.Schema.Types.ObjectId,

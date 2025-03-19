@@ -145,12 +145,13 @@ export const updateLeadStatus = asyncHandler(async (req: Request, res: Response)
 
         lead = lead.toObject();
         lead.dob = lead.customer?.dob?.getTime();
-        delete lead.createdAt;
+        lead.createdAt = convertToIstMillie(lead.createdAt);
         delete lead.updatedAt;
         delete lead.__v;
         lead.name = lead.customer.name;
         lead.email = lead.customer.email;
         lead.phone = lead.customer.phone;
+        lead.address = lead.customer.address;
         res.status(200).json(lead);
     } catch (error) {
         onCatchError(error, res);
