@@ -15,6 +15,8 @@ import Activity from "../../models/Activity";
 import {convertToIstMillie} from "../../utils/ist_time";
 import {ActivityType} from "../activity/validation";
 import Customer from "../../models/Customer";
+import {incrementAchievedForUserTarget} from "../target/targetController";
+import {markTaskCompleted} from "../tasks/taskController";
 
 export const createLead = asyncHandler(async (req: Request, res: Response) => {
     try {
@@ -113,6 +115,14 @@ export const updateLeadStatus = asyncHandler(async (req: Request, res: Response)
             activityType = 'status_updated';
             lead.enquireStatus = updateData.enquireStatus;
             message = message + getUpdateStatusMessage('status', updateData.enquireStatus);
+            //when won or lost, task should be updated as completed.
+            //if won should reflect to target.
+            if (updateData.enquireStatus === 'won') {
+                await incrementAchievedForUserTarget(req.userId!);
+                await markTaskCompleted(req.params.id);
+            } else if(updateData.enquireStatus === 'lost') {
+                await markTaskCompleted(req.params.id);
+            }
         } else if (updateData.source && updateData.source !== lead.source) {
             activityType = 'lead_updated'
             lead.source = updateData.source;

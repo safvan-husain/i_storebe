@@ -9,10 +9,9 @@ import taskRoutes from "./routes/taskRoutes";
 import {activityRoutes} from "./routes/activityRoutes";
 import {staticsRoutes} from "./routes/staticsRoutes";
 import Lead from "./models/Lead";
-import Customer from "./models/Customer";
-import {ObjectId} from "mongoose";
 import User from "./models/User";
 import {generateToken} from "./utils/jwtUtils";
+import {targetRoutes} from "./routes/targetRoutes";
 require("dotenv").config();
 
 const PORT = 3000;
@@ -35,6 +34,7 @@ app.use('/api/leads', leadRoutes);
 app.use('/api/tasks', taskRoutes);
 app.use('/api/activity', activityRoutes);
 app.use('/api/analytics', staticsRoutes);
+app.use('/api/target', targetRoutes);
 
 const random10DigitNumber = (): number => {
     return Math.floor(1000000000 + Math.random() * 9000000000);
@@ -58,10 +58,6 @@ app.get('/api/transform', async (_, res) => {
         res.status(500).json(e)
     }
 })
-
-// Middleware for handling 404s and errors
-// app.use(notFound);
-// app.use(errorHandler);
 
 app.listen(PORT, () => {
     console.log(`Server is running on http://0.0.0.0:${PORT}`);

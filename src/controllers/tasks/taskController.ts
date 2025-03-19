@@ -181,6 +181,10 @@ export const updateTask = asyncHandler(async (req: Request, res: Response) => {
     }
 });
 
+export const markTaskCompleted = async (taskId: string): Promise<boolean> => {
+    const result = await Task.findByIdAndUpdate(taskId, {isCompleted: true});
+    return result != null;
+}
 // Delete a task
 // export const deleteTask = asyncHandler(async (req: Request, res: Response) => {
 //     const task = await Task.findById(req.params.id);

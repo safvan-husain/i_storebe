@@ -10,9 +10,9 @@ export const paginationSchema = z.object({
     limit: z.string().optional().transform(val => val ? parseInt(val) : 20)
 })
 
-const istUtcOffset = 19800000;
+export const istUtcOffset = 19800000;
 
-//transforming from milliseconds to date (from flutter app it will be IST so converting it into UTC, since mongodb use UTC by default.
+//transforming from milliseconds to date from flutter app it will be IST so converting it into UTC, since mongodb use UTC by default.
 function transformDate(val: string | undefined): (Date | undefined) {
     if (!val) {
         return undefined;
@@ -24,7 +24,7 @@ function transformDate(val: string | undefined): (Date | undefined) {
     return new Date(millisecondInIst - istUtcOffset);
 }
 
-const ISToUTCFromStringSchema = z.string().optional().refine(val => !(val && !/^-?\d+$/.test(val)), { message: "should be milliseconds since epoch"}).transform(transformDate);
+export const ISToUTCFromStringSchema = z.string().optional().refine(val => !(val && !/^-?\d+$/.test(val)), { message: "should be milliseconds since epoch"}).transform(transformDate);
 
 export const dateFiltersSchema = z.object({
     startDate: ISToUTCFromStringSchema,
