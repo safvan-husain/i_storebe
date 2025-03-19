@@ -102,7 +102,7 @@ export const updateLeadStatus = asyncHandler(async (req: Request, res: Response)
             return;
         }
         const updateData = updateLeadStatusSchema.parse(req.body);
-        let lead: any = await Lead.findByIdAndUpdate(req.params.id, updateData, {new: true}).populate('manager', 'name');
+        let lead: any = await Lead.findByIdAndUpdate(req.params.id, updateData, {new: true}).populate('manager', 'name').populate('customer');
         if (!lead) {
             res.status(401).json({message: "lead not found"});
             return;
@@ -144,10 +144,13 @@ export const updateLeadStatus = asyncHandler(async (req: Request, res: Response)
         }
 
         lead = lead.toObject();
-        lead.dob = lead.dob ? lead.dob.getTime() : null;
+        lead.dob = lead.customer?.dob?.getTime();
         delete lead.createdAt;
         delete lead.updatedAt;
         delete lead.__v;
+        lead.name = lead.customer.name;
+        lead.email = lead.customer.email;
+        lead.phone = lead.customer.phone;
         res.status(200).json(lead);
     } catch (error) {
         onCatchError(error, res);
