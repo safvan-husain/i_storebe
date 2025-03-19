@@ -59,7 +59,8 @@ export const createLead = asyncHandler(async (req: Request, res: Response) => {
         let lead: any = await Lead.create({
             ...leadData,
             customer: customer._id,
-            createdBy: req.userId
+            createdBy: req.userId,
+            handledBy: req.userId,
         });
 
         if (lead) {
