@@ -64,16 +64,19 @@ export const createLead = asyncHandler(async (req: Request, res: Response) => {
         });
 
         if (lead) {
-            await Activity.create({
+            await Activity.createActivity({
                 type: 'lead_added',
-                activator: req.userId,
+                activator: req.userId ? new Types.ObjectId(req.userId) : undefined,
                 lead: lead._id,
-                action: "Created Lead",
             });
             lead = lead.toObject();
-            delete lead.createdAt;
+            lead.createdAt = convertToIstMillie(lead.createdAt);
             delete lead.updatedAt;
             delete lead.__v;
+            delete lead.createdBy;
+            delete lead.handledBy;
+            delete lead.isAvailableForAllUnderManager;
+
             lead.dob = customer?.dob ? customer.dob.getTime() : null;
             res.status(201).json({
                 ...lead,
@@ -82,6 +85,7 @@ export const createLead = asyncHandler(async (req: Request, res: Response) => {
                 address: customer?.address,
                 email: customer?.email,
                 manager: managerExists,
+                customer: undefined,
             });
         } else {
             res.status(400).json({message: 'Failed to create lead'});
@@ -103,7 +107,7 @@ export const updateLeadStatus = asyncHandler(async (req: Request, res: Response)
             return;
         }
         const updateData = updateLeadStatusSchema.parse(req.body);
-        let lead: any = await Lead.findByIdAndUpdate(req.params.id, updateData, {new: true}).populate('manager', 'name').populate('customer');
+        let lead: any = await Lead.findById(req.params.id).populate('manager', 'name').populate('customer');
         if (!lead) {
             res.status(401).json({message: "lead not found"});
             return;
@@ -114,27 +118,33 @@ export const updateLeadStatus = asyncHandler(async (req: Request, res: Response)
         //if the given value is not null update accordingly and create new activity.
         if (updateData.enquireStatus && updateData.enquireStatus !== lead.enquireStatus) {
             activityType = 'status_updated';
+            message = message + getUpdateStatusMessage('status', lead.enquireStatus, updateData.enquireStatus);
+            //after message, changing the value to save later.
             lead.enquireStatus = updateData.enquireStatus;
-            message = message + getUpdateStatusMessage('status', updateData.enquireStatus);
             //when won or lost, task should be updated as completed.
             //if won should reflect to target.
             if (updateData.enquireStatus === 'won') {
                 await incrementAchievedForUserTarget(req.userId!);
                 await markTaskCompleted(req.params.id);
-            } else if(updateData.enquireStatus === 'lost') {
+            } else if (updateData.enquireStatus === 'lost') {
                 await markTaskCompleted(req.params.id);
             }
         } else if (updateData.source && updateData.source !== lead.source) {
             activityType = 'lead_updated'
+            message = message + getUpdateStatusMessage('source', lead.source, updateData.source);
+            //after message, changing the value to save later.
             lead.source = updateData.source;
-            message = message + getUpdateStatusMessage('source', updateData.source);
         } else if (updateData.purpose && updateData.purpose !== lead.purpose) {
             activityType = 'purpose_updated';
+            message = message + getUpdateStatusMessage('purpose', lead.purpose, updateData.purpose);
+            //after message, changing the value to save later.
             lead.purpose = updateData.purpose;
-            message = message + getUpdateStatusMessage('purpose', updateData.purpose);
         }
 
+        await lead.save()
+
         if (activityType) {
+            console.log(activityType);
             await Activity.create({
                 type: activityType,
                 activator: req.userId,
@@ -142,6 +152,8 @@ export const updateLeadStatus = asyncHandler(async (req: Request, res: Response)
                 action: message,
             });
             lead = await lead.save();
+        } else {
+            console.log('no activity');
         }
 
         lead = lead.toObject();
@@ -149,6 +161,9 @@ export const updateLeadStatus = asyncHandler(async (req: Request, res: Response)
         lead.createdAt = convertToIstMillie(lead.createdAt);
         delete lead.updatedAt;
         delete lead.__v;
+        delete lead.createdBy;
+        delete lead.handledBy;
+        delete lead.isAvailableForAllUnderManager;
         lead.name = lead.customer.name;
         lead.email = lead.customer.email;
         lead.phone = lead.customer.phone;
@@ -156,6 +171,7 @@ export const updateLeadStatus = asyncHandler(async (req: Request, res: Response)
         delete lead.customer;
         res.status(200).json(lead);
     } catch (error) {
+        console.log(error)
         onCatchError(error, res);
     }
 });
@@ -163,13 +179,10 @@ export const updateLeadStatus = asyncHandler(async (req: Request, res: Response)
 export const getLeads = asyncHandler(async (req: Request, res: Response) => {
     try {
         const filter = LeadFilterSchema.parse(req.body);
-
         // Start building the aggregation pipeline
         const pipeline: any[] = [];
-
         // Match stage (for filtering)
         const matchStage: any = {};
-
         // Apply filters if provided
         if (filter.searchTerm) {
             const searchRegex = {$regex: filter.searchTerm, $options: 'i'};
@@ -206,34 +219,34 @@ export const getLeads = asyncHandler(async (req: Request, res: Response) => {
             matchStage.type = {$all: filter.type};
         }
 
-        if (filter.staffs?.length ?? 0 > 0) matchStage.createdBy = {$in: filter.staffs!.map(e => new Types.ObjectId(e))};
+        if ((filter.staffs?.length ?? 0) > 0) matchStage.createdBy = {$in: filter.staffs!.map(e => new Types.ObjectId(e))};
 
         // Role-based filtering
-        if (req.privilege === 'manager' && (filter.staffs?.length ?? 0) === 0) { //when manager filter with staffs, it is necessary to filter with manager.
+        if (req.privilege === 'manager' && (filter.staffs?.length ?? 0) === 0) { //when manager filter with staffs, it is unnecessary to filter with manager.
             //when manager provide all the leads created by his staff.
             matchStage.manager = new Types.ObjectId(req.userId!);
         } else if (req.privilege === 'staff') {
             //when staff make request, only provide what he created.
+            //TODO: handle managedBy.
             matchStage.createdBy = new Types.ObjectId(req.userId!);
         } else if (req.privilege === 'admin' && (filter.managers?.length ?? 0) > 0) {
             //when admin pass managers.
             matchStage.manager = {$in: filter.managers!.map(e => new Types.ObjectId(e))};
         }
 
-
         // Add match stage to pipeline if there are any conditions
         if (Object.keys(matchStage).length > 0) {
             pipeline.push({$match: matchStage});
         }
-        console.log(pipeline);
-
 
         pipeline.push(
             {$sort: {createdAt: -1}},
             //
             {
                 $facet: {
+                    //performing rest of the operations to get required data.
                     data: [
+                        //pagination done here, so we also calculate the analytics for this filtered (above match)
                         {$skip: filter.skip},
                         {$limit: filter.limit},
                         // Add lookup stages for populating related data
@@ -372,7 +385,17 @@ export const getLeadById = asyncHandler(async (req: Request, res: Response) => {
             return;
         }
 
-        const lead: any = await Lead.findById(req.params.id).populate('manager', 'phone privilege').populate('customer').lean();
+        const lead: any = await Lead.findById(req.params.id, {
+            enquireStatus: true,
+            callStatus: true,
+            purpose: true,
+            product: true,
+            source: true,
+            type: true,
+            createdAt: true
+        })
+            .populate('manager', 'name')
+            .populate('customer').lean();
 
         // Check if lead exists
         if (!lead) {
@@ -393,6 +416,7 @@ export const getLeadById = asyncHandler(async (req: Request, res: Response) => {
             address: lead.customer?.address ?? "",
             dob: lead.customer?.dob?.getTime(),
             email: lead.customer?.email,
+            createdAt: convertToIstMillie(lead.createdAt),
             customer: undefined
         });
     } catch (error) {
@@ -428,33 +452,35 @@ export const updateLead = asyncHandler(async (req: Request, res: Response) => {
             }
         }
 
+        let customer: any = await Customer
+            .findByIdAndUpdate(
+                lead.customer,
+                updateData, {new: true}
+            );
 
         let updatedLead: any = await Lead.findByIdAndUpdate(
             req.params.id,
             updateData,
             {new: true, runValidators: true}
-        ).populate('manager', 'name').populate('customer');
+        ).select('enquireStatus callStatus purpose product source type createdAt customer')
+            .populate('manager', 'name');
 
         if (!updatedLead || !updatedLead.customer) {
             res.status(404).json({message: 'Lead or Customer not found'});
             return;
         }
-        let customer: any = await Customer
-            .findByIdAndUpdate(
-                updatedLead.customer._id,
-                updateData, {new: true}
-            );
+
         //TODO: correct messages.
-        await Activity.create({
-            activator: req.userId,
+        await Activity.createActivity({
+            activator: new Types.ObjectId(req.userId),
             lead: updatedLead._id,
-            action: "Updated Lead data",
             type: 'lead_updated',
         });
         updatedLead = updatedLead.toObject();
         customer = customer.toObject();
         delete updatedLead.updatedAt;
         delete updatedLead.__v;
+        delete updatedLead.customer;
         updatedLead.dob = updatedLead.dob ? updatedLead.dob.getTime() : null;
         updatedLead.createdAt = convertToIstMillie(updatedLead.createdAt);
         res.status(200).json({
@@ -472,7 +498,8 @@ export const updateLead = asyncHandler(async (req: Request, res: Response) => {
 
 export function getUpdateStatusMessage<T extends EnquireSourceType | PurposeType | EnquireStatusType>(
     category: 'source' | 'purpose' | 'status',
-    value: T
+    old: T,
+    newV: T,
 ): string {
-    return `${category} to ${value}`;
+    return `${category} to ${newV} from ${old}`;
 }
