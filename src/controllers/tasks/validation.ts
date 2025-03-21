@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import {ObjectIdSchema, paginationSchema, dateFiltersSchema} from "../../common/types";
+import {EnquireStatus, Purpose, callStatusSchema} from "../leads/validations";
 
 const categorySchema = z.enum(['call', 'sales', 'meeting'])
 
@@ -22,3 +23,13 @@ export const TaskFilterSchema = z.object({
     managers: z.array(ObjectIdSchema).optional(),
     category: categorySchema.optional(),
 }).merge(paginationSchema).merge(dateFiltersSchema);
+
+export const completeTaskSchema = z.object({
+    id: ObjectIdSchema,
+    enquireStatus: EnquireStatus.optional(),
+    purpose: Purpose.optional(),
+    callStatus: callStatusSchema.optional(),
+    note: z.string().optional(),
+    //TODO: check ist or utc date.
+    followUpDate: z.number().optional().transform(val => val ? new Date(val) : undefined),
+})

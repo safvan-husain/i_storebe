@@ -2,32 +2,35 @@ import {Request, Response} from 'express';
 import Task from '../../models/Task';
 import Activity from '../../models/Activity';
 import asyncHandler from 'express-async-handler';
-import mongoose from 'mongoose';
-import {TaskCreateSchema, TaskFilterSchema, updateSchema} from './validation';
+import mongoose, {Types} from 'mongoose';
+import {completeTaskSchema, TaskCreateSchema, TaskFilterSchema, updateSchema} from './validation';
 import {onCatchError} from "../../middleware/error";
 import {convertToIstMillie} from "../../utils/ist_time";
 import User from "../../models/User";
 import Lead from "../../models/Lead";
 
+//TODO: check all response are consistent.
 
 // Create a new task
 export const createTask = asyncHandler(async (req: Request, res: Response) => {
     try {
-        if (!['admin', 'manager'].includes(req?.privilege ?? "")) {
-            res.status(403).json({message: "You don't have permission to create task"});
-            return;
-        }
         //manager or admin
         let assigner = await User.findById(req.userId, {name: true}).lean();
 
         const {assigned, ...rest} = TaskCreateSchema.parse(req.body);
+        let tTask = await Task.findOne({lead: rest.lead, isCompleted: false});
+        if (tTask) {
+            res.status(401).json({message: "Task already exists for this lead"});
+            return;
+        }
+        let lead: any = await Lead.findById(rest.lead, {"customer": true}).populate('customer', "name").lean();
 
+        if (!lead?.customer) {
+            res.status(404).json({message: 'Lead not found'});
+            return;
+        }
+        //if no title desc provided, assign.
         if (!rest.title) {
-            const lead: any = await Lead.findById(rest.lead, {"customer.name": true}).lean();
-            if (!lead?.customer) {
-                res.status(404).json({message: 'Lead not found'});
-                return;
-            }
             rest.title = `${rest.category} with ${lead.customer.name}`;
         }
 
@@ -46,6 +49,7 @@ export const createTask = asyncHandler(async (req: Request, res: Response) => {
             ...rest,
             assigned,
         });
+        //making to the format the client requires
         task = task.toObject();
         delete task.updatedAt;
         delete task.__v;
@@ -58,9 +62,8 @@ export const createTask = asyncHandler(async (req: Request, res: Response) => {
             activator: req.userId, // Assuming the authenticated user is stored in req.user
             lead: rest.lead,
             task: task._id,
-            action: `${assigner.name} created task for ${staff.name}`,
+            action: `${assigner.name} created task`,
         });
-
         res.status(201).json(task);
     } catch (error) {
         onCatchError(error, res);
@@ -96,7 +99,9 @@ export const getTasks = asyncHandler(async (req: Request, res: Response) => {
             staffs = users.map(e => e._id);
         }
 
-        const query: any = {};
+        const query: any = {
+            isCompleted: false,
+        };
 
         if (lead) query.lead = new mongoose.Types.ObjectId(lead);
         //filter with staff only when there is no filter for manager.
@@ -121,11 +126,12 @@ export const getTasks = asyncHandler(async (req: Request, res: Response) => {
             ...e,
             due: e.due.getTime(),
             assigned: e.assigned.name,
-            createdAt: convertToIstMillie(e.cratedAt),
+            createdAt: convertToIstMillie(e.createdAt),
             updatedAt: undefined,
             __v: undefined
         })));
     } catch (error) {
+        console.log(error);
         onCatchError(error, res);
     }
 });
@@ -181,32 +187,86 @@ export const updateTask = asyncHandler(async (req: Request, res: Response) => {
     }
 });
 
+export const completeTask = asyncHandler(async (req: Request, res: Response) => {
+    try {
+        const data = completeTaskSchema.parse(req.body);
+
+        let user = await User.findById(req.userId);
+        if(!user) {
+            res.status(404).json({message: 'User not found'});
+            return;
+        }
+
+        let task: any = await Task.findByIdAndUpdate(
+            data.id,
+            {isCompleted: true},
+            {new: true, runValidators: true}
+        );
+        //update data (status, call)
+        const lead: any = await Lead.findByIdAndUpdate(task.lead, data).populate('customer', 'name');
+
+        if (!task || !lead) {
+            res.status(404).json({message: 'Task or Lead not found'});
+            return;
+        }
+
+        if (data.note) {
+            await Activity.createActivity({
+                activator: new Types.ObjectId(req.userId),
+                lead: new Types.ObjectId(task.lead),
+                type: 'note_added',
+                optionalMessage: data.note,
+            });
+        }
+
+        // Create an activity for the task completetion
+        await Activity.create({
+            activator: req.userId,
+            lead: task!.lead,
+            task: task!._id,
+            action: `${user.name} completed task`,
+            type: 'completed',
+        });
+
+        //when follow-up task is adding, create task and update on activity
+        let newTask;
+        if (data.followUpDate) {
+            if(await Task.findOne({ lead: task.lead, isCompleted: false})) {
+                res.status(400).json({message: "Task already exists for this lead"});
+                return;
+            }
+            newTask = await Task.create({
+                lead: task.lead,
+                assigned: task.assigned,
+                due: data.followUpDate,
+                category: task.category,
+                title: `Call back ${lead.customer.name}`,
+                description: `Call back ${lead.customer.name}`,
+            });
+            // Create an activity for the task update
+            await Activity.create({
+                activator: req.userId,
+                lead: task!.lead,
+                task: newTask._id,
+                action: `${user.name} created follow-up`,
+                type: 'followup_added',
+            });
+        }
+
+        newTask = newTask?.toObject();
+
+        let responseData = newTask ?  {
+            ...newTask,
+            createdAt: convertToIstMillie(newTask!.createdAt),
+        } : undefined;
+
+        res.status(200).json({ newTask: responseData });
+    } catch (error) {
+        onCatchError(error, res);
+    }
+});
+
 export const markTaskCompleted = async (taskId: string): Promise<boolean> => {
     const result = await Task.findByIdAndUpdate(taskId, {isCompleted: true});
     return result != null;
 }
-// Delete a task
-// export const deleteTask = asyncHandler(async (req: Request, res: Response) => {
-//     const task = await Task.findById(req.params.id);
-//
-//     if (!task) {
-//         res.status(404);
-//         throw new Error('Task not found');
-//     }
-//
-//     await Task.findByIdAndDelete(req.params.id);
-//
-//     // Create an activity for the task deletion
-//     await Activity.create({
-//         activator: req.userId,
-//         lead: task.lead,
-//         task: task._id,
-//         action: 'deleted_task',
-//         timestamp: new Date()
-//     });
-//
-//     res.status(200).json({
-//         success: true,
-//         message: 'Task deleted successfully'
-//     });
-// });

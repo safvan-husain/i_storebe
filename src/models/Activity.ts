@@ -72,6 +72,9 @@ activitySchema.statics.createActivity = async function (activityData) {
             case 'check_out':
                 activityData.action = `${activatorName} checked out`;
                 break;
+            case 'completed':
+                activityData.action = `${activatorName} completed task`;
+                break;
             default:
                 activityData.action = `${activatorName} performed an action`;
         }

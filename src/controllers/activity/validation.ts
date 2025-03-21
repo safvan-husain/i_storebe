@@ -5,7 +5,7 @@ export const activityTypeSchema = z.enum(
     [
         'task_added', 'task_updated', 'lead_added',
         'lead_updated', 'note_added', 'followup_added',
-        'status_updated',
+        'status_updated', 'completed',
         'purpose_updated', 'check_in', 'check_out',
     ]);
 

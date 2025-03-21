@@ -4,45 +4,49 @@ import {onCatchError} from "../../middleware/error";
 import {activityFilterSchema, createNoteSchema} from "./validation";
 import Activity from '../../models/Activity';
 import {convertToIstMillie} from "../../utils/ist_time";
-import {Types} from "mongoose";
+import {ObjectId, Types} from "mongoose";
 import User from "../../models/User";
 
+//TODO: working here, ensure this works properly.
 export const getActivity = asyncHandler(
     async (req: Request, res: Response) => {
         try {
             let query: any = {}
             const reqFilter = activityFilterSchema.parse(req.query);
-            if (reqFilter.manager) query.activator = {$in: reqFilter.manager};
-            if (reqFilter.staff) query.activator = {$in: reqFilter.staff};
-            if (reqFilter.activityType) query.type = {$in: reqFilter.activityType};
-            if (reqFilter.startDate && reqFilter.endDate) {
-                query.createdAt = {
-                    $gte: reqFilter.startDate,
-                    $lte: reqFilter.endDate
-                };
-            } else if (query.startDate) {
-                query.createdAt = {$gte: query.startDate};
-            } else if (query.endDate) {
-                query.createdAt = {$lte: query.endDate};
-            }
+
             //if lead is provided, ignore other filters.
-            if (reqFilter.lead) query = {lead: reqFilter.lead};
+            if (reqFilter.lead) {
+                query = {lead: reqFilter.lead};
+            } else {
+                if (reqFilter.manager) query.activator = {$in: reqFilter.manager};
+                if (reqFilter.staff) query.activator = {$in: reqFilter.staff};
+                if (reqFilter.activityType) query.type = {$in: reqFilter.activityType};
+                if (reqFilter.startDate && reqFilter.endDate) {
+                    query.createdAt = {
+                        $gte: reqFilter.startDate,
+                        $lte: reqFilter.endDate
+                    };
+                } else if (query.startDate) {
+                    query.createdAt = {$gte: query.startDate};
+                } else if (query.endDate) {
+                    query.createdAt = {$lte: query.endDate};
+                }
 
-            if (req.privilege === 'manager' && (query.staff?.length ?? 0) < 1) {
-                const staffs = await User.find({manager: req.userId}, {_id: true}).lean();
-                query.staff = {$in: staffs.map(e => e._id)};
-            }
+                if (req.privilege === 'manager' && (query.staff?.length ?? 0) < 1) {
+                    const staffs = await User.find({manager: req.userId}, {_id: true}).lean();
+                    query.activator = {$in: staffs.map(e => e._id)};
+                }
 
-            //when requested by staff only provide his activities.
-            if (req.privilege === 'staff') {
-                query.staff = req.userId;
-                query.manager = undefined;
+                //when requested by staff only provide his activities.
+                if (req.privilege === 'staff') {
+                    query.activator = req.userId;
+                }
             }
 
             const activities = await Activity.find(query, {updatedAt: false, __v: false}).populate([
                 {
                     path: 'task',
-                    select: 'isCompleted due title description assigned timestamp',
+                    select: 'isCompleted due title description assigned timestamp createdAt',
                     populate: {
                         path: 'assigned',
                         select: 'name',
@@ -71,6 +75,7 @@ export const getActivity = asyncHandler(
                     ,),
             );
         } catch (e) {
+            console.log(e);
             onCatchError(e, res);
         }
     }

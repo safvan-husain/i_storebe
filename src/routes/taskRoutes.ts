@@ -1,10 +1,10 @@
 
 import express from 'express';
-import { 
-  createTask, 
-  getTasks, 
-  getTaskById, 
-  updateTask, 
+import {
+  createTask,
+  getTasks,
+  getTaskById,
+  updateTask, completeTask,
 } from '../controllers/tasks/taskController';
 import { protect } from '../middleware/auth';
 
@@ -17,6 +17,9 @@ router.use(protect);
 router.route('/')
   .post(createTask)
   .get(getTasks);
+
+router.route('/complete')
+    .post(completeTask);
 
 router.route('/:id')
   .get(getTaskById)
