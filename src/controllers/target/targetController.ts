@@ -3,7 +3,9 @@ import {Request, Response} from "express";
 import Target from "../../models/Target";
 import {onCatchError} from "../../middleware/error";
 import {TargetCreateSchema, TargetFilterSchema} from "./validation";
-import User from "../../models/User";
+import User, {IUser} from "../../models/User";
+import {ObjectId} from "mongoose";
+import {ILead} from "../../models/Lead";
 
 export const createTarget = asyncHandler(
     async (req: Request, res: Response) => {
@@ -68,10 +70,29 @@ export const getTarget = asyncHandler(
         }
     });
 
-export const incrementAchievedForUserTarget = async (userId: string) => {
+export const handleTarget = async ({ updater, lead } : { updater: ObjectId, lead: ILead }) => {
+    await incrementTargetAchievedCount(updater);
+    if(updater.toString() !== lead.createdBy.toString()) {
+        let creator = await User.findById(lead.createdBy, { privilege: true, secondPrivilege: true }).lean();
+        if(creator?.secondPrivilege === 'call-center') {
+            //if created by call center-staff, credit him also for this achievement.
+            await incrementTargetAchievedCount(lead.createdBy as unknown as ObjectId);
+        }
+    }
+}
+
+const incrementTargetAchievedCount = async (userId: ObjectId) => {
     let thisMonth = new Date();
     thisMonth.setHours(0,0,0,0);
     thisMonth.setDate(0);
     let target = await Target.findOneAndUpdate({assigned: userId, month: thisMonth }, { $inc: { achieved: 1 } },);
-    return target !== null;
+    if(!target) {
+        //if target not created yet, we don't want to miss what he has achieved this month
+        await Target.create({
+            assigned: userId,
+            month: thisMonth,
+            achieved: 1,
+            total: 0
+        })
+    }
 }

@@ -1,5 +1,5 @@
 import {Request, Response} from 'express';
-import {Types} from 'mongoose';
+import {ObjectId, Types} from 'mongoose';
 import asyncHandler from 'express-async-handler';
 import Lead from '../../models/Lead';
 import User from '../../models/User';
@@ -15,7 +15,7 @@ import Activity from "../../models/Activity";
 import {convertToIstMillie} from "../../utils/ist_time";
 import {ActivityType} from "../activity/validation";
 import Customer from "../../models/Customer";
-import {incrementAchievedForUserTarget} from "../target/targetController";
+import {handleTarget} from "../target/targetController";
 import {markTaskCompleted} from "../tasks/taskController";
 import {ObjectIdSchema} from "../../common/types";
 import {z} from "zod";
@@ -127,7 +127,7 @@ export const updateLeadStatus = asyncHandler(async (req: Request, res: Response)
             //when won or lost, task should be updated as completed.
             //if won should reflect to target.
             if (updateData.enquireStatus === 'won') {
-                await incrementAchievedForUserTarget(req.userId!);
+                await handleTarget({ updater: requestedUser._id as unknown as ObjectId, lead});
                 await markTaskCompleted(req.params.id);
             } else if (updateData.enquireStatus === 'lost') {
                 await markTaskCompleted(req.params.id);
