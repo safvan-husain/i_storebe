@@ -1,7 +1,7 @@
 
 import { Request, Response, NextFunction } from 'express';
 import { verifyToken } from '../utils/jwtUtils';
-import { UserPrivilege } from '../common/types';
+import {SecondUserPrivilege, UserPrivilege} from '../common/types';
 
 // // Extend Express Request type to include user
 declare global {
@@ -9,6 +9,7 @@ declare global {
     interface Request {
       userId?: string;
       privilege: UserPrivilege;
+      secondPrivilege: SecondUserPrivilege;
     }
   }
 }
@@ -34,6 +35,7 @@ export const protect = async (req: Request, res: Response, next: NextFunction) =
 
     req.userId = decoded.id;
     req.privilege = decoded.privilege;
+    req.secondPrivilege = decoded.secondPrivilege ?? "regular";
     next();
   } catch (error) {
     next(error);

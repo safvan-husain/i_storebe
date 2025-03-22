@@ -14,6 +14,7 @@ export interface IUser extends Document {
     //TODO: remove this later.
     token?:  string;
     comparePassword(candidatePassword: string): Promise<boolean>;
+    createdAt: Date;
 }
 
 const UserSchema = new mongoose.Schema(

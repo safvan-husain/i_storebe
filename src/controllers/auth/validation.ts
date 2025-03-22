@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import {Types} from "mongoose";
-import {ObjectIdSchema, UserPrivilegeSchema} from "../../common/types";
+import {ObjectIdSchema, secondUserPrivilegeSchema, UserPrivilegeSchema} from "../../common/types";
 
 export const UserRequestSchema = z.object({
   name: z.string(),
@@ -8,6 +8,7 @@ export const UserRequestSchema = z.object({
   password: z.string().min(8), // Ensure a minimum length for security
   privilege: UserPrivilegeSchema.optional().default('staff').refine((v) => v !== 'admin', { message: "Cannot crate admin"}),
   manager: ObjectIdSchema.optional(),
+  secondPrivilege: secondUserPrivilegeSchema.exclude(['super']).default('regular')
 });
 
 export const loginSchema = z.object({

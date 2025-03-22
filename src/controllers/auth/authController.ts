@@ -5,6 +5,7 @@ import asyncHandler from 'express-async-handler';
 import {loginSchema, UserRequestSchema} from './validation';
 import {onCatchError} from '../../middleware/error';
 import {Types} from 'mongoose';
+import {ObjectIdSchema} from "../../common/types";
 
 export const loginUser = asyncHandler(async (req: Request, res: Response) => {
     try {
@@ -77,10 +78,10 @@ export const createUser = asyncHandler(async (req: Request, res: Response) => {
 
         // Create user
         const user = (await User.create({
+            ...rest,
             phone,
             privilege,
             manager: managerId,
-            ...rest,
         }));
 
         let userObject: any = user.toObject();
@@ -102,19 +103,30 @@ export const createUser = asyncHandler(async (req: Request, res: Response) => {
 });
 
 export const getUsers = asyncHandler(async (req: Request, res: Response) => {
-    const users = await User.find({}).select('-password');
-    res.status(200).json(users);
+    const users = await User.find({}, {
+        name: true,
+        phone: true,
+        privilege: true,
+        manager: true,
+        secondPrivilege: true,
+        createdAt: true
+    }).lean();
+    res.status(200).json(users.map(e => ({
+        ...e,
+        createdAt: e?.createdAt?.getTime()
+    })));
 });
 
 export const getUserById = asyncHandler(async (req: Request, res: Response) => {
-    if (!Types.ObjectId.isValid(req.params.id)) {
-        res.status(400).json({message: 'Invalid user id'})
-        return;
-    }
-    const user = await User.findById(req.params.id).select('-password');
-    if (user) {
-        res.status(200).json(user);
-    } else {
+    try {
+        let id = ObjectIdSchema.parse(req.params.id);
+        const user = await User.findById(id).select('-password');
+        if (user) {
+            res.status(200).json(user);
+            return;
+        }
         res.status(404).json({message: 'User not found'});
+    } catch (e) {
+        onCatchError(e, res);
     }
 });
