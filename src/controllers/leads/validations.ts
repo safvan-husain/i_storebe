@@ -22,15 +22,7 @@ const LeadStatus = z.object({
     callStatus: callStatusSchema.optional(),
 });
 
-export const updateLeadStatusSchema = LeadStatus.partial().refine(
-    (data) => Object.keys(data).length > 0,
-    {
-        message: "At least one field (source, enquireStatus, or purpose, callStatus) must be provided.",
-    }
-);
-
-// Lead validation schemas
-export const crateLeadSchema = z.object({
+const LeadData = z.object({
     phone: z.string().min(1, {message: 'Phone is required'}),
     name: z.string().min(1, {message: 'Name is required'}),
     email: z.string().email({message: 'Invalid email format'}).optional(),
@@ -41,11 +33,21 @@ export const crateLeadSchema = z.object({
     //this would be IST since getting from client
     dob: z.number().optional().transform(val => val ? new Date(val) : undefined),
     nearestStore: z.string().optional()
-}).merge(LeadStatus);
+})
+
+export const updateLeadStatusSchema = LeadStatus.partial().refine(
+    (data) => Object.keys(data).length > 0,
+    {
+        message: "At least one field (source, enquireStatus, or purpose, callStatus) must be provided.",
+    }
+);
+
+// Lead validation schemas
+export const crateLeadSchema = z.object({}).merge(LeadStatus).merge(LeadData);
 
 export type UpdateLeadStatusData = z.infer<typeof updateLeadStatusSchema>;
 
-export const updateLeadData = crateLeadSchema.partial().refine(
+export const updateLeadData = LeadData.partial().refine(
     (data) => Object.keys(data).length > 0,
     {
         message: "At least one field must be provided.",
