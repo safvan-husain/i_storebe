@@ -17,6 +17,7 @@ import {ActivityType} from "../activity/validation";
 import Customer from "../../models/Customer";
 import {incrementAchievedForUserTarget} from "../target/targetController";
 import {markTaskCompleted} from "../tasks/taskController";
+//search Note to see the notes for specific sections
 
 export const createLead = asyncHandler(async (req: Request, res: Response) => {
     try {
@@ -282,6 +283,7 @@ export const getLeads = asyncHandler(async (req: Request, res: Response) => {
                         // Project to format output as needed
                         {
                             $project: {
+                                //NOTE: specify fields here to get them, when update the document structure this should be changed
                                 _id: 1,
                                 name: 1,
                                 phone: 1,
@@ -292,12 +294,13 @@ export const getLeads = asyncHandler(async (req: Request, res: Response) => {
                                 type: 1,
                                 callStatus: 1,
                                 product: 1,
+                                nearestStore: 1,
                                 // Other fields you need
                                 manager: {
                                     _id: '$managerData._id',
                                     name: '$managerData.name'
                                 },
-                                customer: '$customerData'
+                                customer: '$customerData',
                             }
                         },
                     ],
@@ -439,10 +442,7 @@ export const updateLead = asyncHandler(async (req: Request, res: Response) => {
             return;
         }
 
-        if (req.privilege !== 'admin') {
-            res.status(403).json({message: 'Not authorized to update this lead'});
-            return;
-        }
+
 
         if (updateData.manager) {
             const managerExists = await User.findById(updateData.manager);

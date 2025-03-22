@@ -39,7 +39,8 @@ export const crateLeadSchema = z.object({
     type: Type,
     manager: ObjectIdSchema.optional(),
     //this would be IST since getting from client
-    dob: z.number().optional().transform(val => val ? new Date(val) : undefined)
+    dob: z.number().optional().transform(val => val ? new Date(val) : undefined),
+    nearestStore: z.string().optional()
 }).merge(LeadStatus);
 
 export type UpdateLeadStatusData = z.infer<typeof updateLeadStatusSchema>;

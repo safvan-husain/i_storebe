@@ -16,6 +16,7 @@ export interface ILead extends Document {
     customer: ObjectId,
     product: string;
     createdAt: Date;
+    nearestStore?:string;
 }
 
 const LeadSchema = new mongoose.Schema(
@@ -68,6 +69,9 @@ const LeadSchema = new mongoose.Schema(
             ref: 'Customer',
             required: [true, 'Customer is required'],
         },
+        nearestStore: {
+            type: String
+        }
     },
     {
         timestamps: true,
