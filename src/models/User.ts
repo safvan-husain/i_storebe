@@ -1,6 +1,6 @@
 import mongoose, {Document, Types} from 'mongoose';
 import bcrypt from 'bcryptjs';
-import {UserPrivilege} from '../common/types';
+import {UserPrivilege, SecondUserPrivilege} from '../common/types';
 
 
 export interface IUser extends Document {
@@ -8,7 +8,7 @@ export interface IUser extends Document {
     phone: string;
     password: string;
     privilege: UserPrivilege;
-    isSuperAdmin: boolean;
+    secondPrivilege: SecondUserPrivilege;
     //if the user is staff, they should have a manager
     manager?: Types.ObjectId;
     //TODO: remove this later.
@@ -40,13 +40,14 @@ const UserSchema = new mongoose.Schema(
             enum: ['admin', 'manager', 'staff'],
             default: 'staff',
         },
+        secondPrivilege: {
+            type: String,
+            enum: ['super', 'call-center', 'regular'],
+            default: 'regular'
+        },
         manager: {
             type: mongoose.Schema.Types.ObjectId,
             ref: 'User',
-        },
-        isSuperAdmin: {
-            type: Boolean,
-            default: false,
         },
     },
     {

@@ -32,5 +32,7 @@ export const dateFiltersSchema = z.object({
 })
 
 export const UserPrivilegeSchema = z.enum(['admin', 'manager', 'staff']);
+export const secondUserPrivilegeSchema = z.enum(['super', 'call-center', 'regular'])
 
 export type UserPrivilege = z.infer<typeof UserPrivilegeSchema>;
+export type SecondUserPrivilege = z.infer<typeof secondUserPrivilegeSchema>;
