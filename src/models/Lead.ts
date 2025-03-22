@@ -11,6 +11,7 @@ export interface ILead extends Document {
     //useful when call center staff transfer the lead.
     isAvailableForAllUnderManager: boolean;
     //when transferring this would be useful.
+    //when a manager is the one (handled by) all the staff under him would have access to this.
     handledBy: ObjectId;
     type: string;
     customer: ObjectId,

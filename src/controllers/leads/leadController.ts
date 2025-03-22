@@ -17,6 +17,8 @@ import {ActivityType} from "../activity/validation";
 import Customer from "../../models/Customer";
 import {incrementAchievedForUserTarget} from "../target/targetController";
 import {markTaskCompleted} from "../tasks/taskController";
+import {ObjectIdSchema} from "../../common/types";
+import {z} from "zod";
 //search Note to see the notes for specific sections
 
 export const createLead = asyncHandler(async (req: Request, res: Response) => {
@@ -180,6 +182,11 @@ export const updateLeadStatus = asyncHandler(async (req: Request, res: Response)
 export const getLeads = asyncHandler(async (req: Request, res: Response) => {
     try {
         const filter = LeadFilterSchema.parse(req.body);
+        const requester =  await User.findById(req.userId, { manager: true }).lean();
+        if(!requester) {
+            res.status(401).json({message: "requester not found"});
+            return;
+        }
         // Start building the aggregation pipeline
         const pipeline: any[] = [];
         // Match stage (for filtering)
@@ -220,16 +227,15 @@ export const getLeads = asyncHandler(async (req: Request, res: Response) => {
             matchStage.type = {$all: filter.type};
         }
 
-        if ((filter.staffs?.length ?? 0) > 0) matchStage.createdBy = {$in: filter.staffs!.map(e => new Types.ObjectId(e))};
+        if ((filter.staffs?.length ?? 0) > 0) matchStage.handledBy = {$in: filter.staffs!.map(e => new Types.ObjectId(e))};
 
         // Role-based filtering
         if (req.privilege === 'manager' && (filter.staffs?.length ?? 0) === 0) { //when manager filter with staffs, it is unnecessary to filter with manager.
             //when manager provide all the leads created by his staff.
             matchStage.manager = new Types.ObjectId(req.userId!);
         } else if (req.privilege === 'staff') {
-            //when staff make request, only provide what he created.
-            //TODO: handle managedBy.
-            matchStage.createdBy = new Types.ObjectId(req.userId!);
+            //when staff make request, only provide what he created. and handled by manager (if handled by manager it means it available all the staff under him)
+            matchStage.handledBy = { $in: [ new Types.ObjectId(req.userId!), requester.manager! ]};
         } else if (req.privilege === 'admin' && (filter.managers?.length ?? 0) > 0) {
             //when admin pass managers.
             matchStage.manager = {$in: filter.managers!.map(e => new Types.ObjectId(e))};
@@ -427,6 +433,52 @@ export const getLeadById = asyncHandler(async (req: Request, res: Response) => {
     }
 });
 
+export const transferLead = asyncHandler(async (req: Request, res: Response) => {
+    try {
+        //transfer lead to either a manager or staff, if it is to a manager, all staff under him should see it
+        const data = z.object({
+            manager: ObjectIdSchema.optional(),
+            staff: ObjectIdSchema.optional(),
+            lead: ObjectIdSchema
+        }).refine(v => {
+            if(v.manager && v.staff) return false;
+            return !(!v.manager && !v.staff);
+        }, { message: "Pass either manager or staff" }).parse(req.body);
+
+        let transferUser = await User.findById(data.manager ?? data.staff);
+        if (!transferUser) {
+            res.status(401).json({message: "transfer user not found"});
+            return;
+        }
+        let lead = await Lead.findById(data.lead).lean();
+        if (!lead) {
+            res.status(401).json({message: "lead not found"});
+            return;
+        }
+        let requester = await User.findById(req.userId);
+        if(!requester) {
+            res.status(401).json({message: "requester not found"});
+            return
+        }
+
+        if(data.manager) {
+            //when transferring to manager, this will available to all staff under him
+            if(!await Lead.findByIdAndUpdate(data.lead, { manager: data.manager, handledBy: data.manager })) {
+                res.status(401).json({message: "lead not found"});
+                return;
+            }
+        } else {
+            if(!await Lead.findByIdAndUpdate(data.lead, { handledBy: data.staff })) {
+                res.status(401).json({message: "lead not found"});
+                return;
+            }
+        }
+        res.status(200).json({ message: "transfer successful"})
+    } catch (e) {
+        onCatchError(e, res);
+    }
+});
+
 export const updateLead = asyncHandler(async (req: Request, res: Response) => {
     try {
         if (!Types.ObjectId.isValid(req.params.id)) {
@@ -441,7 +493,6 @@ export const updateLead = asyncHandler(async (req: Request, res: Response) => {
             res.status(404).json({message: 'Lead not found'});
             return;
         }
-
 
 
         if (updateData.manager) {
