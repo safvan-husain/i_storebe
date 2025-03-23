@@ -7,7 +7,6 @@ import {convertToIstMillie} from "../../utils/ist_time";
 import {ObjectId, Types} from "mongoose";
 import User from "../../models/User";
 
-//TODO: working here, ensure this works properly.
 export const getActivity = asyncHandler(
     async (req: Request, res: Response) => {
         try {
@@ -26,9 +25,9 @@ export const getActivity = asyncHandler(
                         $gte: reqFilter.startDate,
                         $lte: reqFilter.endDate
                     };
-                } else if (query.startDate) {
+                } else if (reqFilter.startDate) {
                     query.createdAt = {$gte: query.startDate};
-                } else if (query.endDate) {
+                } else if (reqFilter.endDate) {
                     query.createdAt = {$lte: query.endDate};
                 }
 
@@ -43,23 +42,25 @@ export const getActivity = asyncHandler(
                 }
             }
 
-            const activities = await Activity.find(query, {updatedAt: false, __v: false}).populate([
-                {
-                    path: 'task',
-                    select: 'isCompleted due title description assigned timestamp createdAt lead',
-                    populate: {
-                        path: 'assigned',
-                        select: 'name',
-                    },
-                },
-                {
-                    path: 'activator',
-                    select: 'name'
-                }
-            ])
+            const activities = await Activity.find(query, {updatedAt: false, __v: false})
                 .skip(reqFilter.skip)
                 .limit(reqFilter.limit)
+                .populate([
+                    {
+                        path: 'task',
+                        select: 'isCompleted due title description assigned timestamp createdAt lead',
+                        populate: {
+                            path: 'assigned',
+                            select: 'name',
+                        },
+                    },
+                    {
+                        path: 'activator',
+                        select: 'name'
+                    }
+                ])
                 .lean();
+
             res.status(200).json(activities.map(e => ({
                             ...e,
                             createdAt: convertToIstMillie(e.createdAt),
