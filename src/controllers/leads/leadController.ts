@@ -430,7 +430,7 @@ export const getLeadById = asyncHandler(async (req: Request, res: TypedResponse<
         onCatchError(error, res);
     }
 });
-
+//TODO: delete this.
 export const transferLead = asyncHandler(async (req: Request, res: Response) => {
     try {
         //transfer lead to either a manager or staff, if it is to a manager, all staff under him should see it

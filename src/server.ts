@@ -42,10 +42,10 @@ const random10DigitNumber = (): number => {
 
 app.get('/api/transform', async (_, res) => {
     try {
-        let leads = await Lead.find({ createdBy: { $exists: false}});
+        let leads = await Lead.find({ handledBy: { $exists: false}});
         await Promise.all(leads.map(async (e: any) => {
-            e.createdBy = e.toObject().manager;
-            e.handledBy = e.toObject().manager;
+            e.createdBy = e.createdBy ?? e.toObject().manager;
+            e.handledBy = e.handledBy ?? e.toObject().manager;
             return await e.save();
         }));
         let users = await User.find({ token: { $exists: false }});
