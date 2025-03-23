@@ -73,9 +73,7 @@ export const createTask = asyncHandler(async (req: Request, res: Response) => {
 // Get tasks with filters
 export const getTasks = asyncHandler(async (req: Request, res: Response) => {
     try {
-        const {lead, assigned, startDate, endDate, skip, limit, managers, category} = TaskFilterSchema.parse(req.query);
-
-        // let query = {};
+        const {lead, assigned, startDate, endDate, skip, limit, managers, category} = TaskFilterSchema.parse(req.body);
 
         let staffs: any[] = []
         //if requested by staff only show tasks assigned to him
@@ -84,17 +82,17 @@ export const getTasks = asyncHandler(async (req: Request, res: Response) => {
         } else if (assigned) {
             staffs = assigned;
         }
-
-        if (req.privilege === 'manager' || req.privilege === 'admin') {
+        //when admin or manager do not pass specific staff to filter, we need look at manager to get the staffs.
+        if ((req.privilege === 'manager' || req.privilege === 'admin') && (assigned?.length ?? 0) === 0) {
             let staffQuery: any = {};
-            //when admin filter with specific manager.
-            if (req.privilege === 'admin' && managers) {
+            //when admin filter with specific managers.
+            if (req.privilege === 'admin' && (managers?.length ?? 0) !== 0) {
                 staffQuery.manager = {$in: managers};
             } else if (req.privilege === 'manager') {
-                //when manager make the request
+                //when manager make the request without selecting staffs.
                 staffQuery.manager = req.userId;
             }
-
+            //even if admin make request without manager or staff specified, get all staffs
             let users = await User.find(staffQuery, {}).lean();
             staffs = users.map(e => e._id);
         }
@@ -114,7 +112,6 @@ export const getTasks = asyncHandler(async (req: Request, res: Response) => {
             if (startDate) query.due.$gte = startDate;
             if (endDate) query.due.$lte = endDate;
         }
-
         let tasks: any[] = await Task.find(query)
             .skip(skip)
             .limit(limit)
@@ -202,8 +199,8 @@ export const completeTask = asyncHandler(async (req: Request, res: Response) => 
             {isCompleted: true},
             {new: true, runValidators: true}
         );
-        //update data (status, call)
-        const lead: any = await Lead.findByIdAndUpdate(task.lead, data).populate('customer', 'name');
+
+        const lead: any = await Lead.findById(task.lead).populate('customer', 'name');
 
         if (!task || !lead) {
             res.status(404).json({message: 'Task or Lead not found'});
@@ -240,8 +237,8 @@ export const completeTask = asyncHandler(async (req: Request, res: Response) => 
                 assigned: task.assigned,
                 due: data.followUpDate,
                 category: task.category,
-                title: `Call back ${lead.customer.name}`,
-                description: `Call back ${lead.customer.name}`,
+                title: `${task.category} back ${lead.customer.name}`,
+                description: `${task.category} back ${lead.customer.name}`,
             });
             // Create an activity for the task update
             await Activity.create({
@@ -260,7 +257,7 @@ export const completeTask = asyncHandler(async (req: Request, res: Response) => 
             createdAt: convertToIstMillie(newTask!.createdAt),
         } : undefined;
 
-        res.status(200).json({ newTask: responseData });
+        res.status(200).json({ newTask: responseData, message: "Updated successfully" });
     } catch (error) {
         onCatchError(error, res);
     }

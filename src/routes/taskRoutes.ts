@@ -15,8 +15,10 @@ router.use(protect);
 
 // Task routes
 router.route('/')
-  .post(createTask)
-  .get(getTasks);
+  .post(createTask);
+
+router.route('/filter')
+    .post(getTasks);
 
 router.route('/complete')
     .post(completeTask);
