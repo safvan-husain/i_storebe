@@ -4,7 +4,7 @@ import Target from "../../models/Target";
 import {onCatchError} from "../../middleware/error";
 import {TargetCreateSchema, TargetFilterSchema} from "./validation";
 import User, {IUser} from "../../models/User";
-import {ObjectId} from "mongoose";
+import {ObjectId, Types} from "mongoose";
 import {ILead} from "../../models/Lead";
 
 export const createTarget = asyncHandler(
@@ -70,7 +70,7 @@ export const getTarget = asyncHandler(
         }
     });
 
-export const handleTarget = async ({ updater, lead } : { updater: ObjectId, lead: ILead }) => {
+export const handleTarget = async ({ updater, lead } : { updater: ObjectId, lead: ILead<Types.ObjectId, any> }) => {
     await incrementTargetAchievedCount(updater);
     if(updater.toString() !== lead.createdBy.toString()) {
         let creator = await User.findById(lead.createdBy, { privilege: true, secondPrivilege: true }).lean();

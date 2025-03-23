@@ -45,6 +45,7 @@ app.get('/api/transform', async (_, res) => {
         let leads = await Lead.find({ createdBy: { $exists: false}});
         await Promise.all(leads.map(async (e: any) => {
             e.createdBy = e.toObject().manager;
+            e.handledBy = e.toObject().manager;
             return await e.save();
         }));
         let users = await User.find({ token: { $exists: false }});

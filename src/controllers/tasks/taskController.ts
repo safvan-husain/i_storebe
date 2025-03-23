@@ -8,6 +8,7 @@ import {onCatchError} from "../../middleware/error";
 import {convertToIstMillie} from "../../utils/ist_time";
 import User from "../../models/User";
 import Lead from "../../models/Lead";
+import {internalLeadStatusUpdate} from "../leads/leadController";
 
 //TODO: check all response are consistent.
 
@@ -194,17 +195,36 @@ export const completeTask = asyncHandler(async (req: Request, res: Response) => 
             return;
         }
 
-        let task: any = await Task.findByIdAndUpdate(
+        let task = await Task.findByIdAndUpdate(
             data.id,
             {isCompleted: true},
             {new: true, runValidators: true}
         );
 
+        if(!task) {
+            res.status(404).json({message: 'Task not found'});
+            return;
+        }
+
         const lead: any = await Lead.findById(task.lead).populate('customer', 'name');
 
-        if (!task || !lead) {
-            res.status(404).json({message: 'Task or Lead not found'});
+        if (!lead) {
+            res.status(404).json({message: 'Lead not found'});
             return;
+        }
+
+        if(data.enquireStatus || data.callStatus || data.purpose) {
+            await internalLeadStatusUpdate({
+                requestedUser: user,
+                lead: lead,
+                updateData: {
+                    enquireStatus: data.enquireStatus,
+                    callStatus: data.callStatus,
+                    purpose: data.purpose,
+                    source: undefined,
+                },
+                taskId: task._id
+            })
         }
 
         if (data.note) {
@@ -263,7 +283,7 @@ export const completeTask = asyncHandler(async (req: Request, res: Response) => 
     }
 });
 
-export const markTaskCompleted = async (taskId: string): Promise<boolean> => {
+export const markTaskCompleted = async (taskId: Types.ObjectId | string): Promise<boolean> => {
     const result = await Task.findByIdAndUpdate(taskId, {isCompleted: true});
     return result != null;
 }

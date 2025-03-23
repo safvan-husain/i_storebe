@@ -42,6 +42,8 @@ export const updateLeadStatusSchema = LeadStatus.partial().refine(
     }
 );
 
+export type UpdateLeadStatus = z.infer<typeof updateLeadStatusSchema>
+
 // Lead validation schemas
 export const crateLeadSchema = z.object({}).merge(LeadStatus).merge(LeadData);
 

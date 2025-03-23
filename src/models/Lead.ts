@@ -1,7 +1,8 @@
-import mongoose, {Document, ObjectId} from 'mongoose';
+import mongoose, {Document, ObjectId, Schema, Types} from 'mongoose';
 import {CallStatus, EnquireSourceType, EnquireStatusType, PurposeType} from "../controllers/leads/validations";
 
-export interface ILead extends Document {
+export interface ILead<T = Types.ObjectId, S = Types.ObjectId> extends Document {
+    _id: Types.ObjectId,
     source: EnquireSourceType;
     enquireStatus: EnquireStatusType;
     purpose: PurposeType;
@@ -12,9 +13,9 @@ export interface ILead extends Document {
     isAvailableForAllUnderManager: boolean;
     //when transferring this would be useful.
     //when a manager is the one (handled by) all the staff under him would have access to this.
-    handledBy: ObjectId;
+    handledBy: S;
     type: string;
-    customer: ObjectId,
+    customer: T,
     product: string;
     createdAt: Date;
     nearestStore?:string;

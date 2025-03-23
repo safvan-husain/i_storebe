@@ -1,28 +1,42 @@
 import {Request, Response} from 'express';
 import {ObjectId, Types} from 'mongoose';
 import asyncHandler from 'express-async-handler';
-import Lead from '../../models/Lead';
-import User from '../../models/User';
+import Lead, {ILead} from '../../models/Lead';
+import User, {IUser} from '../../models/User';
 import {
+    CallStatus,
     crateLeadSchema, EnquireSourceType,
     EnquireStatusType,
     LeadFilterSchema,
-    PurposeType, updateLeadData,
+    PurposeType, updateLeadData, UpdateLeadStatus,
     updateLeadStatusSchema
 } from './validations';
 import {onCatchError} from '../../middleware/error';
 import Activity from "../../models/Activity";
 import {convertToIstMillie} from "../../utils/ist_time";
 import {ActivityType} from "../activity/validation";
-import Customer from "../../models/Customer";
+import Customer, {ICustomer} from "../../models/Customer";
 import {handleTarget} from "../target/targetController";
 import {markTaskCompleted} from "../tasks/taskController";
 import {ObjectIdSchema} from "../../common/types";
 import {z} from "zod";
-//search Note to see the notes for specific sections
 
-export const createLead = asyncHandler(async (req: Request, res: Response) => {
+interface ErrorMessage {
+    message: string;
+}
+
+interface TypedResponse<T> extends Response {
+    json: (body: T | ErrorMessage) => this;
+}
+
+//search Note to see the notes for specific sections
+export const createLead = asyncHandler(async (req: Request, res: TypedResponse<ILeadResponse>) => {
     try {
+        let requester: IUser = await User.findById(req.userId, {manager: true, privilege: true, name: true}).lean() as unknown as IUser;
+        if (!requester) {
+            res.status(401).json({message: "User not found"})
+            return;
+        }
         let leadData = crateLeadSchema.parse(req.body);
         const requestedPrivilege = req.privilege;
 
@@ -32,17 +46,12 @@ export const createLead = asyncHandler(async (req: Request, res: Response) => {
         } else if (req.privilege === 'manager') {
             leadData.manager = req.userId;
         } else {
-            let staff = await User.findById(req.userId, {manager: true}).lean();
-            if (!staff) {
-                res.status(401).json({message: "User not found"})
-                return;
+
+            if(requester.privilege === 'staff') {
+                leadData.manager = requester!.manager?.toString();
+            } else if (requester.privilege === 'manager') {
+                leadData.manager = req.userId;
             }
-            leadData.manager = staff!.manager?.toString();
-        }
-        // Verify manager exists
-        if (!Types.ObjectId.isValid(leadData.manager ?? "")) {
-            res.status(400).json({message: 'Invalid manager id'});
-            return;
         }
 
         const managerExists = await User.findById(leadData.manager, {name: true}).lean();
@@ -59,7 +68,7 @@ export const createLead = asyncHandler(async (req: Request, res: Response) => {
             res.status(401).json({message: "Could not create customer"});
             return;
         }
-        let lead: any = await Lead.create({
+        let lead:ILead = await Lead.create({
             ...leadData,
             customer: customer._id,
             createdBy: req.userId,
@@ -73,23 +82,24 @@ export const createLead = asyncHandler(async (req: Request, res: Response) => {
                 lead: lead._id,
             });
             lead = lead.toObject();
-            lead.createdAt = convertToIstMillie(lead.createdAt);
-            delete lead.updatedAt;
-            delete lead.__v;
-            delete lead.createdBy;
-            delete lead.handledBy;
-            delete lead.isAvailableForAllUnderManager;
 
-            lead.dob = customer?.dob ? customer.dob.getTime() : null;
-            res.status(201).json({
-                ...lead,
-                name: customer?.name,
-                phone: customer?.phone,
-                address: customer?.address,
-                email: customer?.email,
-                manager: managerExists,
-                customer: undefined,
-            });
+            res.status(200).json({
+                _id: lead._id,
+                handlerName: requester.name,
+                source: lead.source,
+                enquireStatus: lead.enquireStatus,
+                purpose: lead.purpose,
+                callStatus: lead.callStatus,
+                type: lead.type,
+                product: lead.product,
+                nearestStore: lead.nearestStore,
+                name: customer.name,
+                phone: customer.phone,
+                email: customer.email,
+                address: customer.address,
+                dob: customer.dob?.getTime(),
+                createdAt: convertToIstMillie(lead.createdAt),
+            })
         } else {
             res.status(400).json({message: 'Failed to create lead'});
         }
@@ -98,7 +108,7 @@ export const createLead = asyncHandler(async (req: Request, res: Response) => {
     }
 });
 
-export const updateLeadStatus = asyncHandler(async (req: Request, res: Response) => {
+export const updateLeadStatus = asyncHandler(async (req: Request, res: TypedResponse<ILeadResponse>) => {
     try {
         const requestedUser = await User.findById(req.userId, {name: true}).lean();
         if (!requestedUser) {
@@ -115,71 +125,20 @@ export const updateLeadStatus = asyncHandler(async (req: Request, res: Response)
             res.status(401).json({message: "lead not found"});
             return;
         }
-
-        let activityType: ActivityType | undefined;
-        let message = `${requestedUser.name} Changed `;
-        //if the given value is not null update accordingly and create new activity.
-        if (updateData.enquireStatus && updateData.enquireStatus !== lead.enquireStatus) {
-            activityType = 'status_updated';
-            message = message + getUpdateStatusMessage('status', lead.enquireStatus, updateData.enquireStatus);
-            //after message, changing the value to save later.
-            lead.enquireStatus = updateData.enquireStatus;
-            //when won or lost, task should be updated as completed.
-            //if won should reflect to target.
-            if (updateData.enquireStatus === 'won') {
-                await handleTarget({ updater: requestedUser._id as unknown as ObjectId, lead});
-                await markTaskCompleted(req.params.id);
-            } else if (updateData.enquireStatus === 'lost') {
-                await markTaskCompleted(req.params.id);
-            }
-        } else if (updateData.source && updateData.source !== lead.source) {
-            activityType = 'lead_updated'
-            message = message + getUpdateStatusMessage('source', lead.source, updateData.source);
-            //after message, changing the value to save later.
-            lead.source = updateData.source;
-        } else if (updateData.purpose && updateData.purpose !== lead.purpose) {
-            activityType = 'purpose_updated';
-            message = message + getUpdateStatusMessage('purpose', lead.purpose, updateData.purpose);
-            //after message, changing the value to save later.
-            lead.purpose = updateData.purpose;
-        }
-
-        await lead.save()
-
-        if (activityType) {
-            console.log(activityType);
-            await Activity.create({
-                type: activityType,
-                activator: req.userId,
-                lead: lead._id,
-                action: message,
-            });
-            lead = await lead.save();
-        } else {
-            console.log('no activity');
-        }
-
-        lead = lead.toObject();
-        lead.dob = lead.customer?.dob?.getTime();
-        lead.createdAt = convertToIstMillie(lead.createdAt);
-        delete lead.updatedAt;
-        delete lead.__v;
-        delete lead.createdBy;
-        delete lead.handledBy;
-        delete lead.isAvailableForAllUnderManager;
-        lead.name = lead.customer.name;
-        lead.email = lead.customer.email;
-        lead.phone = lead.customer.phone;
-        lead.address = lead.customer.address;
-        delete lead.customer;
-        res.status(200).json(lead);
+        let result = await internalLeadStatusUpdate({
+            requestedUser,
+            updateData,
+            lead,
+            taskId: req.body.taskId
+        });
+        res.status(200).json(result);
     } catch (error) {
         console.log(error)
         onCatchError(error, res);
     }
 });
 
-export const getLeads = asyncHandler(async (req: Request, res: Response) => {
+export const getLeads = asyncHandler(async (req: Request, res: TypedResponse<GetLeadsResponse>) => {
     try {
         const filter = LeadFilterSchema.parse(req.body);
         const requester =  await User.findById(req.userId, { manager: true }).lean();
@@ -260,9 +219,9 @@ export const getLeads = asyncHandler(async (req: Request, res: Response) => {
                         {
                             $lookup: {
                                 from: 'users',
-                                localField: 'manager',
+                                localField: 'handledBy',
                                 foreignField: '_id',
-                                as: 'managerData'
+                                as: 'handledBy'
                             }
                         },
                         {
@@ -270,19 +229,19 @@ export const getLeads = asyncHandler(async (req: Request, res: Response) => {
                                 from: 'customers',
                                 localField: 'customer',
                                 foreignField: '_id',
-                                as: 'customerData'
+                                as: 'customer'
                             }
                         },
                         // Unwind arrays to objects, with preserveNullAndEmptyArrays to handle missing data
                         {
                             $unwind: {
-                                path: '$managerData',
+                                path: '$handledBy',
                                 preserveNullAndEmptyArrays: true
                             }
                         },
                         {
                             $unwind: {
-                                path: '$customerData',
+                                path: '$customer',
                                 preserveNullAndEmptyArrays: true
                             }
                         },
@@ -302,11 +261,8 @@ export const getLeads = asyncHandler(async (req: Request, res: Response) => {
                                 product: 1,
                                 nearestStore: 1,
                                 // Other fields you need
-                                manager: {
-                                    _id: '$managerData._id',
-                                    name: '$managerData.name'
-                                },
-                                customer: '$customerData',
+                                handledBy: 1,
+                                customer: 1,
                             }
                         },
                     ],
@@ -358,17 +314,22 @@ export const getLeads = asyncHandler(async (req: Request, res: Response) => {
             res.status(401).json({message: "unexpected db behavior"});
             return;
         }
-        const leads = (result[0]['data'] ?? []).map((e: any) => ({
-            ...e,
+        const leads: ILeadResponse[] = (result[0]['data'] ?? []).map((e: ILead<ICustomer, IUser>): ILeadResponse => ({
+            _id: e._id,
+            handlerName: e.handledBy.name,
+            source: e.source,
+            enquireStatus: e.enquireStatus,
+            purpose: e.purpose,
+            callStatus: e.callStatus,
+            type: e.type,
+            product: e.product,
+            nearestStore: e.nearestStore,
             name: e.customer?.name ?? "",
             phone: e.customer?.phone ?? "",
             email: e.customer?.email,
             address: e.customer?.address ?? "",
             dob: e.customer.dob ? e.customer.dob.getTime() : undefined,
-            customer: undefined,
             createdAt: convertToIstMillie(e.createdAt),
-            updatedAt: undefined,
-            __v: undefined
         }));
         const totalCount = result[0]['totalCount'][0]?.count ?? 0;
         const todayCount = result[0]['todayCount'][0]?.count ?? 0;
@@ -387,14 +348,22 @@ export const getLeads = asyncHandler(async (req: Request, res: Response) => {
     }
 });
 
-export const getLeadById = asyncHandler(async (req: Request, res: Response) => {
+interface GetLeadsResponse {
+    leads: ILeadResponse[];
+    totalCount: number;
+    todayCount: number;
+    weekCount: number;
+    monthCount: number;
+}
+
+export const getLeadById = asyncHandler(async (req: Request, res: TypedResponse<ILeadResponse>) => {
     try {
         if (!Types.ObjectId.isValid(req.params.id)) {
             res.status(400).json({message: 'Invalid lead id'});
             return;
         }
 
-        const lead: any = await Lead.findById(req.params.id, {
+        const lead: ILead<ICustomer, IUser> = await Lead.findById(req.params.id, {
             enquireStatus: true,
             callStatus: true,
             purpose: true,
@@ -403,8 +372,8 @@ export const getLeadById = asyncHandler(async (req: Request, res: Response) => {
             type: true,
             createdAt: true
         })
-            .populate('manager', 'name')
-            .populate('customer').lean();
+            .populate('handledBy', 'name')
+            .populate('customer').lean() as any;
 
         // Check if lead exists
         if (!lead) {
@@ -419,14 +388,21 @@ export const getLeadById = asyncHandler(async (req: Request, res: Response) => {
         }
 
         res.status(200).json({
-            ...lead,
+            _id: lead._id,
+            handlerName: lead.handledBy.name,
+            source: lead.source,
+            enquireStatus: lead.enquireStatus,
+            purpose: lead.purpose,
+            callStatus: lead.callStatus,
+            type: lead.type,
+            product: lead.product,
+            nearestStore: lead.nearestStore,
             name: lead.customer?.name ?? "",
             phone: lead.customer?.phone ?? "",
-            address: lead.customer?.address ?? "",
-            dob: lead.customer?.dob?.getTime(),
             email: lead.customer?.email,
+            address: lead.customer?.address ?? "",
+            dob: lead?.customer?.dob?.getTime(),
             createdAt: convertToIstMillie(lead.createdAt),
-            customer: undefined
         });
     } catch (error) {
         onCatchError(error, res);
@@ -553,4 +529,99 @@ export function getUpdateStatusMessage<T extends EnquireSourceType | PurposeType
     newV: T,
 ): string {
     return `${category} to ${newV} from ${old}`;
+}
+
+export const internalLeadStatusUpdate = async ({requestedUser, lead, updateData, taskId}: {
+    requestedUser: IUser,
+    lead: ILead<Types.ObjectId, IUser>,
+    updateData: UpdateLeadStatus,
+    taskId: Types.ObjectId | string
+}): Promise<ILeadResponse> => {
+    let activityType: ActivityType | undefined;
+    let message = `${requestedUser.name} Changed `;
+    //if the given value is not null update accordingly and create new activity.
+    if (updateData.enquireStatus && updateData.enquireStatus !== lead.enquireStatus) {
+        activityType = 'status_updated';
+        message = message + getUpdateStatusMessage('status', lead.enquireStatus, updateData.enquireStatus);
+        //after message, changing the value to save later.
+        lead.enquireStatus = updateData.enquireStatus;
+        //when won or lost, task should be updated as completed.
+        //if won should reflect to target.
+        if (updateData.enquireStatus === 'won') {
+            await handleTarget({updater: requestedUser._id as unknown as ObjectId, lead});
+            await markTaskCompleted(taskId);
+        } else if (updateData.enquireStatus === 'lost') {
+            await markTaskCompleted(taskId);
+        }
+        await Activity.create({
+            type: activityType,
+            activator: requestedUser._id,
+            lead: lead._id,
+            action: message,
+        });
+    }
+    if (updateData.source && updateData.source !== lead.source) {
+        activityType = 'lead_updated'
+        message = message + getUpdateStatusMessage('source', lead.source, updateData.source);
+        //after message, changing the value to save later.
+        lead.source = updateData.source;
+        await Activity.create({
+            type: activityType,
+            activator: requestedUser._id,
+            lead: lead._id,
+            action: message,
+        });
+    }
+    if (updateData.purpose && updateData.purpose !== lead.purpose) {
+        activityType = 'purpose_updated';
+        message = message + getUpdateStatusMessage('purpose', lead.purpose, updateData.purpose);
+        //after message, changing the value to save later.
+        lead.purpose = updateData.purpose;
+        await Activity.create({
+            type: activityType,
+            activator: requestedUser._id,
+            lead: lead._id,
+            action: message,
+        });
+    }
+
+    lead = await lead.save()
+
+    lead = lead.toObject();
+    let customer = (lead.customer as unknown as ICustomer)
+    return {
+        _id: lead._id,
+        handlerName: requestedUser.name,
+        source: lead.source,
+        enquireStatus: lead.enquireStatus,
+        purpose: lead.purpose,
+        callStatus: lead.callStatus,
+        type: lead.type,
+        product: lead.product,
+        nearestStore: lead.nearestStore,
+        name: customer.name,
+        phone: customer.phone,
+        email: customer.email,
+        address: customer.address,
+        dob: customer.dob?.getTime(),
+        createdAt: convertToIstMillie(lead.createdAt),
+    };
+}
+
+export interface ILeadResponse {
+    _id: Types.ObjectId;
+    handlerName: string;
+    name: string;
+    email?: string;
+    phone: string;
+    address: string;
+    dob?: number;
+    createdAt: number;
+    source: EnquireSourceType;
+    enquireStatus: EnquireStatusType;
+    purpose: PurposeType;
+    callStatus: CallStatus;
+    type: string;
+    product: string;
+    nearestStore?: string;
 }

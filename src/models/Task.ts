@@ -1,8 +1,9 @@
-import mongoose, {Document} from 'mongoose';
+import mongoose, {Document, Types} from 'mongoose';
 import {IUser} from './User';
 import {Category} from "../controllers/tasks/validation";
 
 export interface ITask extends Document {
+    _id: Types.ObjectId;
     lead: mongoose.Types.ObjectId;
     due: Date;
     // timestamp: Date;
