@@ -1,5 +1,5 @@
 import {Request, Response} from 'express';
-import {ObjectId, Types} from 'mongoose';
+import mongoose, {ObjectId, Types} from 'mongoose';
 import asyncHandler from 'express-async-handler';
 import Lead, {ILead} from '../../models/Lead';
 import User, {IUser} from '../../models/User';
@@ -120,18 +120,40 @@ export const updateLeadStatus = asyncHandler(async (req: Request, res: TypedResp
             return;
         }
         const updateData = updateLeadStatusSchema.parse(req.body);
-        let lead: any = await Lead.findById(req.params.id).populate('manager', 'name').populate('customer');
+        let lead:  ILead<Types.ObjectId, IUser> | null = await Lead.findById(req.params.id).populate('customer')  as any;
         if (!lead) {
             res.status(401).json({message: "lead not found"});
             return;
         }
+        let handlerName;
+        if(updateData.transferTo) {
+            let {errorMessage, lead: lead1, transferToName } = await internalLeadTransfer({
+                lead,
+                transferTo: updateData.transferTo,
+                requester: requestedUser
+            });
+            if(errorMessage) {
+                res.status(401).json({ message: errorMessage});
+                return;
+            }
+            if(lead1) {
+                lead = lead1 as ILead<Types.ObjectId, IUser>;
+            }
+            if(transferToName) {
+                handlerName = transferToName;
+            }
+        }
+
         let result = await internalLeadStatusUpdate({
             requestedUser,
             updateData,
             lead,
             taskId: req.body.taskId
         });
-        res.status(200).json(result);
+        res.status(200).json({
+            ...result,
+            handlerName: handlerName ?? result.handlerName
+        });
     } catch (error) {
         console.log(error)
         onCatchError(error, res);
@@ -454,6 +476,27 @@ export const transferLead = asyncHandler(async (req: Request, res: Response) => 
         onCatchError(e, res);
     }
 });
+
+const internalLeadTransfer = async ({lead, transferTo, requester} : { lead: ILead<any, any>, transferTo: string, requester: IUser}) : Promise<{ errorMessage?: string, lead?: ILead<any, any>, transferToName?: string}> => {
+    let user = await User.findById(transferTo, { name: true, privilege: true });
+    if(!user) {
+        return  { errorMessage: "Transfer user not found" }
+    }
+    if(user.privilege === "admin") {
+        return { errorMessage: "Cannot transfer to admin"}
+    }
+    lead.handledBy = user._id;
+    if(user.privilege === "manager") {
+        lead.manager = user._id;
+    }
+    await Activity.createActivity({
+        activator: requester._id,
+        lead: lead._id,
+        type: 'lead_transfer',
+        action: `${requester.name} transferred lead to ${user.name}`
+    })
+    return { lead, transferToName: user.name };
+}
 
 export const updateLead = asyncHandler(async (req: Request, res: Response) => {
     try {

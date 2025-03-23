@@ -4,6 +4,7 @@ import {UserPrivilege, SecondUserPrivilege} from '../common/types';
 
 
 export interface IUser extends Document {
+    _id: Types.ObjectId;
     name: string;
     phone: string;
     password: string;

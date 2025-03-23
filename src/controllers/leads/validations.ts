@@ -35,7 +35,9 @@ const LeadData = z.object({
     nearestStore: z.string().optional()
 })
 
-export const updateLeadStatusSchema = LeadStatus.partial().refine(
+export const updateLeadStatusSchema = z.object({
+    transferTo: ObjectIdSchema.optional()
+}).merge(LeadStatus.partial()).refine(
     (data) => Object.keys(data).length > 0,
     {
         message: "At least one field (source, enquireStatus, or purpose, callStatus) must be provided.",

@@ -7,6 +7,7 @@ export const activityTypeSchema = z.enum(
         'lead_updated', 'note_added', 'followup_added',
         'status_updated', 'completed',
         'purpose_updated', 'check_in', 'check_out',
+        'lead_transfer'
     ]);
 
 export type ActivityType = z.infer<typeof activityTypeSchema>;
