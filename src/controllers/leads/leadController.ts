@@ -392,7 +392,8 @@ export const getLeadById = asyncHandler(async (req: Request, res: TypedResponse<
             product: true,
             source: true,
             type: true,
-            createdAt: true
+            createdAt: true,
+            manager: true,
         })
             .populate('handledBy', 'name')
             .populate('customer').lean() as any;
