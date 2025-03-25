@@ -12,6 +12,7 @@ import Lead from "./models/Lead";
 import User from "./models/User";
 import {generateToken} from "./utils/jwtUtils";
 import {targetRoutes} from "./routes/targetRoutes";
+import {leaveRouter} from "./routes/leave-routes";
 require("dotenv").config();
 
 const PORT = 3000;
@@ -35,6 +36,7 @@ app.use('/api/tasks', taskRoutes);
 app.use('/api/activity', activityRoutes);
 app.use('/api/analytics', staticsRoutes);
 app.use('/api/target', targetRoutes);
+app.use('/api/leave', leaveRouter);
 
 const random10DigitNumber = (): number => {
     return Math.floor(1000000000 + Math.random() * 9000000000);

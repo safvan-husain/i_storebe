@@ -2,6 +2,7 @@
 import mongoose from 'mongoose';
 import User, {IUser} from '../models/User';
 import connectDb from '../config/db';
+import {generateToken} from "../utils/jwtUtils";
 require('dotenv').config();
 
 const createAdminUser = async () => {
@@ -25,12 +26,14 @@ const createAdminUser = async () => {
     if(superAdmin) {
       await superAdmin.save();
     } else {
-      await User.create({
+      let user = await User.create({
         username: "super_admin",
         password: 'admin123', // Will be hashed automatically by the pre-save hook
         privilege: 'admin',
         secondPrivilege: 'super'
       });
+      user.token = generateToken(user);
+      await user.save();
       console.log('Super Admin created')
     }
     

@@ -14,6 +14,7 @@ export interface IUser extends Document {
     // token?:  string;
     comparePassword(candidatePassword: string): Promise<boolean>;
     createdAt: Date;
+    token?:string;
 }
 
 interface UserModel extends Model<IUser> {
