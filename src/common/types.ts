@@ -27,8 +27,20 @@ function transformDate(val: string | undefined): (Date | undefined) {
 export const ISToUTCFromStringSchema = z.string().optional().refine(val => !(val && !/^-?\d+$/.test(val)), { message: "should be milliseconds since epoch"}).transform(transformDate);
 
 export const dateFiltersSchema = z.object({
-    startDate: ISToUTCFromStringSchema,
-    endDate: ISToUTCFromStringSchema,
+    startDate: ISToUTCFromStringSchema.transform(date => {
+        if (!date) return undefined;
+
+        const startOfDay = new Date(date);
+        startOfDay.setUTCHours(0, 0, 0, 0);
+        return startOfDay;
+    }),
+    endDate: ISToUTCFromStringSchema.transform((date: Date | undefined): Date | undefined => {
+        if (!date) return undefined;
+
+        const endOfDay = new Date(date);
+        endOfDay.setUTCHours(23, 59, 59, 999);
+        return endOfDay;
+    }),
 })
 
 export const UserPrivilegeSchema = z.enum(['admin', 'manager', 'staff']);
