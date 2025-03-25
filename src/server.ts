@@ -42,23 +42,23 @@ const random10DigitNumber = (): number => {
 
 app.get('/api/transform', async (_, res) => {
     try {
-        // let leads = await Lead.find({ handledBy: { $exists: false}});
-        // await Promise.all(leads.map(async (e: any) => {
-        //     e.createdBy = e.createdBy ?? e.toObject().manager;
-        //     e.handledBy = e.handledBy ?? e.toObject().manager;
-        //     return await e.save();
-        // }));
+        let leads = await Lead.find({ handledBy: { $exists: false}});
+        let s = await Promise.all(leads.map(async (e: any) => {
+            e.createdBy = e.createdBy ?? e.toObject().manager;
+            e.handledBy = e.handledBy ?? e.toObject().manager;
+            return await e.save();
+        }));
         // let users = await User.find({ token: { $exists: false }});
         // await Promise.all(users.map(async (e) => {
         //     e.token = generateToken(e);
         //     return await e.save();
         // }))
-        let users = await User.find({ username: { $exists: false }});
-        let s = await Promise.all(users.map(async (e) => {
-           e.username = (e as any).phone;
-            console.log(e.username, " ", (e as any).phone);
-           return await e.save();
-        }));
+        // let users = await User.find({ username: { $exists: false }});
+        // let s = await Promise.all(users.map(async (e) => {
+        //    e.username = (e as any).phone;
+        //     console.log(e.username, " ", (e as any).phone);
+        //    return await e.save();
+        // }));
         res.status(200).json({ s });
     } catch (e) {
         console.log(e);
