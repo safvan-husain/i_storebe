@@ -5,25 +5,31 @@ import asyncHandler from 'express-async-handler';
 import {loginSchema, UserRequestSchema} from './validation';
 import {onCatchError} from '../../middleware/error';
 import {Types} from 'mongoose';
-import {ObjectIdSchema} from "../../common/types";
+import {ObjectIdSchema, SecondUserPrivilege, UserPrivilege, UserPrivilegeSchema} from "../../common/types";
+import {TypedResponse} from "../../common/interface";
+import {z} from "zod";
+
+interface UserResponse {
+    username: string;
+    _id: string;
+    privilege: UserPrivilege;
+    secondPrivilege: SecondUserPrivilege;
+}
+
 
 export const loginUser = asyncHandler(async (req: Request, res: Response) => {
     try {
-        const {phone, password} = loginSchema.parse(req.body);
+        const {username, password} = loginSchema.parse(req.body);
 
-        if (!phone || !password) {
-            res.status(400).json({message: 'Please provide phone and password'});
-            return;
-        }
-        const user = await User.findOne({phone});
+        const user = await User.findOne({username});
         if (!user) {
-            res.status(401).json({message: 'Invalid email or password'});
+            res.status(401).json({message: 'user does not exist'});
             return;
         }
 
         const isMatch = await user.comparePassword(password);
         if (!isMatch) {
-            res.status(401).json({message: 'Invalid email or password'});
+            res.status(401).json({message: 'incorrect password'});
             return;
         }
         let userObject: any = user.toObject();
@@ -40,9 +46,9 @@ export const loginUser = asyncHandler(async (req: Request, res: Response) => {
     }
 });
 
-export const createUser = asyncHandler(async (req: Request, res: Response) => {
+export const createUser = asyncHandler(async (req: Request, res: TypedResponse<UserResponse>) => {
     try {
-        let {phone, privilege, manager, ...rest} = UserRequestSchema.parse(req.body);
+        let {username, privilege, manager, ...rest} = UserRequestSchema.parse(req.body);
 
         // Validate requester permissions
         // const admin = await User.findById(req.userId);
@@ -67,7 +73,7 @@ export const createUser = asyncHandler(async (req: Request, res: Response) => {
         }
 
         // Check if user already exists
-        const userExists = await User.findOne({phone});
+        const userExists = await User.findOne({username});
         if (userExists) {
             res.status(400).json({message: "User already exists"});
             return;
@@ -79,7 +85,7 @@ export const createUser = asyncHandler(async (req: Request, res: Response) => {
         // Create user
         const user = (await User.create({
             ...rest,
-            phone,
+            username,
             privilege,
             manager: managerId,
         }));
@@ -91,8 +97,10 @@ export const createUser = asyncHandler(async (req: Request, res: Response) => {
         delete userObject.__v;
         if (user) {
             res.status(201).json({
-                token: generateToken(user),
-                ...userObject
+                username: userObject.username,
+                _id: userObject._id,
+                privilege: userObject.privilege,
+                secondPrivilege: userObject.secondPrivilege,
             });
         } else {
             res.status(200).json({message: "Failed to create user"});
@@ -102,27 +110,59 @@ export const createUser = asyncHandler(async (req: Request, res: Response) => {
     }
 });
 
-export const getUsers = asyncHandler(async (req: Request, res: Response) => {
-    const users = await User.find({}, {
-        name: true,
-        phone: true,
+export const getUsers = asyncHandler(async (req: Request, res: TypedResponse<UserResponse[]>) => {
+    if(!req.userId) {
+        res.status(401).json({message: "User not found"});
+        return;
+    }
+    let filter = z.object({
+        type: UserPrivilegeSchema.exclude(['admin']).optional()
+    }).parse(req.query);
+    let managerId;
+    if(req.privilege === "staff") {
+        let requester = await User.findById(req.userId, { manager: true }).lean();
+        if(!requester) {
+            res.status(401).json({message: "User not found"});
+            return;
+        }
+        managerId = requester.manager;
+    } else if (req.privilege === 'manager') {
+        managerId = req.userId;
+    }
+    let query: any = {}
+    if(managerId) {
+        query.$or = [ { manager: managerId }, { _id: managerId }]
+    }
+    query.privilege = { $ne: 'admin' }
+    if(filter.type) {
+        query.privilege = filter.type;
+    }
+    const users = await User.find(query, {
+        username: true,
         privilege: true,
         manager: true,
         secondPrivilege: true,
         createdAt: true
     }).lean();
     res.status(200).json(users.map(e => ({
-        ...e,
-        createdAt: e?.createdAt?.getTime()
+            username: e.username,
+            _id: e._id.toString(),
+        privilege: e.privilege,
+        secondPrivilege: e.secondPrivilege
     })));
 });
 
-export const getUserById = asyncHandler(async (req: Request, res: Response) => {
+export const getUserById = asyncHandler(async (req: Request, res: TypedResponse<UserResponse>) => {
     try {
         let id = ObjectIdSchema.parse(req.params.id);
         const user = await User.findById(id).select('-password');
         if (user) {
-            res.status(200).json(user);
+            res.status(200).json({
+                username: user.username,
+                _id: user._id.toString(),
+                privilege: user.privilege,
+                secondPrivilege: user.secondPrivilege
+            });
             return;
         }
         res.status(404).json({message: 'User not found'});

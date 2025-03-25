@@ -1,6 +1,6 @@
 
 import mongoose from 'mongoose';
-import User from '../models/User';
+import User, {IUser} from '../models/User';
 import connectDb from '../config/db';
 require('dotenv').config();
 
@@ -8,31 +8,28 @@ const createAdminUser = async () => {
   try {
     await connectDb();
     // Check if admin already exists
-    const adminExists = await User.findOne({ phone: '1234567890' });
+    const adminExists = await User.findOne({ username: 'admin' });
     
     if (!adminExists) {
       // Create admin user
       const admin = await User.create({
-        name: "Admin",
-        phone: '1234567890',
+        username: "admin",
         password: 'admin123', // Will be hashed automatically by the pre-save hook
         privilege: 'admin',
       });
       console.log('Admin created');
     }
     
-    const superAdmin = await User.findOne({ phone: "2234567890"})
+    const superAdmin = await User.findOne({ username: "super_admin"})
 
     if(superAdmin) {
-      superAdmin.isSuperAdmin = true;
       await superAdmin.save();
     } else {
       await User.create({
-        name: "Super Admin",
-        phone: '2234567890',
+        username: "super_admin",
         password: 'admin123', // Will be hashed automatically by the pre-save hook
         privilege: 'admin',
-        isSuperAdmin: true,
+        secondPrivilege: 'super'
       });
       console.log('Super Admin created')
     }

@@ -1,12 +1,12 @@
 import {Request, Response} from 'express';
-import Task from '../../models/Task';
+import Task, {ITask} from '../../models/Task';
 import Activity from '../../models/Activity';
 import asyncHandler from 'express-async-handler';
 import mongoose, {Types} from 'mongoose';
 import {completeTaskSchema, TaskCreateSchema, TaskFilterSchema, updateSchema} from './validation';
 import {onCatchError} from "../../middleware/error";
 import {convertToIstMillie} from "../../utils/ist_time";
-import User from "../../models/User";
+import User, {IUser} from "../../models/User";
 import Lead from "../../models/Lead";
 import {internalLeadStatusUpdate} from "../leads/leadController";
 
@@ -56,14 +56,14 @@ export const createTask = asyncHandler(async (req: Request, res: Response) => {
         delete task.__v;
         task.due = task.due.getTime();
         task.createdAt = convertToIstMillie(task.createdAt);
-        task.assigned = staff.name;
+        task.assigned = staff.username;
         // Create an activity record for this task
         await Activity.create({
             type: 'task_added',
             activator: req.userId, // Assuming the authenticated user is stored in req.user
             lead: rest.lead,
             task: task._id,
-            action: `${assigner.name} created task`,
+            action: `${assigner.username} created task`,
         });
         res.status(201).json(task);
     } catch (error) {
@@ -113,17 +113,17 @@ export const getTasks = asyncHandler(async (req: Request, res: Response) => {
             if (startDate) query.due.$gte = startDate;
             if (endDate) query.due.$lte = endDate;
         }
-        let tasks: any[] = await Task.find(query)
+        let tasks = await Task.find(query)
             .skip(skip)
             .limit(limit)
-            .populate('assigned', 'name phone')
+            .populate<{ assigned: { username: string} }>('assigned', 'username')
             .sort({due: 1}) // Sort by due date ascending
             .lean();
 
         res.status(200).json(tasks.map(e => ({
             ...e,
             due: e.due.getTime(),
-            assigned: e.assigned.name,
+            assigned: e.assigned.username,
             createdAt: convertToIstMillie(e.createdAt),
             updatedAt: undefined,
             __v: undefined
@@ -137,8 +137,9 @@ export const getTasks = asyncHandler(async (req: Request, res: Response) => {
 // Get a single task by ID
 export const getTaskById = asyncHandler(async (req: Request, res: Response) => {
     const task = await Task.findById(req.params.id)
-        .populate('lead', 'name phone')
-        .populate('assigned', 'name phone');
+        .populate('lead', 'customer')
+        .populate<{ lead: { customer: { name: string, phone: string } }}>('lead.customer', 'name phone')
+        .populate<{ assigned: { name: string, phone: string } }>('assigned', 'name phone');
 
     if (!task) {
         res.status(404);
@@ -241,7 +242,7 @@ export const completeTask = asyncHandler(async (req: Request, res: Response) => 
             activator: req.userId,
             lead: task!.lead,
             task: task!._id,
-            action: `${user.name} completed task`,
+            action: `${user.username} completed task`,
             type: 'completed',
         });
 
@@ -265,7 +266,7 @@ export const completeTask = asyncHandler(async (req: Request, res: Response) => 
                 activator: req.userId,
                 lead: task!.lead,
                 task: newTask._id,
-                action: `${user.name} created follow-up`,
+                action: `${user.username} created follow-up`,
                 type: 'followup_added',
             });
         }

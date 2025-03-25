@@ -1,36 +1,42 @@
-import mongoose, {Document, Types} from 'mongoose';
+import mongoose, {Document, Model, Types} from 'mongoose';
 import bcrypt from 'bcryptjs';
 import {UserPrivilege, SecondUserPrivilege} from '../common/types';
 
-
 export interface IUser extends Document {
     _id: Types.ObjectId;
-    name: string;
-    phone: string;
+    username: string;
     password: string;
     privilege: UserPrivilege;
     secondPrivilege: SecondUserPrivilege;
     //if the user is staff, they should have a manager
     manager?: Types.ObjectId;
     //TODO: remove this later.
-    token?:  string;
+    // token?:  string;
     comparePassword(candidatePassword: string): Promise<boolean>;
     createdAt: Date;
 }
 
+interface UserModel extends Model<IUser> {
+    username: string;
+    token?: string;
+    password: string;
+    privilege: UserPrivilege;
+    secondPrivilege: SecondUserPrivilege;
+    manager?: Types.ObjectId;
+    phone: string;
+}
+
 const UserSchema = new mongoose.Schema(
     {
-        name: {
+        phone: {
             type: String,
-            required: true,
+        },
+        username: {
+            type: String,
+            // required: true,
         },
         token: {
             type: String,
-        },
-        phone: {
-            type: String,
-            required: [true, 'Phone number is required'],
-            trim: true,
         },
         password: {
             type: String,
@@ -71,6 +77,6 @@ UserSchema.methods.comparePassword = async function (candidatePassword: string):
     return await bcrypt.compare(candidatePassword, this.password);
 };
 
-const User = mongoose.model<IUser>('User', UserSchema);
+const User = mongoose.model<IUser, UserModel>('User', UserSchema);
 
 export default User;

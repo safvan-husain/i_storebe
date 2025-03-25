@@ -20,14 +20,9 @@ import {handleTarget} from "../target/targetController";
 import {markTaskCompleted} from "../tasks/taskController";
 import {ObjectIdSchema} from "../../common/types";
 import {z} from "zod";
+import {TypedResponse} from "../../common/interface";
 
-interface ErrorMessage {
-    message: string;
-}
 
-interface TypedResponse<T> extends Response {
-    json: (body: T | ErrorMessage) => this;
-}
 
 //search Note to see the notes for specific sections
 export const createLead = asyncHandler(async (req: Request, res: TypedResponse<ILeadResponse>) => {
@@ -85,7 +80,7 @@ export const createLead = asyncHandler(async (req: Request, res: TypedResponse<I
 
             res.status(200).json({
                 _id: lead._id,
-                handlerName: requester.name,
+                handlerName: requester.username,
                 source: lead.source,
                 enquireStatus: lead.enquireStatus,
                 purpose: lead.purpose,
@@ -338,7 +333,7 @@ export const getLeads = asyncHandler(async (req: Request, res: TypedResponse<Get
         }
         const leads: ILeadResponse[] = (result[0]['data'] ?? []).map((e: ILead<ICustomer, IUser>): ILeadResponse => ({
             _id: e._id,
-            handlerName: e.handledBy.name,
+            handlerName: e.handledBy.username,
             source: e.source,
             enquireStatus: e.enquireStatus,
             purpose: e.purpose,
@@ -395,7 +390,7 @@ export const getLeadById = asyncHandler(async (req: Request, res: TypedResponse<
             createdAt: true,
             manager: true,
         })
-            .populate('handledBy', 'name')
+            .populate<{ handledBy: IUser }>('handledBy', 'name')
             .populate('customer').lean() as any;
 
         // Check if lead exists
@@ -412,7 +407,7 @@ export const getLeadById = asyncHandler(async (req: Request, res: TypedResponse<
 
         res.status(200).json({
             _id: lead._id,
-            handlerName: lead.handledBy.name,
+            handlerName: lead.handledBy.username,
             source: lead.source,
             enquireStatus: lead.enquireStatus,
             purpose: lead.purpose,
@@ -494,9 +489,9 @@ const internalLeadTransfer = async ({lead, transferTo, requester} : { lead: ILea
         activator: requester._id,
         lead: lead._id,
         type: 'lead_transfer',
-        action: `${requester.name} transferred lead to ${user.name}`
+        action: `${requester.username} transferred lead to ${user.username}`
     })
-    return { lead, transferToName: user.name };
+    return { lead, transferToName: user.username };
 }
 
 export const updateLead = asyncHandler(async (req: Request, res: Response) => {
@@ -582,7 +577,7 @@ export const internalLeadStatusUpdate = async ({requestedUser, lead, updateData,
     taskId: Types.ObjectId | string
 }): Promise<ILeadResponse> => {
     let activityType: ActivityType | undefined;
-    let message = `${requestedUser.name} Changed `;
+    let message = `${requestedUser.username} Changed `;
     //if the given value is not null update accordingly and create new activity.
     if (updateData.enquireStatus && updateData.enquireStatus !== lead.enquireStatus) {
         activityType = 'status_updated';
@@ -635,7 +630,7 @@ export const internalLeadStatusUpdate = async ({requestedUser, lead, updateData,
     let customer = (lead.customer as unknown as ICustomer)
     return {
         _id: lead._id,
-        handlerName: requestedUser.name,
+        handlerName: requestedUser.username,
         source: lead.source,
         enquireStatus: lead.enquireStatus,
         purpose: lead.purpose,
