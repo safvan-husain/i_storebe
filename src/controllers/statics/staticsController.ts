@@ -10,6 +10,10 @@ import {convertToIstMillie} from "../../utils/ist_time";
 export const getLeadsStatics = asyncHandler(
     async (req: Request, res: Response) => {
         try {
+            if(!req.userId) {
+                res.status(401).json({message: "User id not found"});
+                return;
+            }
             let { startDate, endDate, managerId } = staticsFilterSchema.parse(req.query);
             let manager ;
             if (req.privilege === 'staff') {
