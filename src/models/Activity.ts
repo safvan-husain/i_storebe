@@ -1,5 +1,6 @@
 import mongoose, {Document, Schema, Types} from 'mongoose';
 import {ActivityType} from "../controllers/activity/validation";
+import User from './User';
 
 
 export interface IActivity extends Document {
@@ -36,9 +37,8 @@ activitySchema.statics.createActivity = async function (activityData) {
     // Only run activityData if action is not already set
     if (!activityData.action) {
         // Fetch the user's name from the User collection
-        const User = mongoose.model('User');
-        const user = await User.findById(activityData.activator);
-        const activatorName = user ? user.name : 'Someone';
+        const user = await User.findById(activityData.activator, { username: true });
+        const activatorName = user ? user.username : 'Someone';
 
         // Set action based on type
         switch (activityData.type) {
@@ -78,9 +78,8 @@ activitySchema.statics.createActivity = async function (activityData) {
             default:
                 activityData.action = `${activatorName} performed an action`;
         }
-
-        return await this.create(activityData);
     }
+    return await this.create(activityData);
 }
 
 const Activity = mongoose.model<IActivity, IActivityModel>('Activity', activitySchema);

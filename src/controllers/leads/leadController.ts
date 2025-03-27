@@ -108,7 +108,7 @@ export const createLead = asyncHandler(async (req: Request, res: TypedResponse<I
 
 export const updateLeadStatus = asyncHandler(async (req: Request, res: TypedResponse<ILeadResponse>) => {
     try {
-        const requestedUser = await User.findById(req.userId, {name: true}).lean();
+        const requestedUser = await User.findById(req.userId, {username: true}).lean();
         if (!requestedUser) {
             res.status(401).json({message: "User not found"})
             return;
@@ -401,7 +401,7 @@ export const getLeadById = asyncHandler(async (req: Request, res: TypedResponse<
             return;
         }
 
-        const lead: ILead<ICustomer, IUser> = await Lead.findById(req.params.id, {
+        const lead = await Lead.findById(req.params.id, {
             enquireStatus: true,
             callStatus: true,
             purpose: true,
@@ -411,8 +411,8 @@ export const getLeadById = asyncHandler(async (req: Request, res: TypedResponse<
             createdAt: true,
             manager: true,
         })
-            .populate<{ handledBy: IUser }>('handledBy', 'name')
-            .populate('customer').lean() as any;
+            .populate<{ handledBy: { username: string } }>('handledBy', 'username')
+            .populate<{ customer: ICustomer}>('customer').lean();
 
         // Check if lead exists
         if (!lead) {
@@ -499,7 +499,7 @@ const internalLeadTransfer = async ({lead, transferTo, requester}: {
     transferTo: string,
     requester: IUser
 }): Promise<{ errorMessage?: string, lead?: ILead<any, any>, transferToName?: string }> => {
-    let user = await User.findById(transferTo, {name: true, privilege: true});
+    let user = await User.findById(transferTo, {username: true, privilege: true});
     if (!user) {
         return {errorMessage: "Transfer user not found"}
     }

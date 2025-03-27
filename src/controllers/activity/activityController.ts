@@ -11,7 +11,7 @@ export const getActivity = asyncHandler(
     async (req: Request, res: Response) => {
         try {
             let query: any = {}
-            const reqFilter = activityFilterSchema.parse(req.query);
+            const reqFilter = activityFilterSchema.parse(req.body);
 
             //if lead is provided, ignore other filters.
             if (reqFilter.lead) {
@@ -19,7 +19,6 @@ export const getActivity = asyncHandler(
             } else {
                 if (reqFilter.manager) query.activator = {$in: reqFilter.manager};
                 if (reqFilter.staff) query.activator = {$in: reqFilter.staff};
-                if (reqFilter.activityType) query.type = {$in: reqFilter.activityType};
                 if (reqFilter.startDate && reqFilter.endDate) {
                     query.createdAt = {
                         $gte: reqFilter.startDate,
@@ -41,38 +40,55 @@ export const getActivity = asyncHandler(
                     query.activator = req.userId;
                 }
             }
-
+            if (reqFilter.activityType) query.type =  { $in: reqFilter.activityType };
+            console.log(query)
             const activities = await Activity.find(query, {updatedAt: false, __v: false})
                 .skip(reqFilter.skip)
                 .limit(reqFilter.limit)
-                .populate([
+                .populate<{
+                    activator: { username: string }, task?: {
+                        isCompleted: boolean,
+                        due: Date,
+                        title: string,
+                        description: string,
+                        assigned: {
+                            _id: Types.ObjectId,
+                            username: string,
+                        },
+                        category: true,
+                        timestamp: Date,
+                        createdAt: Date,
+                        lead: Types.ObjectId
+                    }
+                }>([
                     {
                         path: 'task',
-                        select: 'isCompleted due title description assigned timestamp createdAt lead',
+                        select: 'isCompleted due title description assigned timestamp createdAt lead category',
                         populate: {
                             path: 'assigned',
-                            select: 'name',
+                            select: 'username',
                         },
                     },
                     {
                         path: 'activator',
-                        select: 'name'
+                        select: 'username'
                     }
                 ])
                 .lean();
-
-            res.status(200).json(activities.map(e => ({
-                            ...e,
-                            createdAt: convertToIstMillie(e.createdAt),
-                            activator: (e.activator as any).name,
-                            task: e.task ? {
-                                ...e.task,
-                                due: (e.task as any).due.getTime(),
-                                createdAt: convertToIstMillie((e.task as any).createdAt),
-                                assigned: (e.task as any).assigned.name,
-                            } : undefined
-                        }
-                    )
+            res.status(200).json(activities.map(e => {
+                        return ({
+                                ...e,
+                                createdAt: convertToIstMillie(e.createdAt),
+                                activator: e.activator.username,
+                                task: e.task ? {
+                                    ...e.task,
+                                    due: e.task.due.getTime(),
+                                    createdAt: convertToIstMillie(e.task.createdAt),
+                                    assigned: e.task.assigned.username,
+                                } : undefined
+                            }
+                        );
+                    }
                     ,),
             );
         } catch (e) {
@@ -100,6 +116,5 @@ export const createNote = asyncHandler(
         } catch (e) {
             onCatchError(e, res);
         }
-
     }
 )

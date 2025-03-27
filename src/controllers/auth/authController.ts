@@ -14,8 +14,8 @@ interface UserResponse {
     _id: string;
     privilege: UserPrivilege;
     secondPrivilege: SecondUserPrivilege;
+    manager?: string;
 }
-
 
 export const loginUser = asyncHandler(async (req: Request, res: Response) => {
     try {
@@ -79,10 +79,20 @@ export const createUser = asyncHandler(async (req: Request, res: TypedResponse<U
             return;
         }
 
-        // Set manager ID for staff creation
+        //when creating user, manager field should be null for managers, otherwise getTarget api will not work as expected, and possibly some other.
         const managerId = privilege === 'staff' ? manager : undefined;
+        if(managerId) {
+                const managerExists = await User.findById(managerId, { privilege: true });
+                if (!managerExists) {
+                    res.status(404).json({message: "Manager not found"});
+                    return;
+                }
+                if(managerExists.privilege !== 'manager') {
+                    res.status(400).json({ message: "provided manager is not a manager"});
+                    return;
+                }
+        }
 
-        // Create user
         const user = (await User.create({
             ...rest,
             username,
@@ -112,7 +122,7 @@ export const createUser = asyncHandler(async (req: Request, res: TypedResponse<U
 
 export const getUsers = asyncHandler(async (req: Request, res: TypedResponse<UserResponse[]>) => {
     if(!req.userId) {
-        res.status(401).json({message: "User not found"});
+        res.status(401).json({message: "requested user not found"});
         return;
     }
     let filter = z.object({
@@ -142,7 +152,6 @@ export const getUsers = asyncHandler(async (req: Request, res: TypedResponse<Use
         privilege: true,
         manager: true,
         secondPrivilege: true,
-        createdAt: true
     }).lean();
     res.status(200).json(users.map(e => ({
             username: e.username,

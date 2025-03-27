@@ -22,9 +22,9 @@ export const activityFilterSchema = z.object({
     .merge(paginationSchema).merge(dateFiltersSchema)
     .refine(e => {
             console.log(e);
-            return !(e.lead && Object.keys(e).length > 3);
+            return (!(e.lead && Object.keys(e).length > 3)) || (e.lead && e.activityType);
         },
-        {message: "on lead no other filters applicable"});
+        {message: "on lead no other filters applicable other than activityType"});
 
 export const createNoteSchema = z.object({
     note: z.string().min(1, { message: "at least one character required"}),

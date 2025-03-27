@@ -27,9 +27,6 @@ export const TargetCreateSchema = z.object({
 });
 
 export const TargetFilterSchema = z.object({
-    assigned: ObjectIdSchema.optional(),
-    manager: ObjectIdSchema.optional(),
-    achieveStatus: z.boolean().optional(),
     month: ISToUTCFromStringSchema.transform(val => {
         if(!val) return  undefined;
         return getMonthOnly(val.getTime() + istUtcOffset);

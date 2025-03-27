@@ -13,6 +13,7 @@ import User from "./models/User";
 import {generateToken} from "./utils/jwtUtils";
 import {targetRoutes} from "./routes/targetRoutes";
 import {leaveRouter} from "./routes/leave-routes";
+import {onCatchError} from "./middleware/error";
 require("dotenv").config();
 
 const PORT = 3000;
@@ -65,6 +66,21 @@ app.get('/api/transform', async (_, res) => {
     } catch (e) {
         console.log(e);
         res.status(500).json(e)
+    }
+})
+
+app.get('/api/token', async (req, res) => {
+    try {
+        let users = await User.find({ token: { $exists: false }});
+        let s = await Promise.all(users.map(async (e) => {
+            e.token = generateToken(e);
+            return await e.save();
+        }));
+
+        let users2 = await User.find({}, { username: true, token: true, privilege: true, secondPrivilege: true }).lean();
+        res.status(200).json({ s, users2 });
+    } catch (e) {
+       onCatchError(e, res);
     }
 })
 
