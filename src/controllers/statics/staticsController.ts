@@ -114,8 +114,11 @@ const _getLeadsAnalytics = async ({startDate, endDate, managerId, handlerId}: {
 
         }
     ]);
-    const status = result[0].status[0];
-    let progress = result[0].progress.map((e: any) => ({
+    if(result.length === 0) {
+        return DashboardDataSchema.parse({});
+    }
+    const leadStatus = result[0].status.length === 0 ? {} : result[0].status[0];
+    let leadProgress = result[0].progress.map((e: any) => ({
         ...e,
         date: new Date(e._id).getTime()
     }));
@@ -139,92 +142,79 @@ const _getLeadsAnalytics = async ({startDate, endDate, managerId, handlerId}: {
         pending: taskData.total - (taskData.overDue + taskData.completed)
     };
     if (startDate && endDate) {
-        progress = compressProgress(progress, startDate, endDate);
+        leadProgress = compressProgress(leadProgress, startDate, endDate);
     }
     return {
-        taskStatus,
-        enquireStatus: {
-            empty: status.empty,
-            contacted: status.contacted,
-            interested: status.interested,
-            lost: status.lost,
-            new: status.new,
-            none: status.none,
-            pending: status.pending,
-            quotation_shared: status.quotation_shared,
-            visit_store: status.visit_store,
-            won: status.won
-        },
-        enquireSource: {
-            call: status.call,
-            facebook: status.facebook,
-            instagram: status.instagram,
-            previous_customer: status.previous_customer,
-            wabis: status.wabis,
-            walkin: status.walkin,
-            whatsapp: status.whatsapp
-        },
-        purpose: {
-            inquire: status.inquire,
-            purchase: status.purchase,
-            sales: status.sales,
-            service_request: status.service_request
-        },
-        progress
+        taskStatus: taskStatusSchema.parse(taskStatus),
+        enquireStatus: enquireStatusSchema.parse(leadStatus),
+        enquireSource: enquireSourceSchema.parse(leadStatus),
+        purpose: purposeSchema.parse(leadStatus),
+        progress: leadProgress
     };
 }
 
-type DashboardData = {
-    taskStatus: {
-        completed: number;
-        overDue: number;
-        total: number;
-        pending: number;
-    };
-    enquireStatus: {
-        empty: number;
-        contacted: number;
-        interested: number;
-        lost: number;
-        new: number;
-        none: number;
-        pending: number;
-        quotation_shared: number;
-        visit_store: number;
-        won: number;
-    };
-    enquireSource: {
-        call: number;
-        facebook: number;
-        instagram: number;
-        previous_customer: number;
-        wabis: number;
-        walkin: number;
-        whatsapp: number;
-    };
-    purpose: {
-        inquire: number;
-        purchase: number;
-        sales: number;
-        service_request: number;
-    };
-    progress: {
-        _id: string;
-        count: number;
-        date: number; // assuming this is a timestamp (ms)
-    }[];
-};
+import { z } from 'zod';
 
-type ProgressItem = {
-    _id: string;      // format: YYYY-MM-DD
-    count: number;
-    date: number;     // timestamp
-};
+const taskStatusSchema = z.object({
+    completed: z.number().default(0),
+    overDue: z.number().default(0),
+    total: z.number().default(0),
+    pending: z.number().default(0),
+}).default({});
+const enquireStatusSchema = z.object({
+        empty: z.number().default(0),
+        contacted: z.number().default(0),
+        interested: z.number().default(0),
+        lost: z.number().default(0),
+        new: z.number().default(0),
+        none: z.number().default(0),
+        pending: z.number().default(0),
+        quotation_shared: z.number().default(0),
+        visit_store: z.number().default(0),
+        won: z.number().default(0),
+    }).default({});
 
-type LabeledItem = {
-    label: string;
-    count: number;
-};
+const enquireSourceSchema = z.object({
+    call: z.number().default(0),
+    facebook: z.number().default(0),
+    instagram: z.number().default(0),
+    previous_customer: z.number().default(0),
+    wabis: z.number().default(0),
+    walkin: z.number().default(0),
+    whatsapp: z.number().default(0),
+}).default({});
+
+const purposeSchema = z.object({
+    inquire: z.number().default(0),
+    purchase: z.number().default(0),
+    sales: z.number().default(0),
+    service_request: z.number().default(0),
+}).default({});
+
+const progressItemSchema = z.object({
+    _id: z.string().default(''),
+    count: z.number().default(0),
+    date: z.number().default(0), // timestamp
+});
+
+const labeledItemSchema = z.object({
+    label: z.string(),
+    count: z.number(),
+})
+
+const DashboardDataSchema = z.object({
+    taskStatus: taskStatusSchema,
+    enquireStatus: enquireStatusSchema,
+    enquireSource: enquireSourceSchema,
+    purpose: purposeSchema,
+    progress: z.array(labeledItemSchema).default([]),
+});
+
+export type DashboardData = z.infer<typeof DashboardDataSchema>;
+
+type ProgressItem = z.infer<typeof progressItemSchema>;
+
+type LabeledItem = z.infer<typeof labeledItemSchema>;
 
 function formatDateLabel(date: Date): string {
     return `${date.getDate()}-${date.getMonth() + 1}-${date.getFullYear()}`;
@@ -294,7 +284,7 @@ function compressProgress(
             const label = formatMonthLabel(date);
             monthlyMap.set(label, (monthlyMap.get(label) || 0) + item.count);
         }
-        return Array.from(monthlyMap.entries()).map(([label, count]) => ({label, count}));
+        return Array.from(monthlyMap.entries()).map(([label, count]) => (labeledItemSchema.parse({label, count})));
     }
 }
 
