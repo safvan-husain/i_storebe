@@ -1,52 +1,61 @@
 import {Request, Response} from 'express';
 import asyncHandler from "express-async-handler";
-import Lead from "../../models/Lead";
+import Lead, {ILead} from "../../models/Lead";
 import {onCatchError} from "../../middleware/error";
-import {Types} from "mongoose";
+import {FilterQuery, Types} from "mongoose";
 import {staticsFilterSchema} from "./validation";
 import Task from "../../models/Task";
 import {convertToIstMillie} from "../../utils/ist_time";
+import {TypedResponse} from "../../common/interface";
 
 export const getLeadsStatics = asyncHandler(
-    async (req: Request, res: Response) => {
+    async (req: Request, res: TypedResponse<DashboardData>) => {
         try {
-            if(!req.userId) {
+            if (!req.userId) {
                 res.status(401).json({message: "User id not found"});
                 return;
             }
-            let { startDate, endDate, managerId } = staticsFilterSchema.parse(req.query);
-            let manager ;
+            let {startDate, endDate, managerId} = staticsFilterSchema.parse(req.query);
+            let manager;
             if (req.privilege === 'staff') {
-                res.status(403).json({ message: "staffs not allowed not access analytics"});
+                const analytics = await _getLeadsAnalytics({
+                    startDate,
+                    endDate,
+                    handlerId: Types.ObjectId.createFromHexString(req.userId)
+                });
+                res.status(200).json(analytics);
                 return;
             }
-            if(req.privilege === 'manager') {
+            if (req.privilege === 'manager') {
                 manager = Types.ObjectId.createFromHexString(req.userId);
-            } else if(req.privilege === 'admin' && managerId) {
+            } else if (req.privilege === 'admin' && managerId) {
                 manager = Types.ObjectId.createFromHexString(managerId);
             }
-            const analytics = await _getLeadsAnalytics({ startDate, endDate, managerId: manager });
+            const analytics = await _getLeadsAnalytics({startDate, endDate, managerId: manager});
             res.status(200).json(analytics);
         } catch (e) {
-           onCatchError(e, res);
+            onCatchError(e, res);
         }
     }
 );
 
-const _getLeadsAnalytics = async ({startDate, endDate, managerId }: { startDate?: Date, endDate?: Date, managerId?: Types.ObjectId }) => {
-    let match: any = {};
+const _getLeadsAnalytics = async ({startDate, endDate, managerId, handlerId}: {
+    startDate: Date,
+    endDate: Date,
+    managerId?: Types.ObjectId,
+    handlerId?: Types.ObjectId
+}): Promise<DashboardData> => {
+    let match: FilterQuery<ILead> = {};
     //if start and end date provided, filter with them first.
-    if (startDate) {
-        match.createdAt = match.createdAt || {};
-        match.createdAt.$gte = startDate;
-    }
-    if (endDate) {
-        match.createdAt = match.createdAt || {};
-        match.createdAt.$lte = endDate;
-    }
+    match.createdAt = {
+        $gte: startDate,
+        $lte: endDate
+    };
 
-    if(managerId) {
+    if (managerId) {
         match.manager = managerId;
+    } else if (handlerId) {
+        match.handler = handlerId;
     }
 
     let pipeline = [];
@@ -54,7 +63,7 @@ const _getLeadsAnalytics = async ({startDate, endDate, managerId }: { startDate?
         pipeline.push({$match: match});
     }
     let result = await Lead.aggregate([
-         ...pipeline,
+        ...pipeline,
         {
             $facet: {
                 status: [
@@ -106,7 +115,7 @@ const _getLeadsAnalytics = async ({startDate, endDate, managerId }: { startDate?
         }
     ]);
     const status = result[0].status[0];
-    const progress = result[0].progress.map((e: any) => ({
+    let progress = result[0].progress.map((e: any) => ({
         ...e,
         date: new Date(e._id).getTime()
     }));
@@ -116,19 +125,22 @@ const _getLeadsAnalytics = async ({startDate, endDate, managerId }: { startDate?
         {
             $group: {
                 _id: null,
-                completed: { $sum: { $cond: [{ $eq: ["$isCompleted", true] }, 1, 0] }},
-                overDue: { $sum: { $cond: [{ $lt: ["$due", new Date(IstNowInMillie)] }, 1, 0]}},
-                total: { $sum: 1 }
+                completed: {$sum: {$cond: [{$eq: ["$isCompleted", true]}, 1, 0]}},
+                overDue: {$sum: {$cond: [{$lt: ["$due", new Date(IstNowInMillie)]}, 1, 0]}},
+                total: {$sum: 1}
             }
         }
     ]);
-    const taskData = tasks.length > 0 ? tasks[0] : { completed: 0, overDue: 0, total: 0 };
+    const taskData = tasks.length > 0 ? tasks[0] : {completed: 0, overDue: 0, total: 0};
     const taskStatus = {
         completed: taskData.completed,
         overDue: taskData.overDue,
         total: taskData.total,
         pending: taskData.total - (taskData.overDue + taskData.completed)
     };
+    if (startDate && endDate) {
+        progress = compressProgress(progress, startDate, endDate);
+    }
     return {
         taskStatus,
         enquireStatus: {
@@ -161,3 +173,128 @@ const _getLeadsAnalytics = async ({startDate, endDate, managerId }: { startDate?
         progress
     };
 }
+
+type DashboardData = {
+    taskStatus: {
+        completed: number;
+        overDue: number;
+        total: number;
+        pending: number;
+    };
+    enquireStatus: {
+        empty: number;
+        contacted: number;
+        interested: number;
+        lost: number;
+        new: number;
+        none: number;
+        pending: number;
+        quotation_shared: number;
+        visit_store: number;
+        won: number;
+    };
+    enquireSource: {
+        call: number;
+        facebook: number;
+        instagram: number;
+        previous_customer: number;
+        wabis: number;
+        walkin: number;
+        whatsapp: number;
+    };
+    purpose: {
+        inquire: number;
+        purchase: number;
+        sales: number;
+        service_request: number;
+    };
+    progress: {
+        _id: string;
+        count: number;
+        date: number; // assuming this is a timestamp (ms)
+    }[];
+};
+
+type ProgressItem = {
+    _id: string;      // format: YYYY-MM-DD
+    count: number;
+    date: number;     // timestamp
+};
+
+type LabeledItem = {
+    label: string;
+    count: number;
+};
+
+function formatDateLabel(date: Date): string {
+    return `${date.getDate()}-${date.getMonth() + 1}-${date.getFullYear()}`;
+}
+
+function formatWeekLabel(date: Date): string {
+    const monthNames = [
+        "January", "February", "March", "April", "May", "June",
+        "July", "August", "September", "October", "November", "December"
+    ];
+    const weekOfMonth = Math.ceil((date.getDate() + new Date(date.getFullYear(), date.getMonth(), 1).getDay()) / 7);
+    return `${monthNames[date.getMonth()]} ${weekOfMonth}th week ${date.getFullYear()}`;
+}
+
+function formatMonthLabel(date: Date): string {
+    const monthNames = [
+        "January", "February", "March", "April", "May", "June",
+        "July", "August", "September", "October", "November", "December"
+    ];
+    return `${monthNames[date.getMonth()]} ${date.getFullYear()}`;
+}
+
+function compressProgress(
+    progress: ProgressItem[],
+    startDate: Date,
+    endDate: Date
+): LabeledItem[] {
+    const dayInMs = 24 * 60 * 60 * 1000;
+    const rangeInDays = Math.floor((endDate.getTime() - startDate.getTime()) / dayInMs) + 1;
+
+    // Fill missing dates
+    const progressMap = new Map(progress.map(item => [item._id, item]));
+    const dailyFilled: ProgressItem[] = [];
+    for (let d = new Date(startDate); d <= endDate; d = new Date(d.getTime() + dayInMs)) {
+        const isoDate = d.toISOString().split("T")[0];
+        if (progressMap.has(isoDate)) {
+            dailyFilled.push(progressMap.get(isoDate)!);
+        } else {
+            dailyFilled.push({
+                _id: isoDate,
+                count: 0,
+                date: d.getTime(),
+            });
+        }
+    }
+
+    // Grouping logic
+    if (rangeInDays <= 30) {
+        return dailyFilled.map(item => ({
+            label: formatDateLabel(new Date(item.date)),
+            count: item.count,
+        }));
+    } else if (rangeInDays <= 90) {
+        // Weekly grouping
+        const weeklyMap = new Map<string, number>();
+        for (const item of dailyFilled) {
+            const date = new Date(item.date);
+            const label = formatWeekLabel(date);
+            weeklyMap.set(label, (weeklyMap.get(label) || 0) + item.count);
+        }
+        return Array.from(weeklyMap.entries()).map(([label, count]) => ({label, count}));
+    } else {
+        // Monthly grouping
+        const monthlyMap = new Map<string, number>();
+        for (const item of dailyFilled) {
+            const date = new Date(item.date);
+            const label = formatMonthLabel(date);
+            monthlyMap.set(label, (monthlyMap.get(label) || 0) + item.count);
+        }
+        return Array.from(monthlyMap.entries()).map(([label, count]) => ({label, count}));
+    }
+}
+

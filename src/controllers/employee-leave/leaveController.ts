@@ -4,7 +4,7 @@ import {onCatchError} from "../../middleware/error";
 import {z} from "zod";
 import Leave, {LeaveStatus, leaveStatusSchema} from "../../models/Leave";
 import {TypedResponse} from "../../common/interface";
-import {dateFiltersSchema, ObjectIdSchema, paginationSchema} from "../../common/types";
+import {optionalDateFiltersSchema, ObjectIdSchema, paginationSchema} from "../../common/types";
 import {Schema, Types} from "mongoose";
 
 export const applyLeave = asyncHandler(
@@ -43,7 +43,7 @@ export const getLeaves = async (req: Request, res: TypedResponse<ILeaveResponse[
     try {
         let data = z.object({
             userId: ObjectIdSchema.optional()
-        }).merge(paginationSchema).merge(dateFiltersSchema).parse(req.query);
+        }).merge(paginationSchema).merge(optionalDateFiltersSchema).parse(req.query);
         if (!req.userId) {
             res.status(401).json({message: "User not found"});
             return;

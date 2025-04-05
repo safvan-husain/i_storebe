@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import {ObjectIdSchema, paginationSchema, dateFiltersSchema} from "../../common/types";
+import {ObjectIdSchema, paginationSchema, optionalDateFiltersSchema} from "../../common/types";
 import {EnquireStatus, Purpose, callStatusSchema} from "../leads/validations";
 
 const categorySchema = z.enum(['call', 'sales', 'meeting'])
@@ -22,7 +22,7 @@ export const TaskFilterSchema = z.object({
     assigned: z.array(ObjectIdSchema).optional(),
     managers: z.array(ObjectIdSchema).optional(),
     category: categorySchema.optional(),
-}).merge(paginationSchema).merge(dateFiltersSchema);
+}).merge(paginationSchema).merge(optionalDateFiltersSchema);
 
 export const completeTaskSchema = z.object({
     id: ObjectIdSchema,

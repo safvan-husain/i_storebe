@@ -1,5 +1,5 @@
 import {z} from 'zod';
-import {ObjectIdSchema, paginationSchema, dateFiltersSchema} from "../../common/types";
+import {ObjectIdSchema, paginationSchema, optionalDateFiltersSchema} from "../../common/types";
 
 export const EnquireSource = z.enum(['call', 'facebook', 'instagram', 'previous customer', 'wabis', 'walkin', 'whatsapp']);
 export const Purpose = z.enum(['inquire', 'purchase', 'sales', 'service request']);
@@ -66,4 +66,4 @@ export const LeadFilterSchema = z.object({
     searchTerm: z.string().optional(),
     managers: z.array(ObjectIdSchema).optional(),
     staffs: z.array(ObjectIdSchema).optional(),
-}).merge(paginationSchema).merge(dateFiltersSchema);
+}).merge(paginationSchema).merge(optionalDateFiltersSchema);

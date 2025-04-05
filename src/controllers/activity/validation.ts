@@ -1,5 +1,5 @@
 import {z} from 'zod';
-import {dateFiltersSchema, ObjectIdSchema, paginationSchema} from "../../common/types";
+import {optionalDateFiltersSchema, ObjectIdSchema, paginationSchema} from "../../common/types";
 
 export const activityTypeSchema = z.enum(
     [
@@ -19,7 +19,7 @@ export const activityFilterSchema = z.object({
     //the lead will be used only on specific lead, it is not actually filtering.
     lead: ObjectIdSchema.optional(),
 })
-    .merge(paginationSchema).merge(dateFiltersSchema)
+    .merge(paginationSchema).merge(optionalDateFiltersSchema)
     .refine(e => {
             console.log(e);
             return (!(e.lead && Object.keys(e).length > 3)) || (e.lead && e.activityType);

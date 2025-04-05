@@ -1,5 +1,6 @@
 import {z} from "zod";
 import {Types} from "mongoose";
+import {AppError} from "../middleware/error";
 
 export const ObjectIdSchema = z
     .string()
@@ -13,7 +14,7 @@ export const paginationSchema = z.object({
 export const istUtcOffset = 19800000;
 
 //transforming from milliseconds to date from flutter app it will be IST so converting it into UTC, since mongodb use UTC by default.
-function transformDate(val: string | undefined): (Date | undefined) {
+function transformOptionalDate(val: string | undefined): (Date | undefined) {
     if (!val) {
         return undefined;
     }
@@ -24,19 +25,41 @@ function transformDate(val: string | undefined): (Date | undefined) {
     return new Date(millisecondInIst - istUtcOffset);
 }
 
-export const ISToUTCFromStringSchema = z.string().optional().refine(val => !(val && !/^-?\d+$/.test(val)), { message: "should be milliseconds since epoch"}).transform(transformDate);
+function transformDate(val: string ): Date {
+    let millisecondInIst = parseInt(val);
+    if (isNaN(millisecondInIst)) {
+        throw new AppError("Invalid number for Date on request string");
+    }
+    return new Date(millisecondInIst - istUtcOffset);
+}
 
-export const dateFiltersSchema = z.object({
-    startDate: ISToUTCFromStringSchema.transform(date => {
+export const IstToUtsOptionalFromStringSchema = z.string().optional().refine(val => !(val && !/^-?\d+$/.test(val)), { message: "should be milliseconds since epoch"}).transform(transformOptionalDate);
+export const IstToUtsFromStringSchema = z.string().refine(val => !(val && !/^-?\d+$/.test(val)), { message: "should be milliseconds since epoch"}).transform<Date>(transformDate);
+
+export const optionalDateFiltersSchema = z.object({
+    startDate: IstToUtsOptionalFromStringSchema.transform(date => {
         if (!date) return undefined;
 
         const startOfDay = new Date(date);
         startOfDay.setUTCHours(0, 0, 0, 0);
         return startOfDay;
     }),
-    endDate: ISToUTCFromStringSchema.transform((date: Date | undefined): Date | undefined => {
+    endDate: IstToUtsOptionalFromStringSchema.transform((date: Date | undefined): Date | undefined => {
         if (!date) return undefined;
 
+        const endOfDay = new Date(date);
+        endOfDay.setUTCHours(23, 59, 59, 999);
+        return endOfDay;
+    }),
+})
+
+export const dateFiltersSchema = z.object({
+    startDate: IstToUtsFromStringSchema.transform(date => {
+        const startOfDay = new Date(date);
+        startOfDay.setUTCHours(0, 0, 0, 0);
+        return startOfDay;
+    }),
+    endDate: IstToUtsFromStringSchema.transform((date: Date): Date => {
         const endOfDay = new Date(date);
         endOfDay.setUTCHours(23, 59, 59, 999);
         return endOfDay;

@@ -2,9 +2,9 @@ import { z } from 'zod';
 import {
     ObjectIdSchema,
     paginationSchema,
-    dateFiltersSchema,
+    optionalDateFiltersSchema,
     istUtcOffset,
-    ISToUTCFromStringSchema
+    IstToUtsOptionalFromStringSchema
 } from "../../common/types";
 
 
@@ -27,7 +27,7 @@ export const TargetCreateSchema = z.object({
 });
 
 export const TargetFilterSchema = z.object({
-    month: ISToUTCFromStringSchema.transform(val => {
+    month: IstToUtsOptionalFromStringSchema.transform(val => {
         if(!val) return  getMonthOnly();
         return getMonthOnly(val.getTime() + istUtcOffset);
     }),
