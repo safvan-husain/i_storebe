@@ -1,5 +1,4 @@
 import mongoose, {Document, Types} from 'mongoose';
-import {IUser} from './User';
 import {Category} from "../controllers/tasks/validation";
 
 export interface ITask extends Document {

@@ -151,7 +151,6 @@ export const updateLeadStatus = asyncHandler(async (req: Request, res: TypedResp
             requestedUser,
             updateData,
             lead,
-            taskId: req.body.taskId
         });
         res.status(200).json({
             _id: lead._id,
@@ -412,7 +411,7 @@ export const getLeadById = asyncHandler(async (req: Request, res: TypedResponse<
             manager: true,
         })
             .populate<{ handledBy: { username: string } }>('handledBy', 'username')
-            .populate<{ customer: ICustomer}>('customer').lean();
+            .populate<{ customer: ICustomer }>('customer').lean();
 
         // Check if lead exists
         if (!lead) {
@@ -599,7 +598,7 @@ export const internalLeadStatusUpdate = async ({requestedUser, lead, updateData,
     requestedUser: IUser,
     lead: ILead<any, IUser>,
     updateData: UpdateLeadStatus,
-    taskId: Types.ObjectId | string
+    taskId?: Types.ObjectId | string
 }): Promise<ILeadResponse> => {
     let activityType: ActivityType | undefined;
     let message = `${requestedUser.username} Changed `;
@@ -613,9 +612,10 @@ export const internalLeadStatusUpdate = async ({requestedUser, lead, updateData,
         //if won should reflect to target.
         if (updateData.enquireStatus === 'won') {
             await handleTarget({updater: requestedUser._id as unknown as ObjectId, lead});
-            await markTaskCompleted(taskId);
+            //since this function is used on both lead status update and task status update, updating specific task or all task for a lead.
+            await markTaskCompleted(taskId ? {taskId} : {leadId: lead._id});
         } else if (updateData.enquireStatus === 'lost') {
-            await markTaskCompleted(taskId);
+            await markTaskCompleted(taskId ? {taskId} : {leadId: lead._id});
         }
         await Activity.create({
             type: activityType,

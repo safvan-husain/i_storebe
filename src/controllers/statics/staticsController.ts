@@ -21,9 +21,9 @@ export const getLeadsStatics = asyncHandler(
                 return;
             }
             if(req.privilege === 'manager') {
-                manager = new Types.ObjectId(req.userId);
+                manager = Types.ObjectId.createFromHexString(req.userId);
             } else if(req.privilege === 'admin' && managerId) {
-                manager = new Types.ObjectId(managerId);
+                manager = Types.ObjectId.createFromHexString(managerId);
             }
             const analytics = await _getLeadsAnalytics({ startDate, endDate, managerId: manager });
             res.status(200).json(analytics);

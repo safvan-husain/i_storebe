@@ -3,8 +3,9 @@ import express from 'express';
 import {
   createTask,
   getTasks,
-  getTaskById,
-  updateTask, completeTask,
+  // getTaskById,
+  // updateTask,
+  completeTask,
 } from '../controllers/tasks/taskController';
 import { protect } from '../middleware/auth';
 
@@ -23,9 +24,9 @@ router.route('/filter')
 router.route('/complete')
     .post(completeTask);
 
-router.route('/:id')
-  .get(getTaskById)
-  .put(updateTask)
+// router.route('/:id')
+//   .get(getTaskById)
+//   .put(updateTask)
   // .delete(deleteTask);
 
 export default router;

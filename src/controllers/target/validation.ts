@@ -8,8 +8,8 @@ import {
 } from "../../common/types";
 
 
-function getMonthOnly(val: number) : Date {
-    let month = new Date(val);
+export function getMonthOnly(val?: number) : Date {
+    let month = val ? new Date(val) : new Date();
     //we only care about year and month.
     month.setUTCHours(0, 0, 0, 0);
     month.setUTCMonth(month.getMonth())
@@ -28,7 +28,7 @@ export const TargetCreateSchema = z.object({
 
 export const TargetFilterSchema = z.object({
     month: ISToUTCFromStringSchema.transform(val => {
-        if(!val) return  undefined;
+        if(!val) return  getMonthOnly();
         return getMonthOnly(val.getTime() + istUtcOffset);
     }),
 }).merge(paginationSchema);

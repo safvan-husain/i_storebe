@@ -9,6 +9,7 @@ import {convertToIstMillie} from "../../utils/ist_time";
 import User, {IUser} from "../../models/User";
 import Lead from "../../models/Lead";
 import {internalLeadStatusUpdate} from "../leads/leadController";
+import {TypedResponse} from "../../common/interface";
 
 //TODO: check all response are consistent.
 
@@ -72,7 +73,7 @@ export const createTask = asyncHandler(async (req: Request, res: Response) => {
 });
 
 // Get tasks with filters
-export const getTasks = asyncHandler(async (req: Request, res: Response) => {
+export const getTasks = asyncHandler(async (req: Request, res: TypedResponse<TaskResponse[]>) => {
     try {
         const {lead, assigned, startDate, endDate, skip, limit, managers, category} = TaskFilterSchema.parse(req.body);
 
@@ -121,12 +122,15 @@ export const getTasks = asyncHandler(async (req: Request, res: Response) => {
             .lean();
 
         res.status(200).json(tasks.map(e => ({
-            ...e,
             due: e.due.getTime(),
             assigned: e.assigned.username,
             createdAt: convertToIstMillie(e.createdAt),
-            updatedAt: undefined,
-            __v: undefined
+            _id: e._id.toString(),
+            lead: e.lead.toString(),
+            title: e.title ?? "None",
+            description: e.description ?? "None",
+            category: e.category,
+            isCompleted: e.isCompleted,
         })));
     } catch (error) {
         console.log(error);
@@ -134,59 +138,59 @@ export const getTasks = asyncHandler(async (req: Request, res: Response) => {
     }
 });
 
-// Get a single task by ID
-export const getTaskById = asyncHandler(async (req: Request, res: Response) => {
-    const task = await Task.findById(req.params.id)
-        .populate('lead', 'customer')
-        .populate<{ lead: { customer: { name: string, phone: string } }}>('lead.customer', 'name phone')
-        .populate<{ assigned: { name: string, phone: string } }>('assigned', 'name phone');
-
-    if (!task) {
-        res.status(404);
-        throw new Error('Task not found');
-    }
-
-    res.status(200).json({
-        success: true,
-        data: task
-    });
-});
+// // Get a single task by ID
+// export const getTaskById = asyncHandler(async (req: Request, res: Response) => {
+//     const task = await Task.findById(req.params.id)
+//         .populate('lead', 'customer')
+//         .populate<{ lead: { customer: { name: string, phone: string } }}>('lead.customer', 'name phone')
+//         .populate<{ assigned: { name: string, phone: string } }>('assigned', 'name phone');
+//
+//     if (!task) {
+//         res.status(404);
+//         throw new Error('Task not found');
+//     }
+//
+//     res.status(200).json({
+//         success: true,
+//         data: task
+//     });
+// });
 
 // Update a task
-export const updateTask = asyncHandler(async (req: Request, res: Response) => {
-    try {
-        const updates = updateSchema.parse(req.body);
+// export const updateTask = asyncHandler(async (req: Request, res: Response) => {
+//     try {
+//         const updates = updateSchema.parse(req.body);
+//
+//         let task: any = await Task.findByIdAndUpdate(
+//             req.params.id,
+//             {$set: updates},
+//             {new: true, runValidators: true}
+//         );
+//
+//         if (!task) {
+//             res.status(404).json({message: 'Task not found'});
+//             return;
+//         }
+//         task = task.toObject();
+//
+//         // Create an activity for the task update
+//         await Activity.create({
+//             activator: req.userId,
+//             lead: task!.lead,
+//             task: task!._id,
+//             action: 'updated_task',
+//         });
+//
+//         res.status(200).json({
+//             ...task,
+//             createdAt: convertToIstMillie(task.createdAt),
+//         });
+//     } catch (error) {
+//         onCatchError(error, res);
+//     }
+// });
 
-        let task: any = await Task.findByIdAndUpdate(
-            req.params.id,
-            {$set: updates},
-            {new: true, runValidators: true}
-        );
-
-        if (!task) {
-            res.status(404).json({message: 'Task not found'});
-            return;
-        }
-        task = task.toObject();
-
-        // Create an activity for the task update
-        await Activity.create({
-            activator: req.userId,
-            lead: task!.lead,
-            task: task!._id,
-            action: 'updated_task',
-        });
-
-        res.status(200).json({
-            ...task,
-            createdAt: convertToIstMillie(task.createdAt),
-        });
-    } catch (error) {
-        onCatchError(error, res);
-    }
-});
-
-export const completeTask = asyncHandler(async (req: Request, res: Response) => {
+export const completeTask = asyncHandler(async (req: Request, res: TypedResponse<{ newTask?: TaskResponse, message: string }>) => {
     try {
         const data = completeTaskSchema.parse(req.body);
 
@@ -250,17 +254,17 @@ export const completeTask = asyncHandler(async (req: Request, res: Response) => 
         let newTask;
         if (data.followUpDate) {
             if(await Task.findOne({ lead: task.lead, isCompleted: false})) {
-                res.status(400).json({message: "Task already exists for this lead"});
+                res.status(200).json({message: "Updated, but Task already exists for this lead"});
                 return;
             }
-            newTask = await Task.create({
+            newTask = await (await Task.create({
                 lead: task.lead,
                 assigned: task.assigned,
                 due: data.followUpDate,
                 category: task.category,
                 title: `${task.category} back ${lead.customer.name}`,
                 description: `${task.category} back ${lead.customer.name}`,
-            });
+            })).populate<{ assigned: { username: string}}>('assigned', 'username');
             // Create an activity for the task update
             await Activity.create({
                 activator: req.userId,
@@ -269,22 +273,53 @@ export const completeTask = asyncHandler(async (req: Request, res: Response) => 
                 action: `${user.username} created follow-up`,
                 type: 'followup_added',
             });
+
+            let responseData: TaskResponse =   {
+                _id: newTask._id.toString(),
+                lead: newTask.lead.toString(),
+                title: newTask.title ?? "None",
+                description: newTask.description ?? "None",
+                category: newTask.category,
+                due: newTask.due.getTime(),
+                assigned: newTask.assigned.username,
+                isCompleted: newTask.isCompleted,
+                createdAt: convertToIstMillie(newTask.createdAt),
+            } ;
+
+            res.status(200).json({ newTask: responseData, message: "Updated successfully" });
+            return;
         }
-
-        newTask = newTask?.toObject();
-
-        let responseData = newTask ?  {
-            ...newTask,
-            createdAt: convertToIstMillie(newTask!.createdAt),
-        } : undefined;
-
-        res.status(200).json({ newTask: responseData, message: "Updated successfully" });
+        res.status(200).json({message: "Updated successfully"});
     } catch (error) {
         onCatchError(error, res);
     }
 });
 
-export const markTaskCompleted = async (taskId: Types.ObjectId | string): Promise<boolean> => {
-    const result = await Task.findByIdAndUpdate(taskId, {isCompleted: true});
-    return result != null;
+type TaskOrLeadParam =
+    | { taskId: Types.ObjectId | string; leadId?: never }
+    | { taskId?: never; leadId: Types.ObjectId | string };
+
+export const markTaskCompleted = async ({taskId, leadId}: TaskOrLeadParam): Promise<boolean> => {
+    //if passed lead id, update all task related to that lead,
+    if (leadId) {
+        //this is useful when updating status of lead to won or lost, which mean there should not be no more task for that lead.
+        const lead = await Task.updateMany({ lead: leadId, isCompleted: false }, { isCompleted: true });
+        return lead != null;
+    } else {
+        //if task id passed only update that specific.
+        const result = await Task.findByIdAndUpdate(taskId, {isCompleted: true});
+        return result != null;
+    }
 }
+
+type TaskResponse = {
+    _id: string;
+    lead: string;
+    assigned: string;
+    title: string;
+    description: string;
+    category: string;
+    due: number;
+    isCompleted: boolean;
+    createdAt: number;
+};
