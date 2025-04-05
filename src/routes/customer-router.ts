@@ -2,7 +2,7 @@ import { Router } from 'express';
 
 const router = Router();
 
-router.route('/generate-excel');
+router.post('/generate-excel', generateCustomerExcelFile);
 router.route('/list-excel');
 router.route('/download-excel')
 
