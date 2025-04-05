@@ -3,17 +3,20 @@ import { Request } from 'express';
 import { TypedResponse } from "../../common/interface";
 
 import * as ExcelJS from 'exceljs';
-import Customer from '../../models/Customer';
+import Customer, {ICustomer} from '../../models/Customer';
+import {optionalDateQueryFiltersSchema} from "../../common/types";
+import {FilterQuery} from "mongoose";
+import {onCatchError} from "../../middleware/error";
 
 export const generateCustomerExcelFile = async (req: Request, res: TypedResponse<any>) => {
     try {
-        const { startDate, endDate } = req.body;
+        const { startDate, endDate } = optionalDateQueryFiltersSchema.parse(req.query);
         
-        const query: any = {};
+        const query: FilterQuery<ICustomer> = {};
         if (startDate && endDate) {
             query.createdAt = {
-                $gte: new Date(startDate),
-                $lte: new Date(endDate)
+                $gte: startDate,
+                $lte: endDate
             };
         }
 
@@ -48,6 +51,6 @@ export const generateCustomerExcelFile = async (req: Request, res: TypedResponse
         await workbook.xlsx.write(res);
         res.end();
     } catch (error) {
-        res.status(500).json({ message: 'Error generating excel file' });
+        onCatchError(error, res);
     }
 }

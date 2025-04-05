@@ -1,5 +1,5 @@
 import  { z } from 'zod';
-import {optionalDateFiltersSchema, ObjectIdSchema, dateFiltersSchema} from "../../common/types";
+import {optionalDateQueryFiltersSchema, ObjectIdSchema, dateFiltersSchema} from "../../common/types";
 
 export const staticsFilterSchema = z.object({
     managerId: ObjectIdSchema.optional(),

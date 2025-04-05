@@ -1,9 +1,8 @@
 import { Router } from 'express';
+import {generateCustomerExcelFile} from "../controllers/customer/customer-controller";
 
 const router = Router();
 
-router.post('/generate-excel', generateCustomerExcelFile);
-router.route('/list-excel');
-router.route('/download-excel')
+router.get('/generate-excel', generateCustomerExcelFile);
 
 export { router as customerRouter };

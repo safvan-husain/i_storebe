@@ -2,7 +2,7 @@ import { z } from 'zod';
 import {
     ObjectIdSchema,
     paginationSchema,
-    optionalDateFiltersSchema,
+    optionalDateQueryFiltersSchema,
     istUtcOffset,
     IstToUtsOptionalFromStringSchema
 } from "../../common/types";

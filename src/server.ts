@@ -14,6 +14,7 @@ import {generateToken} from "./utils/jwtUtils";
 import {targetRoutes} from "./routes/targetRoutes";
 import {leaveRouter} from "./routes/leave-routes";
 import {onCatchError} from "./middleware/error";
+import {customerRouter} from "./routes/customer-router";
 require("dotenv").config();
 
 const PORT = 3000;
@@ -38,6 +39,7 @@ app.use('/api/activity', activityRoutes);
 app.use('/api/analytics', staticsRoutes);
 app.use('/api/target', targetRoutes);
 app.use('/api/leave', leaveRouter);
+app.use('/api/data', customerRouter);
 
 const random10DigitNumber = (): number => {
     return Math.floor(1000000000 + Math.random() * 9000000000);

@@ -36,7 +36,7 @@ function transformDate(val: string ): Date {
 export const IstToUtsOptionalFromStringSchema = z.string().optional().refine(val => !(val && !/^-?\d+$/.test(val)), { message: "should be milliseconds since epoch"}).transform(transformOptionalDate);
 export const IstToUtsFromStringSchema = z.string().refine(val => !(val && !/^-?\d+$/.test(val)), { message: "should be milliseconds since epoch"}).transform<Date>(transformDate);
 
-export const optionalDateFiltersSchema = z.object({
+export const optionalDateQueryFiltersSchema = z.object({
     startDate: IstToUtsOptionalFromStringSchema.transform(date => {
         if (!date) return undefined;
 
