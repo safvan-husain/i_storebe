@@ -21,6 +21,7 @@ import {markTaskCompleted} from "../tasks/taskController";
 import {ObjectIdSchema} from "../../common/types";
 import {z} from "zod";
 import {TypedResponse} from "../../common/interface";
+import Task from "../../models/Task";
 
 
 //search Note to see the notes for specific sections
@@ -224,6 +225,12 @@ export const getLeads = asyncHandler(async (req: Request, res: TypedResponse<Get
         }
 
         if ((filter.staffs?.length ?? 0) > 0) matchStage.handledBy = {$in: filter.staffs!.map(e => new Types.ObjectId(e))};
+
+        if (filter.queryType === 'spotlight') {
+            //to show leads that are not task assigned.
+            const taskedLeadIds = (await Task.find({}, { lead: true }).lean()).map(e => e.lead);
+            matchStage._id = {$nin: taskedLeadIds};
+        }
 
         // Role-based filtering
         if (req.privilege === 'manager' && (filter.staffs?.length ?? 0) === 0) { //when manager filter with staffs, it is unnecessary to filter with manager.

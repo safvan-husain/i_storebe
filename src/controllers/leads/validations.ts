@@ -66,4 +66,5 @@ export const LeadFilterSchema = z.object({
     searchTerm: z.string().optional(),
     managers: z.array(ObjectIdSchema).optional(),
     staffs: z.array(ObjectIdSchema).optional(),
+    queryType: z.enum(['regular', 'spotlight']).optional().default('regular')
 }).merge(paginationSchema).merge(optionalDateQueryFiltersSchema);
