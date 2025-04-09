@@ -32,7 +32,7 @@ export const getActivity = asyncHandler(
 
                 if (req.privilege === 'manager' && (query.staff?.length ?? 0) < 1) {
                     const staffs = await User.find({manager: req.userId}, {_id: true}).lean();
-                    query.activator = {$in: staffs.map(e => e._id)};
+                    query.activator = {$in: [...staffs.map(e => e._id), req.userId]};
                 }
 
                 //when requested by staff only provide his activities.
@@ -41,7 +41,7 @@ export const getActivity = asyncHandler(
                 }
             }
             if (reqFilter.activityType) query.type =  { $in: reqFilter.activityType };
-            console.log(query)
+            console.log("query acit", query)
             const activities = await Activity.find(query, {updatedAt: false, __v: false})
                 .skip(reqFilter.skip)
                 .limit(reqFilter.limit)
