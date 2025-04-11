@@ -1,7 +1,7 @@
 import {z} from 'zod';
 import {ObjectIdSchema, paginationSchema, optionalDateQueryFiltersSchema} from "../../common/types";
 
-export const EnquireSource = z.enum(['call', 'facebook', 'instagram', 'previous customer', 'wabis', 'walkin', 'whatsapp']);
+export const EnquireSource = z.enum(['call', 'facebook', 'instagram', 'previous customer', 'wabis', 'walkin', 'whatsapp', 'call center']);
 export const Purpose = z.enum(['inquire', 'purchase', 'sales', 'service request']);
 export const EnquireStatus = z.enum(['empty', 'contacted', 'interested', 'lost', 'new', 'none', 'pending', 'quotation shared', 'visit store', 'won']);
 export const Type = z.enum(['fresh', 'used']);

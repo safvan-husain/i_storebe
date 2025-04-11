@@ -17,6 +17,7 @@ const createAdminUser = async () => {
         username: "admin",
         password: 'admin123', // Will be hashed automatically by the pre-save hook
         privilege: 'admin',
+        name: "Admin"
       });
       console.log('Admin created');
     }
@@ -30,7 +31,8 @@ const createAdminUser = async () => {
         username: "super_admin",
         password: 'admin123', // Will be hashed automatically by the pre-save hook
         privilege: 'admin',
-        secondPrivilege: 'super'
+        secondPrivilege: 'super',
+        name: "Super-Admin"
       });
       user.token = generateToken(user);
       await user.save();

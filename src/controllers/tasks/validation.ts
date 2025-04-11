@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import {ObjectIdSchema, paginationSchema, optionalDateQueryFiltersSchema} from "../../common/types";
 import {EnquireStatus, Purpose, callStatusSchema} from "../leads/validations";
+import {enquireStatusSchema} from "../statics/staticsController";
 
 const categorySchema = z.enum(['call', 'sales', 'meeting'])
 
@@ -33,3 +34,18 @@ export const completeTaskSchema = z.object({
     //TODO: check ist or utc date.
     followUpDate: z.number().optional().transform(val => val ? new Date(val) : undefined),
 })
+
+export const callReportsResponseSchema = z.object({
+    completedCalls: z.number().default(0),
+    callStatusStatics: z.object({
+        connected: z.number().default(0),
+        notConnected: z.number().default(0),
+        actionPending: z.number().default(0),
+        notUpdated: z.number().default(0),
+        followUpScheduled: z.number().default(0),
+        callBackRequested: z.number().default(0),
+    }).default({}),
+    leadStatus: enquireStatusSchema
+})
+
+export type CallReportsRes = z.infer<typeof callReportsResponseSchema>;

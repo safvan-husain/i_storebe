@@ -111,7 +111,6 @@ const _getLeadsAnalytics = async ({startDate, endDate, managerId, handlerId}: {
                     }
                 ]
             }
-
         }
     ]);
     if(result.length === 0) {
@@ -161,7 +160,8 @@ const taskStatusSchema = z.object({
     total: z.number().default(0),
     pending: z.number().default(0),
 }).default({});
-const enquireStatusSchema = z.object({
+
+export const enquireStatusSchema = z.object({
         empty: z.number().default(0),
         contacted: z.number().default(0),
         interested: z.number().default(0),

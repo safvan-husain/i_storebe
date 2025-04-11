@@ -2,14 +2,23 @@ import {Request, Response} from 'express';
 import Task, {ITask} from '../../models/Task';
 import Activity from '../../models/Activity';
 import asyncHandler from 'express-async-handler';
-import mongoose, {Types} from 'mongoose';
-import {completeTaskSchema, TaskCreateSchema, TaskFilterSchema, updateSchema} from './validation';
+import mongoose, {FilterQuery, Types} from 'mongoose';
+import {
+    CallReportsRes,
+    callReportsResponseSchema,
+    completeTaskSchema,
+    TaskCreateSchema,
+    TaskFilterSchema,
+    updateSchema
+} from './validation';
 import {onCatchError} from "../../middleware/error";
 import {convertToIstMillie} from "../../utils/ist_time";
 import User, {IUser} from "../../models/User";
 import Lead from "../../models/Lead";
 import {internalLeadStatusUpdate} from "../leads/leadController";
 import {TypedResponse} from "../../common/interface";
+import {z} from "zod";
+import {IstToUtsOptionalFromStringSchema, ObjectIdSchema, UserPrivilegeSchema} from "../../common/types";
 
 //TODO: check all response are consistent.
 
@@ -117,7 +126,7 @@ export const getTasks = asyncHandler(async (req: Request, res: TypedResponse<Tas
         let tasks = await Task.find(query)
             .skip(skip)
             .limit(limit)
-            .populate<{ assigned: { username: string} }>('assigned', 'username')
+            .populate<{ assigned: { username: string } }>('assigned', 'username')
             .sort({due: 1}) // Sort by due date ascending
             .lean();
 
@@ -190,12 +199,15 @@ export const getTasks = asyncHandler(async (req: Request, res: TypedResponse<Tas
 //     }
 // });
 
-export const completeTask = asyncHandler(async (req: Request, res: TypedResponse<{ newTask?: TaskResponse, message: string }>) => {
+export const completeTask = asyncHandler(async (req: Request, res: TypedResponse<{
+    newTask?: TaskResponse,
+    message: string
+}>) => {
     try {
         const data = completeTaskSchema.parse(req.body);
 
         let user = await User.findById(req.userId);
-        if(!user) {
+        if (!user) {
             res.status(404).json({message: 'User not found'});
             return;
         }
@@ -206,7 +218,7 @@ export const completeTask = asyncHandler(async (req: Request, res: TypedResponse
             {new: true, runValidators: true}
         );
 
-        if(!task) {
+        if (!task) {
             res.status(404).json({message: 'Task not found'});
             return;
         }
@@ -218,7 +230,7 @@ export const completeTask = asyncHandler(async (req: Request, res: TypedResponse
             return;
         }
 
-        if(data.enquireStatus || data.callStatus || data.purpose) {
+        if (data.enquireStatus || data.callStatus || data.purpose) {
             await internalLeadStatusUpdate({
                 requestedUser: user,
                 lead: lead,
@@ -253,7 +265,7 @@ export const completeTask = asyncHandler(async (req: Request, res: TypedResponse
         //when follow-up task is adding, create task and update on activity
         let newTask;
         if (data.followUpDate) {
-            if(await Task.findOne({ lead: task.lead, isCompleted: false})) {
+            if (await Task.findOne({lead: task.lead, isCompleted: false})) {
                 res.status(200).json({message: "Updated, but Task already exists for this lead"});
                 return;
             }
@@ -264,7 +276,7 @@ export const completeTask = asyncHandler(async (req: Request, res: TypedResponse
                 category: task.category,
                 title: `${task.category} back ${lead.customer.name}`,
                 description: `${task.category} back ${lead.customer.name}`,
-            })).populate<{ assigned: { username: string}}>('assigned', 'username');
+            })).populate<{ assigned: { username: string } }>('assigned', 'username');
             // Create an activity for the task update
             await Activity.create({
                 activator: req.userId,
@@ -274,7 +286,7 @@ export const completeTask = asyncHandler(async (req: Request, res: TypedResponse
                 type: 'followup_added',
             });
 
-            let responseData: TaskResponse =   {
+            let responseData: TaskResponse = {
                 _id: newTask._id.toString(),
                 lead: newTask.lead.toString(),
                 title: newTask.title ?? "None",
@@ -284,9 +296,9 @@ export const completeTask = asyncHandler(async (req: Request, res: TypedResponse
                 assigned: newTask.assigned.username,
                 isCompleted: newTask.isCompleted,
                 createdAt: convertToIstMillie(newTask.createdAt),
-            } ;
+            };
 
-            res.status(200).json({ newTask: responseData, message: "Updated successfully" });
+            res.status(200).json({newTask: responseData, message: "Updated successfully"});
             return;
         }
         res.status(200).json({message: "Updated successfully"});
@@ -294,6 +306,128 @@ export const completeTask = asyncHandler(async (req: Request, res: TypedResponse
         onCatchError(error, res);
     }
 });
+
+export const callReports = async (req: Request, res: TypedResponse<CallReportsRes>) => {
+    try {
+        if (!req.userId) {
+            res.status(404).json({message: 'User not found'});
+            return;
+        }
+        const query = z.object({
+            managerId: ObjectIdSchema.optional(),
+            startDate: IstToUtsOptionalFromStringSchema,
+            endDate: IstToUtsOptionalFromStringSchema,
+            staffId: ObjectIdSchema.optional(),
+        }).parse(req.body);
+
+        let dbMatchQuery: FilterQuery<ITask> = {
+            isCompleted: true,
+        };
+
+        if ((query.managerId || req.privilege === 'manager') && !query.staffId) {
+            const managerId = query.managerId ?? req.userId;
+            const staffIds = (await User.find({manager: managerId}, {_id: 1}).lean()).map(e => e._id);
+            dbMatchQuery.assigned = {$in: staffIds};
+        } else if (query.staffId) {
+            dbMatchQuery.assigned = query.staffId;
+        }
+
+        if (query.startDate || query.endDate) {
+            dbMatchQuery.due = {};
+            if (query.startDate) dbMatchQuery.due.$gte = query.startDate
+            if (query.endDate) dbMatchQuery.due.$lte = query.endDate
+        }
+
+        const data = await Task.aggregate([
+            {
+                $match: dbMatchQuery
+            },
+            {
+                $lookup: {
+                    from: 'leads',
+                    localField: 'lead',
+                    foreignField: '_id',
+                    as: 'lead'
+                }
+            },
+            {
+                $unwind: {
+                    path: '$lead',
+                    preserveNullAndEmptyArrays: true
+                }
+            },
+            {
+                $group: {
+                    _id: null,
+                    total: { $sum: 1 },
+
+                    // EnquireStatus counts
+                    enquire_empty: { $sum: { $cond: [{ $eq: ["$lead.enquireStatus", "empty"] }, 1, 0] } },
+                    enquire_contacted: { $sum: { $cond: [{ $eq: ["$lead.enquireStatus", "contacted"] }, 1, 0] } },
+                    enquire_interested: { $sum: { $cond: [{ $eq: ["$lead.enquireStatus", "interested"] }, 1, 0] } },
+                    enquire_lost: { $sum: { $cond: [{ $eq: ["$lead.enquireStatus", "lost"] }, 1, 0] } },
+                    enquire_new: { $sum: { $cond: [{ $eq: ["$lead.enquireStatus", "new"] }, 1, 0] } },
+                    enquire_none: { $sum: { $cond: [{ $eq: ["$lead.enquireStatus", "none"] }, 1, 0] } },
+                    enquire_pending: { $sum: { $cond: [{ $eq: ["$lead.enquireStatus", "pending"] }, 1, 0] } },
+                    enquire_quotation_shared: { $sum: { $cond: [{ $eq: ["$lead.enquireStatus", "quotation shared"] }, 1, 0] } },
+                    enquire_visit_store: { $sum: { $cond: [{ $eq: ["$lead.enquireStatus", "visit store"] }, 1, 0] } },
+                    enquire_won: { $sum: { $cond: [{ $eq: ["$lead.enquireStatus", "won"] }, 1, 0] } },
+
+                    // CallStatus counts
+                    call_not_updated: { $sum: { $cond: [{ $eq: ["$lead.callStatus", "not-updated"] }, 1, 0] } },
+                    call_connected: { $sum: { $cond: [{ $eq: ["$lead.callStatus", "connected"] }, 1, 0] } },
+                    call_busy: { $sum: { $cond: [{ $eq: ["$lead.callStatus", "busy"] }, 1, 0] } },
+                    call_switched_off: { $sum: { $cond: [{ $eq: ["$lead.callStatus", "switched-off"] }, 1, 0] } },
+                    call_call_back_requested: { $sum: { $cond: [{ $eq: ["$lead.callStatus", "call_back-requested"] }, 1, 0] } },
+                    call_follow_up_scheduled: { $sum: { $cond: [{ $eq: ["$lead.callStatus", "follow-up-scheduled"] }, 1, 0] } },
+                    call_not_reachable: { $sum: { $cond: [{ $eq: ["$lead.callStatus", "not-reachable"] }, 1, 0] } },
+                    call_connected_on_whatsapp: { $sum: { $cond: [{ $eq: ["$lead.callStatus", "connected-on-whatsapp"] }, 1, 0] } },
+                }
+            },
+            {
+                $project: {
+                    _id: 0,
+                    completedCalls: "$total", // or however you define "completed"
+
+                    callStatusStatics: {
+                        connected: "$call_connected",
+                        notConnected: {
+                            $add: [
+                                "$call_busy",
+                                "$call_switched_off",
+                                "$call_not_reachable"
+                            ]
+                        },
+                        followUpScheduled: "$call_follow_up_scheduled",
+                        callBackRequested: "$call_call_back_requested",
+                        notUpdated: "$call_not_updated"
+                    },
+                    leadStatus: {
+                        empty: "$enquire_empty",
+                        contacted: "$enquire_contacted",
+                        interested: "$enquire_interested",
+                        lost: "$enquire_lost",
+                        new: "$enquire_new",
+                        none: "$enquire_none",
+                        pending: "$enquire_pending",
+                        quotation_shared: "$enquire_quotation_shared",
+                        visit_store: "$enquire_visit_store",
+                        won: "$enquire_won"
+                    }
+                }
+            }
+
+        ]);
+
+        if (data.length === 0) {
+            res.status(200).json(callReportsResponseSchema.parse({}));
+            return;
+        }
+        res.status(200).json(callReportsResponseSchema.parse(data[0]));
+    } catch (e) {
+        onCatchError(e, res);
+    }
+};
 
 type TaskOrLeadParam =
     | { taskId: Types.ObjectId | string; leadId?: never }
@@ -303,7 +437,7 @@ export const markTaskCompleted = async ({taskId, leadId}: TaskOrLeadParam): Prom
     //if passed lead id, update all task related to that lead,
     if (leadId) {
         //this is useful when updating status of lead to won or lost, which mean there should not be no more task for that lead.
-        const lead = await Task.updateMany({ lead: leadId, isCompleted: false }, { isCompleted: true });
+        const lead = await Task.updateMany({lead: leadId, isCompleted: false}, {isCompleted: true});
         return lead != null;
     } else {
         //if task id passed only update that specific.
