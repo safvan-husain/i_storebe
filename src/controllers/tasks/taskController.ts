@@ -33,7 +33,7 @@ export const createTask = asyncHandler(async (req: Request, res: Response) => {
         //manager or admin
         let assigner = await User.findById(req.userId, {name: true}).lean();
 
-        const {assigned, ...rest} = TaskCreateSchema.parse(req.body);
+        let {assigned, ...rest} = TaskCreateSchema.parse(req.body);
         let tTask = await Task.findOne({lead: rest.lead, isCompleted: false});
         if (tTask) {
             res.status(401).json({message: "Task already exists for this lead"});
@@ -61,6 +61,7 @@ export const createTask = asyncHandler(async (req: Request, res: Response) => {
             res.status(400).json({ message: "Assigned is required"});
             return;
         } else {
+            assigned = req.userId;
             staff = await User.findById(assigned, {name: true}).lean();
         }
 
