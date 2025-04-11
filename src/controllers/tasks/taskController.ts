@@ -18,7 +18,12 @@ import Lead from "../../models/Lead";
 import {internalLeadStatusUpdate} from "../leads/leadController";
 import {TypedResponse} from "../../common/interface";
 import {z} from "zod";
-import {IstToUtsOptionalFromStringSchema, ObjectIdSchema, UserPrivilegeSchema} from "../../common/types";
+import {
+    IstToUtsOptionalFromStringSchema,
+    ObjectIdSchema,
+    optionalDateQueryFiltersSchema,
+    UserPrivilegeSchema
+} from "../../common/types";
 
 //TODO: check all response are consistent.
 
@@ -315,10 +320,10 @@ export const callReports = async (req: Request, res: TypedResponse<CallReportsRe
         }
         const query = z.object({
             managerId: ObjectIdSchema.optional(),
-            startDate: IstToUtsOptionalFromStringSchema,
-            endDate: IstToUtsOptionalFromStringSchema,
+            // startDate: IstToUtsOptionalFromStringSchema,
+            // endDate: IstToUtsOptionalFromStringSchema,
             staffId: ObjectIdSchema.optional(),
-        }).parse(req.body);
+        }).merge(optionalDateQueryFiltersSchema).parse(req.query);
 
         let dbMatchQuery: FilterQuery<ITask> = {
             isCompleted: true,
@@ -331,13 +336,12 @@ export const callReports = async (req: Request, res: TypedResponse<CallReportsRe
         } else if (query.staffId) {
             dbMatchQuery.assigned = query.staffId;
         }
-
         if (query.startDate || query.endDate) {
             dbMatchQuery.updatedAt = {};
             if (query.startDate) dbMatchQuery.updatedAt.$gte = query.startDate
             if (query.endDate) dbMatchQuery.updatedAt.$lte = query.endDate
         }
-
+        console.log(query.endDate);
         const data = await Task.aggregate([
             {
                 $match: dbMatchQuery

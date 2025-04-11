@@ -58,8 +58,7 @@ export const getLeaves = async (req: Request, res: TypedResponse<ILeaveResponse[
         }
         //only super admin can see all the leaves.
         if(req.privilege === "admin" && req.secondPrivilege === "regular") {
-            res.status(200).json({ message: "Not allowed"});
-            return;
+            matchStage.requester = Types.ObjectId.createFromHexString(req.userId)
         }
 
         const pipeline = [];
