@@ -5,7 +5,6 @@ export interface ITask extends Document {
     _id: Types.ObjectId;
     lead: mongoose.Types.ObjectId;
     due: Date;
-    // timestamp: Date;
     assigned: mongoose.Types.ObjectId;
     category: Category;
     title?: string;
@@ -38,10 +37,6 @@ const TaskSchema = new mongoose.Schema(
             type: Date,
             required: true,
         },
-        // timestamp: {
-        //     type: Date,
-        //     required: true,
-        // },
         isCompleted: {
             type: Boolean,
             default: false,
@@ -51,6 +46,10 @@ const TaskSchema = new mongoose.Schema(
         timestamps: true,
     }
 );
+
+TaskSchema.index({ isCompleted: 1 });
+TaskSchema.index({ assigned: 1 });
+
 
 const Task = mongoose.model<ITask>('Task', TaskSchema);
 

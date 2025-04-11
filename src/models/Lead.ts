@@ -80,6 +80,10 @@ const LeadSchema = new mongoose.Schema(
     }
 );
 
+LeadSchema.index({ manager: 1 });
+LeadSchema.index({ handledBy: 1 });
+LeadSchema.index({ createdBy: 1 });
+
 const Lead = mongoose.model<ILead>('Lead', LeadSchema);
 
 export default Lead;
