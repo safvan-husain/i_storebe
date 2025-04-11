@@ -54,7 +54,15 @@ export const createTask = asyncHandler(async (req: Request, res: Response) => {
             rest.description = rest.title;
         }
 
-        let staff = await User.findById(assigned, {name: true}).lean();
+        let staff;
+        if(req.privilege === 'staff') {
+            staff = assigner;
+        } else if (!assigned) {
+            res.status(400).json({ message: "Assigned is required"});
+            return;
+        } else {
+            staff = await User.findById(assigned, {name: true}).lean();
+        }
 
         if (!staff || !assigner) {
             res.status(404).json({message: 'User not found (assigner or staff)'});
@@ -152,57 +160,6 @@ export const getTasks = asyncHandler(async (req: Request, res: TypedResponse<Tas
     }
 });
 
-// // Get a single task by ID
-// export const getTaskById = asyncHandler(async (req: Request, res: Response) => {
-//     const task = await Task.findById(req.params.id)
-//         .populate('lead', 'customer')
-//         .populate<{ lead: { customer: { name: string, phone: string } }}>('lead.customer', 'name phone')
-//         .populate<{ assigned: { name: string, phone: string } }>('assigned', 'name phone');
-//
-//     if (!task) {
-//         res.status(404);
-//         throw new Error('Task not found');
-//     }
-//
-//     res.status(200).json({
-//         success: true,
-//         data: task
-//     });
-// });
-
-// Update a task
-// export const updateTask = asyncHandler(async (req: Request, res: Response) => {
-//     try {
-//         const updates = updateSchema.parse(req.body);
-//
-//         let task: any = await Task.findByIdAndUpdate(
-//             req.params.id,
-//             {$set: updates},
-//             {new: true, runValidators: true}
-//         );
-//
-//         if (!task) {
-//             res.status(404).json({message: 'Task not found'});
-//             return;
-//         }
-//         task = task.toObject();
-//
-//         // Create an activity for the task update
-//         await Activity.create({
-//             activator: req.userId,
-//             lead: task!.lead,
-//             task: task!._id,
-//             action: 'updated_task',
-//         });
-//
-//         res.status(200).json({
-//             ...task,
-//             createdAt: convertToIstMillie(task.createdAt),
-//         });
-//     } catch (error) {
-//         onCatchError(error, res);
-//     }
-// });
 
 export const completeTask = asyncHandler(async (req: Request, res: TypedResponse<{
     newTask?: TaskResponse,

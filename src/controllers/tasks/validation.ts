@@ -9,7 +9,7 @@ export type Category = z.infer<typeof categorySchema>
 
 export const TaskCreateSchema = z.object({
     lead: ObjectIdSchema,
-    assigned: ObjectIdSchema,
+    assigned: ObjectIdSchema.optional(),
     category: categorySchema,
     due: z.number().transform(val => new Date(val)),
     title: z.string().optional(),
