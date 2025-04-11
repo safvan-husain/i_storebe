@@ -49,6 +49,7 @@ const TaskSchema = new mongoose.Schema(
 
 TaskSchema.index({ isCompleted: 1 });
 TaskSchema.index({ assigned: 1 });
+TaskSchema.index({ updatedAt: -1 });
 
 
 const Task = mongoose.model<ITask>('Task', TaskSchema);

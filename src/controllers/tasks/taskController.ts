@@ -333,9 +333,9 @@ export const callReports = async (req: Request, res: TypedResponse<CallReportsRe
         }
 
         if (query.startDate || query.endDate) {
-            dbMatchQuery.due = {};
-            if (query.startDate) dbMatchQuery.due.$gte = query.startDate
-            if (query.endDate) dbMatchQuery.due.$lte = query.endDate
+            dbMatchQuery.updatedAt = {};
+            if (query.startDate) dbMatchQuery.updatedAt.$gte = query.startDate
+            if (query.endDate) dbMatchQuery.updatedAt.$lte = query.endDate
         }
 
         const data = await Task.aggregate([
