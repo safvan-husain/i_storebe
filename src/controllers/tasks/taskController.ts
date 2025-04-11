@@ -57,11 +57,11 @@ export const createTask = asyncHandler(async (req: Request, res: Response) => {
         let staff;
         if(req.privilege === 'staff') {
             staff = assigner;
+            assigned = req.userId;
         } else if (!assigned) {
             res.status(400).json({ message: "Assigned is required"});
             return;
         } else {
-            assigned = req.userId;
             staff = await User.findById(assigned, {name: true}).lean();
         }
 
