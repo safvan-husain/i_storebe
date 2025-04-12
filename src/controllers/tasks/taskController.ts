@@ -30,8 +30,11 @@ import {
 // Create a new task
 export const createTask = asyncHandler(async (req: Request, res: Response) => {
     try {
-        //manager or admin
-        let assigner = await User.findById(req.userId, {name: true}).lean();
+        if(!req.userId) {
+            res.status(404).json({message: 'User not found'});
+            return;
+        }
+        let assigner = await User.findById(req.userId, {username: true}).lean();
 
         let {assigned, ...rest} = TaskCreateSchema.parse(req.body);
         let tTask = await Task.findOne({lead: rest.lead, isCompleted: false});
@@ -82,12 +85,11 @@ export const createTask = asyncHandler(async (req: Request, res: Response) => {
         task.createdAt = convertToIstMillie(task.createdAt);
         task.assigned = staff.username;
         // Create an activity record for this task
-        await Activity.create({
+        await Activity.createActivity({
             type: 'task_added',
-            activator: req.userId, // Assuming the authenticated user is stored in req.user
-            lead: rest.lead,
+            activator: Types.ObjectId.createFromHexString(req.userId!), // Assuming the authenticated user is stored in req.user
+            lead: Types.ObjectId.createFromHexString(rest.lead),
             task: task._id,
-            action: `${assigner.username} created task`,
         });
         res.status(201).json(task);
     } catch (error) {
