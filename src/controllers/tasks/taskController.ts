@@ -391,6 +391,54 @@ export const callReports = async (req: Request, res: TypedResponse<CallReportsRe
     }
 };
 
+export const getTodayTaskStat = async (req: Request, res: TypedResponse<{ dueToday: number, overDue: number}>) => {
+    try {
+        if (!req.userId) {
+            res.status(404).json({message: 'User not found'});
+            return;
+        }
+        let dbQuery: FilterQuery<ITask> = {
+            isCompleted: false,
+        }
+
+        if(req.privilege === UserPrivilegeSchema.enum.staff) {
+            //only his for staff
+            dbQuery.assigned = req.userId;
+        } else if (req.privilege === UserPrivilegeSchema.enum.manager) {
+            //show all staff's for manager
+            const staffIds = await User.find({ manager: req.userId }, {_id: true }).lean().then(e => {
+                return e.map(e => e._id);
+            })
+            dbQuery.assigned = {$in: staffIds};
+        }
+        //show every for admin, hence no filter with assigned.
+
+        const unCompleteTasks = await Task.find(dbQuery, { due: true }).lean();
+
+        const now = new Date();
+        const startOfToday = new Date(now);
+        startOfToday.setUTCHours(0, 0, 0, 0);
+
+        const startOfTomorrow = new Date(startOfToday);
+        startOfTomorrow.setDate(startOfTomorrow.getDate() + 1);
+
+        let dueToday = 0;
+        let overDue = 0;
+        for (const task of unCompleteTasks) {
+            const taskDate = new Date(task.due);
+            if (taskDate >= startOfToday && taskDate < startOfTomorrow) {
+                dueToday++;
+            }
+            if (taskDate.getTime() < startOfToday.getTime()) {
+                overDue++;
+            }
+        }
+        res.status(200).json({dueToday, overDue});
+    } catch (e) {
+        onCatchError(e, res);
+    }
+}
+
 type TaskOrLeadParam =
     | { taskId: Types.ObjectId | string; leadId?: never }
     | { taskId?: never; leadId: Types.ObjectId | string };
