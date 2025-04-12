@@ -191,10 +191,15 @@ export const getLeads = asyncHandler(async (req: Request, res: TypedResponse<Get
         // Apply filters if provided
         if (filter.searchTerm) {
             const searchRegex = {$regex: filter.searchTerm, $options: 'i'};
-            matchStage.$or = [
-                {name: searchRegex},
-                {phone: searchRegex}
-            ];
+            const customerIds = await Customer.find({
+                $or: [
+                    {name: searchRegex},
+                    {phone: searchRegex}
+                ]
+            }, { _id: true }).lean().then(e => {
+                return e.map(e => e._id);
+            })
+            matchStage.customer = { $in: customerIds };
         }
 
         if (filter.startDate && filter.endDate) {
