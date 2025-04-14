@@ -68,3 +68,13 @@ export const LeadFilterSchema = z.object({
     staffs: z.array(ObjectIdSchema).optional(),
     queryType: z.enum(['regular', 'spotlight']).optional().default('regular')
 }).merge(paginationSchema).merge(optionalDateQueryFiltersSchema);
+
+export const inActivateUserRequestSchema = z.object({
+    id: ObjectIdSchema,
+    isActive: z.boolean()
+})
+
+export const changeUserPasswordRequestSchema = z.object({
+    id: ObjectIdSchema,
+    password: z.string().min(6, {message: 'Password must be at least 6 characters long'})
+})

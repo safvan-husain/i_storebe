@@ -15,6 +15,9 @@ export interface IUser extends Document {
     comparePassword(candidatePassword: string): Promise<boolean>;
     createdAt: Date;
     token?:string;
+    isActive: boolean;
+    //when admin change password, force user to login again.
+    isNewPassword: boolean;
 }
 
 interface UserModel extends Model<IUser> {
@@ -58,6 +61,8 @@ const UserSchema = new mongoose.Schema(
             type: mongoose.Schema.Types.ObjectId,
             ref: 'User',
         },
+        isActive: { type: Boolean, default: true},
+        isNewPassword: { type: Boolean, default: true}
     },
     {
         timestamps: true,

@@ -1,7 +1,7 @@
 import express from 'express';
 import { createUser, getUsers, getUserById } from '../controllers/auth/authController';
 import { protect } from '../middleware/auth';
-import {getManagers, getStaffs} from "../controllers/user/usersController";
+import {changeUserPassword, getManagers, getStaffs, updateActiveStatus} from "../controllers/user/usersController";
 
 const router = express.Router();
 
@@ -12,6 +12,8 @@ router
 
 router.route('/manager').get(protect, getManagers);
 router.route('/staff').get(protect, getStaffs);
+router.route('/update-active-status').put(protect, updateActiveStatus)
+router.route('/change-password').put(protect, changeUserPassword)
 
 router
   .route('/:id')
