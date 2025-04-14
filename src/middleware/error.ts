@@ -16,11 +16,11 @@ export const errorHandler = (err: Error, _: Request, res: Response) => {
 export class AppError {
 
   statusCode: number;
-  body: { message: string };
+  body: { message: string, error?: any };
 
-  constructor(message: string, statusCode?: number) {
+  constructor(message: string, statusCode?: number, error?: any) {
     this.statusCode = statusCode ?? 500;
-    this.body = { message };
+    this.body = { message, error };
   }
 }
 

@@ -58,11 +58,15 @@ export const changeUserPassword = async (req: Request, res: TypedResponse<any>) 
             return;
         }
         const {id, password } = changeUserPasswordRequestSchema.parse(req.body);
-        let user = await User.findByIdAndUpdate(id, {password, isNewPassword: false});
-        if(!user) {
-            res.status(404).json({message: "user not found"});
+        //don't use findByIdAndUpdate, since it by bass pre save hook, hence no hashing for password.
+        const user = await User.findById(id);
+        if (!user) {
+            res.status(404).json({ message: "User not found" });
             return;
         }
+        user.password = password;
+        user.isNewPassword = true;
+        await user.save();
         res.status(200).json({message: "password changed"});
     } catch (e) {
         onCatchError(e, res);

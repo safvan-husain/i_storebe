@@ -78,3 +78,23 @@ export const changeUserPasswordRequestSchema = z.object({
     id: ObjectIdSchema,
     password: z.string().min(6, {message: 'Password must be at least 6 characters long'})
 })
+
+const staffSchema = z.object({
+    _id: z.any(), // replace with z.string() or z.instanceof(ObjectId) if using mongoose
+    username: z.string(),
+    privilege: z.string(),
+    secondPrivilege: z.string().optional(), // in case it's nullable or optional
+    isActive: z.boolean().default(true),
+});
+
+export const managerWithStaffsSchema = z.object({
+    _id: z.any(),
+    username: z.string(),
+    privilege: z.string(),
+    secondPrivilege: z.string().optional(),
+    isActive: z.boolean().default(true),
+    staffs: z.array(staffSchema),
+});
+
+export type ManagerWithStaffs = z.infer<typeof managerWithStaffsSchema>;
+

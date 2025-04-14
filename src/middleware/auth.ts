@@ -44,10 +44,10 @@ export const protect = async (req: Request, res: Response, next: NextFunction) =
         if (!user) {
             res.status(401).json({message: 'Not authorized, user not found'});
             return;
-        } else if (!user.isActive) {
+        } else if (!(user.isActive ?? true)) {
             res.status(401).json({message: 'Not authorized, user is inactive'});
             return;
-        } else if (!user.isNewPassword) {
+        } else if ((user.isNewPassword ?? false)) {
             res.status(401).json({message: 'Not authorized, password has changed, please login again'});
             return;
         }

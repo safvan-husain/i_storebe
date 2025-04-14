@@ -1,13 +1,15 @@
 import {Request, Response} from 'express';
-import User from '../../models/User';
+import User, {IUser} from '../../models/User';
 import {generateToken} from '../../utils/jwtUtils';
 import asyncHandler from 'express-async-handler';
 import {loginSchema, UserRequestSchema} from './validation';
 import {onCatchError} from '../../middleware/error';
-import {Types} from 'mongoose';
+import {FilterQuery, Types} from 'mongoose';
 import {ObjectIdSchema, SecondUserPrivilege, UserPrivilege, UserPrivilegeSchema} from "../../common/types";
 import {TypedResponse} from "../../common/interface";
 import {z} from "zod";
+import {ManagerWithStaffs, managerWithStaffsSchema} from "../leads/validations";
+import {runtimeValidation} from "../../utils/validation";
 
 interface UserResponse {
     username: string;
@@ -120,45 +122,83 @@ export const createUser = asyncHandler(async (req: Request, res: TypedResponse<U
     }
 });
 
-export const getUsers = asyncHandler(async (req: Request, res: TypedResponse<UserResponse[]>) => {
-    if(!req.userId) {
-        res.status(401).json({message: "requested user not found"});
-        return;
-    }
-    let filter = z.object({
-        type: UserPrivilegeSchema.exclude(['admin']).optional()
-    }).parse(req.query);
-    let managerId;
-    if(req.privilege === "staff") {
-        let requester = await User.findById(req.userId, { manager: true }).lean();
-        if(!requester) {
-            res.status(401).json({message: "User not found"});
+export const getUsers = asyncHandler(async (req: Request, res: TypedResponse<ManagerWithStaffs[]>) => {
+    try {
+        if (!req.userId) {
+            res.status(401).json({message: "requested user not found"});
             return;
         }
-        managerId = requester.manager;
-    } else if (req.privilege === 'manager') {
-        managerId = req.userId;
+        let filter = z.object({
+            type: UserPrivilegeSchema.exclude(['admin']).optional()
+        }).parse(req.query);
+        let managerId : Types.ObjectId | undefined;
+        if (req.privilege === "staff") {
+            let requester = await User.findById(req.userId, {manager: true}).lean();
+            if (!requester) {
+                res.status(401).json({message: "User not found"});
+                return;
+            }
+            managerId = requester.manager;
+        } else if (req.privilege === 'manager') {
+            managerId = Types.ObjectId.createFromHexString(req.userId);
+        }
+        let query: FilterQuery<IUser> = {}
+        if (managerId) {
+            query.$or = [{manager: managerId}, {_id: managerId}]
+        }
+        query.privilege = {$ne: 'admin'}
+        if (filter.type) {
+            query.privilege = filter.type;
+        }
+
+        const users: ManagerWithStaffs[] = await User.aggregate([
+            {
+                $match: query
+            },
+            {
+                $project: {
+                    username: 1,
+                    _id: 1,
+                    privilege: 1,
+                    secondPrivilege: 1,
+                    manager: 1,
+                    isActive: 1,
+                }
+            },
+            {
+                $group: {
+                    _id: "$manager",
+                    staffs: {
+                        $push: "$$ROOT"
+                    }
+                }
+            },
+            {
+                $lookup: {
+                    from: "users",
+                    localField: "_id",
+                    foreignField: "_id",
+                    as: "manager"
+                }
+            },
+            {
+                $unwind: "$manager"
+            },
+            {
+                $project: {
+                    username: "$manager.username",
+                    _id: "$_id",
+                    privilege: "$manager.privilege",
+                    secondPrivilege: "$manager.secondPrivilege",
+                    isActive: "$manager.isActive",
+                    staffs: 1
+                }
+            }
+        ]);
+        res.status(200).json(runtimeValidation(managerWithStaffsSchema, users as any));
+    } catch (e) {
+        onCatchError(e, res);
     }
-    let query: any = {}
-    if(managerId) {
-        query.$or = [ { manager: managerId }, { _id: managerId }]
-    }
-    query.privilege = { $ne: 'admin' }
-    if(filter.type) {
-        query.privilege = filter.type;
-    }
-    const users = await User.find(query, {
-        username: true,
-        privilege: true,
-        manager: true,
-        secondPrivilege: true,
-    }).lean();
-    res.status(200).json(users.map(e => ({
-            username: e.username,
-            _id: e._id.toString(),
-        privilege: e.privilege,
-        secondPrivilege: e.secondPrivilege
-    })));
 });
 
 export const getUserById = asyncHandler(async (req: Request, res: TypedResponse<UserResponse>) => {
