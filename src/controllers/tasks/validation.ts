@@ -3,7 +3,7 @@ import {ObjectIdSchema, paginationSchema, optionalDateQueryFiltersSchema} from "
 import {EnquireStatus, Purpose, callStatusSchema} from "../leads/validations";
 import {enquireStatusSchema} from "../statics/staticsController";
 
-const categorySchema = z.enum(['call', 'sales', 'meeting'])
+export const categorySchema = z.enum(['call', 'sales', 'meeting'])
 
 export type Category = z.infer<typeof categorySchema>
 

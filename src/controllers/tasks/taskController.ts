@@ -5,7 +5,7 @@ import asyncHandler from 'express-async-handler';
 import mongoose, {FilterQuery, Types} from 'mongoose';
 import {
     CallReportsRes,
-    callReportsResponseSchema,
+    callReportsResponseSchema, Category, categorySchema,
     completeTaskSchema,
     TaskCreateSchema,
     TaskFilterSchema,
@@ -393,7 +393,7 @@ export const callReports = async (req: Request, res: TypedResponse<CallReportsRe
     }
 };
 
-export const getTodayTaskStat = async (req: Request, res: TypedResponse<{ dueToday: number, overDue: number}>) => {
+export const getTodayTaskStat = async (req: Request, res: TypedResponse<{ dueToday: number, overDue: number, callDueToday: number, callOverDue: number}>) => {
     try {
         if (!req.userId) {
             res.status(404).json({message: 'User not found'});
@@ -415,7 +415,9 @@ export const getTodayTaskStat = async (req: Request, res: TypedResponse<{ dueTod
         }
         //show every for admin, hence no filter with assigned.
 
-        const unCompleteTasks = await Task.find(dbQuery, { due: true }).lean();
+        const unCompleteTasks = await Task
+            .find(dbQuery, { due: true, category: true })
+            .lean<{ due: Date, category: Category }[]>();
 
         const now = new Date();
         const startOfToday = new Date(now);
@@ -426,16 +428,23 @@ export const getTodayTaskStat = async (req: Request, res: TypedResponse<{ dueTod
 
         let dueToday = 0;
         let overDue = 0;
+        let callDueToday = 0;
+        let callOverDue = 0;
         for (const task of unCompleteTasks) {
             const taskDate = new Date(task.due);
             if (taskDate >= startOfToday && taskDate < startOfTomorrow) {
+                if (task.category === categorySchema.enum.call) {
+                    callDueToday++;
+                }
                 dueToday++;
-            }
-            if (taskDate.getTime() < startOfToday.getTime()) {
+            } else if (taskDate.getTime() < startOfToday.getTime()) {
+                if (task.category === categorySchema.enum.call) {
+                    callOverDue++;
+                }
                 overDue++;
             }
         }
-        res.status(200).json({dueToday, overDue});
+        res.status(200).json({dueToday, overDue, callDueToday, callOverDue});
     } catch (e) {
         onCatchError(e, res);
     }
