@@ -35,7 +35,7 @@ export const updateActiveStatus = async (req: Request, res: TypedResponse<any>) 
             res.status(403).json({message: "user id not found"});
             return;
         }
-        if(req.privilege !== UserPrivilegeSchema.enum.admin) {
+        if(req.privilege === UserPrivilegeSchema.enum.staff) {
             res.status(403).json({ message: "Not authorized not access this api"})
             return;
         }
@@ -53,7 +53,7 @@ export const updateActiveStatus = async (req: Request, res: TypedResponse<any>) 
 
 export const changeUserPassword = async (req: Request, res: TypedResponse<any>) => {
     try {
-        if(req.privilege !== UserPrivilegeSchema.enum.admin) {
+        if(req.privilege === UserPrivilegeSchema.enum.staff) {
             res.status(403).json({ message: "Not authorized not access this api"})
             return;
         }
