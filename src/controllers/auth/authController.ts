@@ -55,7 +55,7 @@ export const loginUser = asyncHandler(async (req: Request, res: Response) => {
 export const createUser = asyncHandler(async (req: Request, res: TypedResponse<UserResponse>) => {
     try {
         let {username, privilege, manager, ...rest} = UserRequestSchema.parse(req.body);
-
+        username = username.trim();
         // Validate requester permissions
         // const admin = await User.findById(req.userId);
         if (!['admin', 'manager'].includes(req?.privilege ?? "")) {
