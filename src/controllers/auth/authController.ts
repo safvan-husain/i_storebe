@@ -34,6 +34,10 @@ export const loginUser = asyncHandler(async (req: Request, res: Response) => {
             res.status(401).json({message: 'incorrect password'});
             return;
         }
+        //when able to pass, set this, so allow access to other apis. using protect.
+        user.isNewPassword = false;
+        await user.save();
+
         let userObject: any = user.toObject();
         delete userObject.updatedAt;
         delete userObject.createdAt;

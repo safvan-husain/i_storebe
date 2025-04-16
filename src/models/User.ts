@@ -62,7 +62,7 @@ const UserSchema = new mongoose.Schema(
             ref: 'User',
         },
         isActive: { type: Boolean, default: true},
-        isNewPassword: { type: Boolean, default: true}
+        isNewPassword: { type: Boolean, default: false }
     },
     {
         timestamps: true,
