@@ -15,13 +15,17 @@ import {targetRoutes} from "./routes/targetRoutes";
 import {leaveRouter} from "./routes/leave-routes";
 import {onCatchError} from "./middleware/error";
 import {customerRouter} from "./routes/customer-router";
-require("dotenv").config();
+import {initializeApp} from "firebase-admin/app";
+import {credential} from "firebase-admin";
+import serviceAccount from "./secret/serviceAccountKey.json";
 
+require("dotenv").config();
 const PORT = 3000;
 
 const app = express();
 
 connectDb().catch(err => console.log(err));
+initializeApp({credential: credential.cert(serviceAccount as unknown as any)});
 app.use(express.urlencoded({ extended: true }));
 app.use(cors());
 app.use(express.json());

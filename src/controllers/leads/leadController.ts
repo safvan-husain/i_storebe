@@ -22,6 +22,7 @@ import {ObjectIdSchema} from "../../common/types";
 import {z} from "zod";
 import {TypedResponse} from "../../common/interface";
 import Task from "../../models/Task";
+import {createNotificationForUsers} from "../../services/notification-services";
 
 
 //search Note to see the notes for specific sections
@@ -508,7 +509,7 @@ export const transferLead = asyncHandler(async (req: Request, res: Response) => 
 });
 
 const internalLeadTransfer = async ({lead, transferTo, requester}: {
-    lead: ILead<any, any>,
+    lead: ILead<ICustomer, any>,
     transferTo: string,
     requester: IUser
 }): Promise<{ errorMessage?: string, lead?: ILead<any, any>, transferToName?: string }> => {
@@ -519,6 +520,7 @@ const internalLeadTransfer = async ({lead, transferTo, requester}: {
     if (user.privilege === "admin") {
         return {errorMessage: "Cannot transfer to admin"}
     }
+    await createNotificationForUsers("New Lead",  `Name: ${lead.customer?.name}}`,  lead._id.toString(),  user._id.toString());
     lead.handledBy = user._id;
     if (user.privilege === "manager") {
         lead.manager = user._id;
