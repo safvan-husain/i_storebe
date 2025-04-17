@@ -19,8 +19,8 @@ export const getNotifications = asyncHandler(
             const notifications = await Notification
                 .find({assigned: req.userId}, {title: 1, description: 1, lead: 1, createdAt: 1})
                 .skip(skip).limit(limit)
-                .lean<{ title: string, description: string, lead: string, createdAt: number }[]>();
-            res.status(200).json(notifications);
+                .lean<{ title: string, description: string, lead: string, createdAt: Date }[]>();
+            res.status(200).json(notifications.map(e => ({...e, createdAt: e.createdAt.getTime()})));
         } catch (error) {
             console.log("error ar getNotification", error);
             res.status(500).json({message: "Internal server error"});
