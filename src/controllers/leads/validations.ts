@@ -36,11 +36,11 @@ const LeadData = z.object({
 })
 
 export const updateLeadStatusSchema = z.object({
-    transferTo: ObjectIdSchema.optional()
+    transferTo: z.string().optional()
 }).merge(LeadStatus.partial()).refine(
     (data) => Object.keys(data).length > 0,
     {
-        message: "At least one field (source, enquireStatus, or purpose, callStatus) must be provided.",
+        message: "At least one field must be provided.",
     }
 );
 

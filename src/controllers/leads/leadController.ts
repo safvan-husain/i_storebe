@@ -512,7 +512,7 @@ const internalLeadTransfer = async ({lead, transferTo, requester}: {
     transferTo: string,
     requester: IUser
 }): Promise<{ errorMessage?: string, lead?: ILead<any, any>, transferToName?: string }> => {
-    let user = await User.findById(transferTo, {username: true, privilege: true});
+    let user = await User.findOne({ username: transferTo }, {username: true, privilege: true}).lean<{ username: string, privilege: string, _id: Types.ObjectId }>();
     if (!user) {
         return {errorMessage: "Transfer user not found"}
     }

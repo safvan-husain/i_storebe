@@ -23,7 +23,7 @@ export const loginUser = asyncHandler(async (req: Request, res: Response) => {
     try {
         const {username, password} = loginSchema.parse(req.body);
 
-        const user = await User.findOne({username});
+        const user = await User.findOne({username: username.trim() });
         if (!user) {
             res.status(401).json({message: 'user does not exist'});
             return;
