@@ -21,9 +21,13 @@ interface UserResponse {
 
 export const loginUser = asyncHandler(async (req: Request, res: Response) => {
     try {
-        const {username, password} = loginSchema.parse(req.body);
+        const {username, password, fcmToken} = loginSchema.parse(req.body);
+        console.log(process.env.EMAIL_USER, process.env.EMAIL_PASSWORD);
+        await wishBirthDay({
+            email: "m.safvan27@gmail.com", dob: new Date(), name: "Sfan"
+        });
 
-        const user = await User.findOne({username: username.trim() });
+        const user = await User.findOne({username: username.trim()});
         if (!user) {
             res.status(401).json({message: 'user does not exist'});
             return;
@@ -36,6 +40,7 @@ export const loginUser = asyncHandler(async (req: Request, res: Response) => {
         }
         //when able to pass, set this, so allow access to other apis. using protect.
         user.isNewPassword = false;
+        if (fcmToken) user.fcmToken = fcmToken;
         await user.save();
 
         let userObject: any = user.toObject();
@@ -51,6 +56,29 @@ export const loginUser = asyncHandler(async (req: Request, res: Response) => {
         onCatchError(error, res);
     }
 });
+
+// Define a schema for validating the request body
+const updateFcmTokenSchema = z.object({
+    fcmToken: z.string().trim(), // New FCM token
+});
+
+export const updateFcmToken = async (req: Request, res: TypedResponse<any>) => {
+    try {
+        const {fcmToken} = updateFcmTokenSchema.parse(req.body);
+
+        const user = await User.findByIdAndUpdate(req.userId, {fcmToken});
+
+        if (!user) {
+            return res.status(404).json({message: 'User not found'});
+        }
+
+        return res.status(200).json({
+            message: 'FCM token updated successfully',
+        });
+    } catch (error) {
+        onCatchError(error, res);
+    }
+};
 
 export const createUser = asyncHandler(async (req: Request, res: TypedResponse<UserResponse>) => {
     try {

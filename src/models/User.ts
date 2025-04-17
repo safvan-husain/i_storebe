@@ -18,6 +18,7 @@ export interface IUser extends Document {
     isActive: boolean;
     //when admin change password, force user to login again.
     isNewPassword: boolean;
+    fcmToken?: string
 }
 
 interface UserModel extends Model<IUser> {
@@ -37,9 +38,13 @@ const UserSchema = new mongoose.Schema(
         },
         username: {
             type: String,
-            // required: true,
+            required: true,
+            unique: true,
         },
         token: {
+            type: String,
+        },
+        fcmToken: {
             type: String,
         },
         password: {

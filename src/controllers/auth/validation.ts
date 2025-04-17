@@ -13,4 +13,5 @@ export const UserRequestSchema = z.object({
 export const loginSchema = z.object({
   username: z.string(), // Adjust min/max based on phone format requirements
   password: z.string().min(8), // Ensure a minimum length for security
+  fcmToken: z.string().optional()
 });
