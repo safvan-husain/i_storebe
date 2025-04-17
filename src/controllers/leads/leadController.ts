@@ -520,7 +520,7 @@ const internalLeadTransfer = async ({lead, transferTo, requester}: {
     if (user.privilege === "admin") {
         return {errorMessage: "Cannot transfer to admin"}
     }
-    await createNotificationForUsers("New Lead",  `Name: ${lead.customer?.name}}`,  lead._id.toString(),  user._id.toString());
+    await createNotificationForUsers("New Lead",  `Name: ${lead.customer?.name}`,  lead._id.toString(),  user._id.toString());
     lead.handledBy = user._id;
     if (user.privilege === "manager") {
         lead.manager = user._id;
