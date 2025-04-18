@@ -78,7 +78,7 @@ export const getActivity = asyncHandler(
             res.status(200).json(activities.map(e => {
                         return ({
                                 ...e,
-                                createdAt: e.createdAt,
+                                createdAt: e.createdAt.getTime(),
                                 activator: e.activator.username,
                                 task: e.task ? {
                                     ...e.task,

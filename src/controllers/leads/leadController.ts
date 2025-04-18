@@ -684,7 +684,7 @@ export const internalLeadStatusUpdate = async ({requestedUser, lead, updateData,
         email: customer.email,
         address: customer.address,
         dob: customer.dob?.getTime(),
-        createdAt: convertToIstMillie(lead.createdAt),
+        createdAt: lead.createdAt.getTime(),
     };
 }
 
