@@ -5,7 +5,7 @@ import {
   getLeads,
   getLeadById,
   updateLead,
-  updateLeadStatus, transferLead
+  updateLeadStatus, transferLead, getTransferableEmployees
 } from '../controllers/leads/leadController';
 import { protect } from '../middleware/auth';
 
@@ -20,6 +20,7 @@ router
 router.route('/filter').post(protect, getLeads);
 router.route('/transfer').post(protect, transferLead)
 router.route('/status/:id').put(protect, updateLeadStatus);
+router.route('/transferable-users').get(protect, getTransferableEmployees);
 
 router
   .route('/:id')

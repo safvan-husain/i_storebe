@@ -21,7 +21,7 @@ import {z} from "zod";
 import {
     IstToUtsOptionalFromStringSchema,
     ObjectIdSchema,
-    optionalDateQueryFiltersSchema,
+    optionalDateQueryFiltersSchema, secondUserPrivilegeSchema,
     UserPrivilegeSchema
 } from "../../common/types";
 
@@ -122,6 +122,7 @@ export const getTasks = asyncHandler(async (req: Request, res: TypedResponse<Tas
             //even if admin make request without manager or staff specified, get all staffs
             let users = await User.find(staffQuery, {}).lean();
             staffs = users.map(e => e._id);
+            staffs.push(req.userId)
         }
 
         const query: any = {
@@ -449,6 +450,8 @@ export const getTodayTaskStat = async (req: Request, res: TypedResponse<{ dueTod
         onCatchError(e, res);
     }
 }
+
+
 
 type TaskOrLeadParam =
     | { taskId: Types.ObjectId | string; leadId?: never }

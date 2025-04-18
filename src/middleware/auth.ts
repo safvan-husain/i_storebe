@@ -2,6 +2,7 @@ import {Request, Response, NextFunction} from 'express';
 import {verifyToken} from '../utils/jwtUtils';
 import {SecondUserPrivilege, UserPrivilege} from '../common/types';
 import User from "../models/User";
+import {Types} from "mongoose";
 
 // // Extend Express Request type to include user
 declare global {
@@ -10,6 +11,7 @@ declare global {
             userId?: string;
             privilege: UserPrivilege;
             secondPrivilege: SecondUserPrivilege;
+            manager?: Types.ObjectId;
         }
     }
 }
@@ -38,8 +40,10 @@ export const protect = async (req: Request, res: Response, next: NextFunction) =
         req.secondPrivilege = decoded.secondPrivilege ?? "regular";
 
         const user = await User
-            .findById(req.userId, {_id: true, isActive: true, isNewPassword: true})
-            .lean<{ _id: true, isActive: true, isNewPassword: true }>();
+            .findById(req.userId, {_id: true, isActive: true, isNewPassword: true, manager: true })
+            .lean<{ _id: Types.ObjectId, isActive: boolean, isNewPassword: boolean, manager: Types.ObjectId  }>();
+
+        req.manager = user?.manager;
 
         if (!user) {
             res.status(401).json({message: 'Not authorized, user not found'});

@@ -1,5 +1,5 @@
 import {Request, Response} from 'express';
-import mongoose, {ObjectId, Types} from 'mongoose';
+import mongoose, {FilterQuery, ObjectId, Types} from 'mongoose';
 import asyncHandler from 'express-async-handler';
 import Lead, {ILead} from '../../models/Lead';
 import User, {IUser} from '../../models/User';
@@ -596,6 +596,41 @@ export const updateLead = asyncHandler(async (req: Request, res: Response) => {
         onCatchError(error, res);
     }
 });
+
+export const getTransferableEmployees = async (req: Request, res: TypedResponse<string[]>) => {
+    try {
+        let query: FilterQuery<IUser> = {};
+
+        if (req.secondPrivilege === 'call-center' || req.privilege === 'manager') {
+            //call center should be able to transfer to other manager's
+            //manager's should be able to transfer to other manager's
+            query.manager = { $exists: false }
+        } else if (req.privilege === 'staff') {
+            //staff should be able to transfer to his manager and peer staffs
+            query.manager = req.manager;
+            query.$or = [
+                {
+                    manager: req.manager
+                },
+                {
+                    _id: req.manager
+                }
+            ];
+            query._id = { $ni: req.userId }
+        }
+        if(req.privilege === 'manager') {
+            //manager should be able to transfer to all his staffs
+            query.manager = req.userId;
+        }
+        const users = await User
+            .find(query, { username: true })
+            .lean<{ username: string }[]>()
+            .then(e => e.map(e => e.username));
+        res.status(200).json(users);
+    } catch (e) {
+        onCatchError(e, res);
+    }
+}
 
 export function getUpdateStatusMessage<T extends EnquireSourceType | PurposeType | EnquireStatusType>(
     category: 'source' | 'purpose' | 'status',
