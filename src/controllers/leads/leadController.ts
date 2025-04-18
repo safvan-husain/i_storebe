@@ -381,7 +381,7 @@ export const getLeads = asyncHandler(async (req: Request, res: TypedResponse<Get
             email: e.customer?.email,
             address: e.customer?.address ?? "",
             dob: e.customer.dob ? e.customer.dob.getTime() : undefined,
-            createdAt: convertToIstMillie(e.createdAt),
+            createdAt: e.createdAt.getTime(),
         }));
         const totalCount = result[0]['totalCount'][0]?.count ?? 0;
         const todayCount = result[0]['todayCount'][0]?.count ?? 0;
@@ -434,11 +434,6 @@ export const getLeadById = asyncHandler(async (req: Request, res: TypedResponse<
             return;
         }
 
-        // Check if user has access to this lead
-        if (req.privilege === 'manager' && lead.manager.toString() !== req.userId) {
-            res.status(403).json({message: 'Not authorized to access this lead'});
-            return;
-        }
 
         res.status(200).json({
             _id: lead._id,
