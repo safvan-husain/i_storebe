@@ -23,9 +23,9 @@ export const loginUser = asyncHandler(async (req: Request, res: Response) => {
     try {
         const {username, password, fcmToken} = loginSchema.parse(req.body);
         console.log(process.env.EMAIL_USER, process.env.EMAIL_PASSWORD);
-        await wishBirthDay({
-            email: "m.safvan27@gmail.com", dob: new Date(), name: "Sfan"
-        });
+        // await wishBirthDay({
+        //     email: "m.safvan27@gmail.com", dob: new Date(), name: "Sfan"
+        // });
 
         const user = await User.findOne({username: username.trim()});
         if (!user) {
