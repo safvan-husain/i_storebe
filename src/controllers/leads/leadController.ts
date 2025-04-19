@@ -18,7 +18,7 @@ import {ActivityType} from "../activity/validation";
 import Customer, {ICustomer} from "../../models/Customer";
 import {handleTarget} from "../target/targetController";
 import {markTaskCompleted} from "../tasks/taskController";
-import {ObjectIdSchema} from "../../common/types";
+import {ObjectIdSchema, UserPrivilegeSchema} from "../../common/types";
 import {z} from "zod";
 import {TypedResponse} from "../../common/interface";
 import Task from "../../models/Task";
@@ -604,7 +604,7 @@ export const getTransferableEmployees = async (req: Request, res: TypedResponse<
         if (req.secondPrivilege === 'call-center' || req.privilege === 'manager') {
             //call center should be able to transfer to other manager's
             //manager's should be able to transfer to other manager's
-            query.manager = { $exists: false }
+            query.privilege = UserPrivilegeSchema.enum.manager;
         } else if (req.privilege === 'staff') {
             //staff should be able to transfer to his manager and peer staffs
             query.manager = req.manager;
