@@ -37,6 +37,7 @@ interface ILeaveResponse {
     userId: string;
     username: string;
     status: LeaveStatus;
+    _id: string;
 }
 
 export const getLeaves = async (req: Request, res: TypedResponse<ILeaveResponse[]>) => {
@@ -96,7 +97,8 @@ export const getLeaves = async (req: Request, res: TypedResponse<ILeaveResponse[
                     date: 1,
                     reason: 1,
                     requester: '$requester._id',
-                    status: 1
+                    status: 1,
+                    _id: 1
                 }
             }
         ]);
@@ -107,6 +109,7 @@ export const getLeaves = async (req: Request, res: TypedResponse<ILeaveResponse[
             reason: e.reason as string,
             userId: e.requester,
             status: e.status as LeaveStatus,
+            _id: e._id
         })));
     } catch (e) {
         onCatchError(e, res);
@@ -144,6 +147,7 @@ export const updateLeaveStatus = async (req: Request, res: TypedResponse<ILeaveR
             reason: leave.reason as string,
             userId: leave.requester._id,
             status: leave.status,
+            _id: leave._id.toString(),
         });
     } catch (e) {
         onCatchError(e, res);
