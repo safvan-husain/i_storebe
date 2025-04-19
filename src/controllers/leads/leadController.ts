@@ -616,11 +616,11 @@ export const getTransferableEmployees = async (req: Request, res: TypedResponse<
                     _id: req.manager
                 }
             ];
-            query._id = { $ni: req.userId }
+            query._id = { $ne: Types.ObjectId.createFromHexString(req.userId!) }
         }
         if(req.privilege === 'manager') {
             //manager should be able to transfer to all his staffs
-            query.manager = req.userId;
+            query.manager = Types.ObjectId.createFromHexString(req.userId!);
         }
         const users = await User
             .find(query, { username: true })
