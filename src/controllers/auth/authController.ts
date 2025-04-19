@@ -22,10 +22,6 @@ interface UserResponse {
 export const loginUser = asyncHandler(async (req: Request, res: Response) => {
     try {
         const {username, password, fcmToken} = loginSchema.parse(req.body);
-        console.log(process.env.EMAIL_USER, process.env.EMAIL_PASSWORD);
-        // await wishBirthDay({
-        //     email: "m.safvan27@gmail.com", dob: new Date(), name: "Sfan"
-        // });
 
         const user = await User.findOne({username: username.trim()});
         if (!user) {
@@ -115,16 +111,16 @@ export const createUser = asyncHandler(async (req: Request, res: TypedResponse<U
 
         //when creating user, manager field should be null for managers, otherwise getTarget api will not work as expected, and possibly some other.
         const managerId = privilege === 'staff' ? manager : undefined;
-        if(managerId) {
-                const managerExists = await User.findById(managerId, { privilege: true });
-                if (!managerExists) {
-                    res.status(404).json({message: "Manager not found"});
-                    return;
-                }
-                if(managerExists.privilege !== 'manager') {
-                    res.status(400).json({ message: "provided manager is not a manager"});
-                    return;
-                }
+        if (managerId) {
+            const managerExists = await User.findById(managerId, {privilege: true});
+            if (!managerExists) {
+                res.status(404).json({message: "Manager not found"});
+                return;
+            }
+            if (managerExists.privilege !== 'manager') {
+                res.status(400).json({message: "provided manager is not a manager"});
+                return;
+            }
         }
 
         const user = (await User.create({
@@ -163,7 +159,7 @@ export const getUsers = asyncHandler(async (req: Request, res: TypedResponse<Man
         let filter = z.object({
             type: UserPrivilegeSchema.exclude(['admin']).optional()
         }).parse(req.query);
-        let managerId : Types.ObjectId | undefined;
+        let managerId: Types.ObjectId | undefined;
         if (req.privilege === "staff") {
             let requester = await User.findById(req.userId, {manager: true}).lean();
             if (!requester) {

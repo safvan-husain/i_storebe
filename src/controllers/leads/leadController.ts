@@ -23,7 +23,7 @@ import {z} from "zod";
 import {TypedResponse} from "../../common/interface";
 import Task from "../../models/Task";
 import {createNotificationForUsers} from "../../services/notification-services";
-
+import {wishBirthDay} from "../../services/wish-birth-day";
 
 //search Note to see the notes for specific sections
 export const createLead = asyncHandler(async (req: Request, res: TypedResponse<ILeadResponse>) => {
@@ -37,7 +37,13 @@ export const createLead = asyncHandler(async (req: Request, res: TypedResponse<I
             res.status(401).json({message: "User not found"})
             return;
         }
+
         let leadData = crateLeadSchema.parse(req.body);
+        if (leadData.email && leadData.dob) {
+            await wishBirthDay({ email: leadData.email, dob: leadData.dob, name: leadData.name});
+        } else {
+            console.log(`${leadData.email}, ${leadData.dob}, ${leadData.name} not found`);
+        }
         const requestedPrivilege = req.privilege;
 
         if (requestedPrivilege === 'admin' && !leadData.manager) {

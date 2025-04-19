@@ -18,6 +18,8 @@ import {customerRouter} from "./routes/customer-router";
 import {initializeApp} from "firebase-admin/app";
 import {credential} from "firebase-admin";
 import serviceAccount from "./secret/serviceAccountKey.json";
+import cron from 'node-cron';
+import {wishBirthDayToCustomers} from "./services/wish-birth-day";
 
 require("dotenv").config();
 const PORT = 3000;
@@ -93,3 +95,10 @@ app.get('/api/token', async (req, res) => {
 app.listen(PORT, () => {
     console.log(`Server is running on http://0.0.0.0:${PORT}`);
 });
+
+// Run daily at 12:00 AM IST
+cron.schedule('0 0 * * *', async () => {
+    await wishBirthDayToCustomers();
+}, {
+    timezone: "Asia/Kolkata"
+})
