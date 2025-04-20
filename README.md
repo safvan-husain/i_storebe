@@ -47,7 +47,7 @@ subgraph Node.js Backend
 ```
 
 - **Platform**: Mobile Application (single app for Admin, Manager, Staff)
-- **Architecture**: Modular Service-based (User, Lead, Activity, Customer, Notification)
+- **Architecture**: A monolithic Node.js backend, organized in a modular, feature-based structure, with separate route and controller files for each domain (leads, tasks, customers, etc.).
 ---
 
 ## 👥 User Roles & Permissions
