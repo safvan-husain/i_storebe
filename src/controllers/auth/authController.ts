@@ -194,35 +194,88 @@ export const getUsers = asyncHandler(async (req: Request, res: TypedResponse<Man
                 }
             },
             {
-                $group: {
-                    _id: "$manager",
-                    staffs: {
-                        $push: "$$ROOT"
+                $facet: {
+                    "staffWithManager": [
+                        { $match: { manager: { $ne: null } } },
+                        { $group: {
+                                _id: "$manager",
+                                staffs: { $push: "$$ROOT" }
+                            }},
+                        // Look up the manager information
+                        { $lookup: {
+                                from: "users",
+                                localField: "_id",
+                                foreignField: "_id",
+                                as: "managerInfo"
+                            }},
+                        { $unwind: "$managerInfo" },
+                        // Format the output
+                        { $project: {
+                                _id: "$_id",
+                                username: "$managerInfo.username",
+                                privilege: "$managerInfo.privilege",
+                                secondPrivilege: "$managerInfo.secondPrivilege",
+                                isActive: "$managerInfo.isActive",
+                                staffs: 1
+                            }}
+                    ],
+                    // Users without staffs (potential managers)
+                    "potentialManagers": [
+                        { $match: { privilege: { $in: ["manager", "admin"] } } },
+                        { $project: {
+                                _id: 1,
+                                username: 1,
+                                privilege: 1,
+                                secondPrivilege: 1,
+                                isActive: 1
+                            }}
+                    ]
+
+                }
+            },
+            // Unwind the results from facet, adding potential managers into staffWithManager into new combined.
+            { $project: {
+                    combined: {
+                        $concatArrays: ["$staffWithManager", {
+                            $map: {
+                                input: "$potentialManagers",
+                                as: "manager",
+                                in: {
+                                    _id: "$$manager._id",
+                                    username: "$$manager.username",
+                                    privilege: "$$manager.privilege",
+                                    secondPrivilege: "$$manager.secondPrivilege",
+                                    isActive: "$$manager.isActive",
+                                    staffs: []
+                                }
+                            }
+                        }]
                     }
-                }
-            },
-            {
-                $lookup: {
-                    from: "users",
-                    localField: "_id",
-                    foreignField: "_id",
-                    as: "manager"
-                }
-            },
-            {
-                $unwind: "$manager"
-            },
-            {
-                $project: {
-                    username: "$manager.username",
-                    _id: "$_id",
-                    privilege: "$manager.privilege",
-                    secondPrivilege: "$manager.secondPrivilege",
-                    isActive: "$manager.isActive",
-                    staffs: 1
-                }
-            }
+                }},
+            { $unwind: "$combined" },
+
+            // Remove duplicate managers (those who already have staff)
+            { $group: {
+                    _id: "$combined._id",
+                    managerData: { $first: "$combined" }
+                }},
+
+            // Final projection
+            { $replaceRoot: { newRoot: "$managerData" }}
         ]);
+        // const managers = users.find(e => e._id == null)?.staffs;
+        // users.splice(users.findIndex(e => e._id == null), 1);
+        // if (managers && managers.length > 0) {
+        //     let managersMap = new Map(managers.map(e => [e._id.toString(), e]));
+        //     users.forEach(e => {
+        //         managersMap.delete(e._id.toString());
+        //     })
+        //     let remainingManagers = Array.from(managersMap.values())
+        //     if(remainingManagers.length > 0 ) {
+        //         users.push(...(remainingManagers.map(e => ({...e, staffs: []}))))
+        //     }
+        // }
+
         res.status(200).json(runtimeValidation(managerWithStaffsSchema, users as any));
     } catch (e) {
         onCatchError(e, res);
