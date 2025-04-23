@@ -98,6 +98,7 @@ app.listen(PORT, () => {
 
 // Run daily at 12:00 AM IST
 cron.schedule('0 0 * * *', async () => {
+    console.log("Running cron job", new Date());
     await wishBirthDayToCustomers();
 }, {
     timezone: "Asia/Kolkata"

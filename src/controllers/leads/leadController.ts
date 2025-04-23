@@ -23,7 +23,6 @@ import {z} from "zod";
 import {TypedResponse} from "../../common/interface";
 import Task from "../../models/Task";
 import {createNotificationForUsers} from "../../services/notification-services";
-import {wishBirthDay} from "../../services/wish-birth-day";
 
 //search Note to see the notes for specific sections
 export const createLead = asyncHandler(async (req: Request, res: TypedResponse<ILeadResponse>) => {
@@ -39,11 +38,6 @@ export const createLead = asyncHandler(async (req: Request, res: TypedResponse<I
         }
 
         let leadData = crateLeadSchema.parse(req.body);
-        if (leadData.email && leadData.dob) {
-            await wishBirthDay({ email: leadData.email, dob: leadData.dob, name: leadData.name});
-        } else {
-            console.log(`${leadData.email}, ${leadData.dob}, ${leadData.name} not found`);
-        }
         const requestedPrivilege = req.privilege;
 
         if (requestedPrivilege === 'admin' && !leadData.manager) {
@@ -52,7 +46,6 @@ export const createLead = asyncHandler(async (req: Request, res: TypedResponse<I
         } else if (req.privilege === 'manager') {
             leadData.manager = req.userId;
         } else {
-
             if (requester.privilege === 'staff') {
                 leadData.manager = requester!.manager?.toString();
             } else if (requester.privilege === 'manager') {
@@ -223,19 +216,19 @@ export const getLeads = asyncHandler(async (req: Request, res: TypedResponse<Get
         console.log(`match create ${matchStage.createdAt}`);
 
         if ((filter.enquireStatus?.length ?? 0) > 0) {
-            matchStage.enquireStatus = {$all: filter.enquireStatus};
+            matchStage.enquireStatus = {$in: filter.enquireStatus};
         }
 
         if ((filter.source?.length ?? 0) > 0) {
-            matchStage.source = {$all: filter.source};
+            matchStage.source = {$in: filter.source};
         }
 
         if ((filter.purpose?.length ?? 0) > 0) {
-            matchStage.purpose = {$all: filter.purpose};
+            matchStage.purpose = {$in: filter.purpose};
         }
 
         if ((filter.type?.length ?? 0) > 0) {
-            matchStage.type = {$all: filter.type};
+            matchStage.type = {$in: filter.type};
         }
 
         if ((filter.staffs?.length ?? 0) > 0) matchStage.handledBy = {$in: filter.staffs!.map(e => new Types.ObjectId(e))};
