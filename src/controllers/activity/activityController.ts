@@ -46,7 +46,7 @@ export const getActivity = asyncHandler(
                 .skip(reqFilter.skip)
                 .limit(reqFilter.limit)
                 .populate<{
-                    activator: { username: string }, task?: {
+                    activator?: { username: string }, task?: {
                         isCompleted: boolean,
                         due: Date,
                         title: string,
@@ -79,11 +79,11 @@ export const getActivity = asyncHandler(
                         return ({
                                 ...e,
                                 createdAt: e.createdAt.getTime(),
-                                activator: e.activator.username,
+                                activator: e.activator?.username ?? "unknown",
                                 task: e.task ? {
                                     ...e.task,
                                     due: e.task.due.getTime(),
-                                    createdAt: convertToIstMillie(e.task.createdAt),
+                                    createdAt: e.task.createdAt?.getTime() ?? 0,
                                     assigned: e.task.assigned.username,
                                 } : undefined
                             }
@@ -102,16 +102,17 @@ export const createNote = asyncHandler(
     async (req: Request, res: Response) => {
         try {
             const data = createNoteSchema.parse(req.body);
-            let activity = await Activity.createActivity({
+            let activity = await (await Activity.createActivity({
                 activator: new Types.ObjectId(req.userId),
                 lead: new Types.ObjectId(data.leadId),
                 type: 'note_added',
                 optionalMessage: data.note,
-            });
+            })).populate<{ activator?: { username: string }}>('activator', 'username');
             activity = activity.toObject();
             res.status(200).json({
                 ...activity,
-                createdAt: convertToIstMillie(activity.createdAt),
+                activator: activity.activator?.username ?? "Unknown",
+                createdAt: activity.createdAt.getTime(),
             })
         } catch (e) {
             onCatchError(e, res);

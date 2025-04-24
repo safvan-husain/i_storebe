@@ -219,7 +219,7 @@ export const getUsers = asyncHandler(async (req: Request, res: TypedResponse<Man
                                 staffs: 1
                             }}
                     ],
-                    // Users without staffs (potential managers)
+                    // Users (potential managers)
                     "potentialManagers": [
                         { $match: { privilege: { $in: ["manager", "admin"] } } },
                         { $project: {
