@@ -17,8 +17,8 @@ export const getActivity = asyncHandler(
             if (reqFilter.lead) {
                 query = {lead: reqFilter.lead};
             } else {
-                if (reqFilter.manager) query.activator = {$in: reqFilter.manager};
-                if (reqFilter.staff) query.activator = {$in: reqFilter.staff};
+                if (reqFilter.manager?.length ?? 0) query.activator = {$in: reqFilter.manager};
+                if (reqFilter.staff?.length ?? 0) query.activator = {$in: reqFilter.staff};
                 if (reqFilter.startDate && reqFilter.endDate) {
                     query.createdAt = {
                         $gte: reqFilter.startDate,
@@ -40,7 +40,7 @@ export const getActivity = asyncHandler(
                     query.activator = req.userId;
                 }
             }
-            if (reqFilter.activityType) query.type =  { $in: reqFilter.activityType };
+            if (reqFilter.activityType?.length ?? 0) query.type =  { $in: reqFilter.activityType };
             console.log("query acit", query)
             const activities = await Activity.find(query, {updatedAt: false, __v: false})
                 .skip(reqFilter.skip)
