@@ -95,7 +95,7 @@ export const createLead = asyncHandler(async (req: Request, res: TypedResponse<I
                 name: customer.name,
                 phone: customer.phone,
                 email: customer.email,
-                address: customer.address,
+                address: customer.address ?? "",
                 dob: customer.dob?.getTime(),
                 createdAt: convertToIstMillie(lead.createdAt),
             })
@@ -159,7 +159,7 @@ export const updateLeadStatus = asyncHandler(async (req: Request, res: TypedResp
             phone: lead.customer.phone,
             name: lead.customer.name,
             email: lead.customer.email,
-            address: lead.customer.address,
+            address: lead.customer.address ?? "",
             dob: lead.customer.dob?.getTime(),
             createdAt: convertToIstMillie(lead.createdAt),
             source: lead.source,

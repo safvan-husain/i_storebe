@@ -4,7 +4,7 @@ export interface ICustomer extends Document {
     phone: string;
     name: string;
     email?: string;
-    address: string;
+    address?: string;
     dob?: Date;
     createdAt: Date;
 }
@@ -33,7 +33,7 @@ const customerSchema = new mongoose.Schema(
         },
         address: {
             type: String,
-            required: [true, 'Address is required'],
+            default: ''
         },
         dob: {
             type: Date,
