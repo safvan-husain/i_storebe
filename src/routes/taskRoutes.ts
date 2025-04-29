@@ -5,7 +5,7 @@ import {
   getTasks,
   // getTaskById,
   // updateTask,
-  completeTask, callReports, getTodayTaskStat,
+  completeTask, callReports, getTodayTaskStat, getTasksV2,
 } from '../controllers/tasks/taskController';
 import { protect } from '../middleware/auth';
 
@@ -20,6 +20,9 @@ router.route('/')
 
 router.route('/filter')
     .post(getTasks);
+
+router.route('/v2')
+    .post(getTasksV2)
 
 router.route('/complete')
     .post(completeTask);

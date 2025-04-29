@@ -165,6 +165,151 @@ export const getTasks = asyncHandler(async (req: Request, res: TypedResponse<Tas
     }
 });
 
+export const getTasksV2 = asyncHandler(async (req: Request, res: TypedResponse<any>) => {
+    try {
+        const {lead, assigned, startDate, endDate, skip, limit, managers, category} = TaskFilterSchema.parse(req.body);
+
+        let staffs: any[] = []
+        //if requested by staff only show tasks assigned to him
+        if (req.privilege === 'staff') {
+            staffs = [req.userId];
+        } else if (assigned) {
+            staffs = assigned;
+        }
+        //when admin or manager do not pass specific staff to filter, we need look at manager to get the staffs.
+        if ((req.privilege === 'manager' || req.privilege === 'admin') && (assigned?.length ?? 0) === 0) {
+            let staffQuery: any = {};
+            //when admin filter with specific managers.
+            if (req.privilege === 'admin' && (managers?.length ?? 0) !== 0) {
+                staffQuery.manager = {$in: managers};
+            } else if (req.privilege === 'manager') {
+                //when manager make the request without selecting staffs.
+                staffQuery.manager = req.userId;
+            }
+            //even if admin make request without manager or staff specified, get all staffs
+            let users = await User.find(staffQuery, {}).lean();
+            staffs = users.map(e => e._id);
+            staffs.push(req.userId)
+        }
+
+        const query: any = {
+        };
+
+        if (lead) query.lead = new mongoose.Types.ObjectId(lead);
+        //filter with staff only when there is no filter for manager.
+        if (staffs.length > 0) query.assigned = {$in: staffs};
+        if (category) query.category = category;
+
+        // Date range filter
+        if (startDate || endDate) {
+            query.due = {};
+            if (startDate) query.createdAt.$gte = startDate;
+            if (endDate) query.createdAt.$lte = endDate;
+        }
+        let data = await Task.aggregate([
+            {
+                $match: query
+            },
+            {
+                $facet: {
+                    tasks: [
+                        { $match: { isCompleted: false }},
+                        { $skip: skip},
+                        {$limit: limit},
+                        {
+                            $lookup: {
+                                from: 'users',
+                                localField: 'assigned',
+                                foreignField: '_id',
+                                as: 'assigned'
+                            }
+                        },
+                        {
+                            $unwind: {
+                                path: '$assigned',
+                                preserveNullAndEmptyArrays: true
+                            }
+                        },
+                        {
+                            $project: {
+                                _id: 1,
+                                lead: 1,
+                                assigned: {
+                                    $ifNull: ["$assigned.username", "None"]
+                                },
+                                title: 1,
+                                description: 1,
+                                category: 1,
+                                due: {
+                                    $toLong: "$due"
+                                },
+                                createdAt: {
+                                    $toLong: "$createdAt"
+                                },
+                                isCompleted: 1,
+                            }
+                        }
+                    ],
+                    stat: [
+                        {
+                            $group: {
+                                _id: null,
+                                completed: {
+                                    $sum: {
+                                        $cond: [
+                                            { $eq: ["$isCompleted", true] },
+                                            1,
+                                            0
+                                        ]
+                                    }
+                                },
+                                total: {$sum: 1},
+                                overDue: {
+                                    $sum: {
+                                        $cond: [
+                                            {
+                                                $and: [
+                                                    {$lt: ["$due", new Date()]},
+                                                    {$eq: ["$isCompleted", false]}
+                                                ]
+                                            },
+                                            1,
+                                            0
+                                        ]
+                                    }
+                                },
+                                pending: {
+                                    $sum: {
+                                        $cond: [
+                                            { $eq: ["$isCompleted", false] },
+                                            1,
+                                            0
+                                        ]
+                                    }
+                                }
+                            }
+                        }
+                    ]
+                }
+            }
+        ]);
+        if (data.length === 0) {
+            res.status(200).json({
+                tasks: [],
+                stat: {
+                    completed: 0,
+                    total: 0,
+                    overDue: 0,
+                    pending: 0
+                }
+            })
+        }
+        res.status(200).json(data[0]);
+    } catch (error) {
+        console.log(error);
+        onCatchError(error, res);
+    }
+});
 
 export const completeTask = asyncHandler(async (req: Request, res: TypedResponse<{
     newTask?: TaskResponse,
