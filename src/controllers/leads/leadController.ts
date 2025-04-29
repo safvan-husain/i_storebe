@@ -59,6 +59,11 @@ export const createLead = asyncHandler(async (req: Request, res: TypedResponse<I
             return;
         }
         let customer = await Customer.findOne({phone: leadData.phone})
+
+        if (customer) {
+            res.status(200).json({ message: "Lead already exists"});
+            return;
+        }
         //keeping separate lead and customer data, so that there will be only customer even they need two leads.
         if (!customer) {
             customer = await Customer.create(leadData);
