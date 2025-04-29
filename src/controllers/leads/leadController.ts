@@ -730,6 +730,24 @@ export const internalLeadStatusUpdate = async ({requestedUser, lead, updateData,
     };
 }
 
+const markDialedRequestSchema = z.object({
+    leadId: ObjectIdSchema
+})
+
+export const markDialed = async (req: Request, res: TypedResponse<any>) => {
+    try {
+        const data = markDialedRequestSchema.parse(req.body);
+        await Activity.createActivity({
+            activator: Types.ObjectId.createFromHexString(req.userId!),
+            lead: Types.ObjectId.createFromHexString(data.leadId!),
+            type: "dialed",
+        });
+        res.status(200).json({message: "success"});
+    } catch (e) {
+        onCatchError(e, res);
+    }
+}
+
 export interface ILeadResponse {
     _id: Types.ObjectId;
     handlerName: string;

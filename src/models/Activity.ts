@@ -4,6 +4,7 @@ import User from './User';
 
 
 export interface IActivity extends Document {
+    _id: Types.ObjectId;
     activator: Types.ObjectId;
     lead: Types.ObjectId;
     action: string;
@@ -74,6 +75,9 @@ activitySchema.statics.createActivity = async function (activityData) {
                 break;
             case 'completed':
                 activityData.action = `${activatorName} completed task`;
+                break;
+            case 'dialed':
+                activityData.action = `${activatorName} dialed`;
                 break;
             default:
                 activityData.action = `${activatorName} performed an action`;
