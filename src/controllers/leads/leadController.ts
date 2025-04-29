@@ -244,16 +244,19 @@ export const getLeads = asyncHandler(async (req: Request, res: TypedResponse<Get
             matchStage._id = {$nin: taskedLeadIds};
         }
 
-        // Role-based filtering
-        if (req.privilege === 'manager' && (filter.staffs?.length ?? 0) === 0) { //when manager filter with staffs, it is unnecessary to filter with manager.
-            //when manager provide all the leads created by his staff.
-            matchStage.manager = new Types.ObjectId(req.userId!);
-        } else if (req.privilege === 'staff') {
-            //when staff make request, only provide what he created. and handled by manager (if handled by manager it means it available all the staff under him)
-            matchStage.handledBy = {$in: [new Types.ObjectId(req.userId!), requester.manager!]};
-        } else if (req.privilege === 'admin' && (filter.managers?.length ?? 0) > 0) {
-            //when admin pass managers.
-            matchStage.manager = {$in: filter.managers!.map(e => new Types.ObjectId(e))};
+        //if searched, ignore all the role based filter
+        if (!filter.searchTerm) {
+            // Role-based filtering
+            if (req.privilege === 'manager' && (filter.staffs?.length ?? 0) === 0) { //when manager filter with staffs, it is unnecessary to filter with manager.
+                //when manager provide all the leads created by his staff.
+                matchStage.manager = new Types.ObjectId(req.userId!);
+            } else if (req.privilege === 'staff') {
+                //when staff make request, only provide what he created. and handled by manager (if handled by manager it means it available all the staff under him)
+                matchStage.handledBy = {$in: [new Types.ObjectId(req.userId!), requester.manager!]};
+            } else if (req.privilege === 'admin' && (filter.managers?.length ?? 0) > 0) {
+                //when admin pass managers.
+                matchStage.manager = {$in: filter.managers!.map(e => new Types.ObjectId(e))};
+            }
         }
 
         // Add match stage to pipeline if there are any conditions
