@@ -30,3 +30,9 @@ export const createNoteSchema = z.object({
     note: z.string().min(1, { message: "at least one character required"}),
     leadId: ObjectIdSchema
 })
+
+export const callReportsRequestSchema = z
+    .object({
+        managerId: ObjectIdSchema.optional(),
+        staffId: ObjectIdSchema.optional(),
+    }).merge(optionalDateQueryFiltersSchema)

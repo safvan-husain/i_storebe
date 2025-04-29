@@ -1,6 +1,6 @@
 import {Request, Response} from 'express';
 import Task, {ITask} from '../../models/Task';
-import Activity from '../../models/Activity';
+import Activity, {IActivity} from '../../models/Activity';
 import asyncHandler from 'express-async-handler';
 import mongoose, {FilterQuery, Types} from 'mongoose';
 import {
@@ -25,6 +25,7 @@ import {
     UserPrivilegeSchema
 } from "../../common/types";
 import task from "../../models/Task";
+import {callReportsRequestSchema} from "../activity/validation";
 
 //TODO: check all response are consistent.
 
@@ -609,27 +610,18 @@ export const getTodayTaskStat = async (req: Request, res: TypedResponse<{ dueTod
 
 export const callReports2 = async (req: Request, res: TypedResponse<CallReportsRes>) => {
     try {
-        if (!req.userId) {
-            res.status(404).json({message: 'User not found'});
-            return;
-        }
-        const query = z.object({
-            managerId: ObjectIdSchema.optional(),
-            // startDate: IstToUtsOptionalFromStringSchema,
-            // endDate: IstToUtsOptionalFromStringSchema,
-            staffId: ObjectIdSchema.optional(),
-        }).merge(optionalDateQueryFiltersSchema).parse(req.query);
+        const query = callReportsRequestSchema.parse(req.query);
 
-        let dbMatchQuery: FilterQuery<ITask> = {
-            isCompleted: true,
+        let dbMatchQuery: FilterQuery<IActivity> = {
+            type: 'dialed',
         };
 
         if ((query.managerId || req.privilege === 'manager') && !query.staffId) {
             const managerId = query.managerId ?? req.userId;
             const staffIds = (await User.find({manager: managerId}, {_id: 1}).lean()).map(e => e._id);
-            dbMatchQuery.assigned = {$in: staffIds};
+            dbMatchQuery.activator = {$in: staffIds};
         } else if (query.staffId) {
-            dbMatchQuery.assigned = query.staffId;
+            dbMatchQuery.activator = query.staffId;
         }
         if (query.startDate || query.endDate) {
             dbMatchQuery.createdAt = {};
@@ -637,11 +629,9 @@ export const callReports2 = async (req: Request, res: TypedResponse<CallReportsR
             if (query.endDate) dbMatchQuery.createdAt.$lte = query.endDate
         }
 
-        const dialedLeads = await Activity.find({
-            activator: dbMatchQuery.assigned,
-            createdAt: dbMatchQuery.createdAt
-        }, {}).lean().then(e => e.map(e => e._id));
-
+        const dialedLeads = await Activity
+            .find(dbMatchQuery, { _id: true, lead: true })
+            .lean().then(e => e.map(e => e.lead));
         const total = dialedLeads.length;
 
         const data = await Lead.aggregate([
@@ -651,42 +641,30 @@ export const callReports2 = async (req: Request, res: TypedResponse<CallReportsR
                 }
             },
             {
-                $project: {
-                    lead: "$$ROOT"
-                }
-            },
-            // {
-            //     $unwind: {
-            //         path: '$lead',
-            //         preserveNullAndEmptyArrays: true
-            //     }
-            // },
-            {
                 $group: {
                     _id: null,
                     total: { $sum: 1 },
 
                     // EnquireStatus counts
-                    enquire_empty: { $sum: { $cond: [{ $eq: ["$lead.enquireStatus", "empty"] }, 1, 0] } },
-                    enquire_contacted: { $sum: { $cond: [{ $eq: ["$lead.enquireStatus", "contacted"] }, 1, 0] } },
-                    enquire_interested: { $sum: { $cond: [{ $eq: ["$lead.enquireStatus", "interested"] }, 1, 0] } },
-                    enquire_lost: { $sum: { $cond: [{ $eq: ["$lead.enquireStatus", "lost"] }, 1, 0] } },
-                    enquire_new: { $sum: { $cond: [{ $eq: ["$lead.enquireStatus", "new"] }, 1, 0] } },
-                    enquire_none: { $sum: { $cond: [{ $eq: ["$lead.enquireStatus", "none"] }, 1, 0] } },
-                    enquire_pending: { $sum: { $cond: [{ $eq: ["$lead.enquireStatus", "pending"] }, 1, 0] } },
-                    enquire_quotation_shared: { $sum: { $cond: [{ $eq: ["$lead.enquireStatus", "quotation shared"] }, 1, 0] } },
-                    enquire_visit_store: { $sum: { $cond: [{ $eq: ["$lead.enquireStatus", "visit store"] }, 1, 0] } },
-                    enquire_won: { $sum: { $cond: [{ $eq: ["$lead.enquireStatus", "won"] }, 1, 0] } },
+                    enquire_empty: { $sum: { $cond: [{ $eq: ["$enquireStatus", "empty"] }, 1, 0] } },
+                    enquire_contacted: { $sum: { $cond: [{ $eq: ["$enquireStatus", "contacted"] }, 1, 0] } },
+                    enquire_interested: { $sum: { $cond: [{ $eq: ["$enquireStatus", "interested"] }, 1, 0] } },
+                    enquire_lost: { $sum: { $cond: [{ $eq: ["$enquireStatus", "lost"] }, 1, 0] } },
+                    enquire_new: { $sum: { $cond: [{ $eq: ["$enquireStatus", "new"] }, 1, 0] } },
+                    enquire_none: { $sum: { $cond: [{ $eq: ["$enquireStatus", "none"] }, 1, 0] } },
+                    enquire_pending: { $sum: { $cond: [{ $eq: ["$enquireStatus", "pending"] }, 1, 0] } },
+                    enquire_quotation_shared: { $sum: { $cond: [{ $eq: ["$enquireStatus", "quotation shared"] }, 1, 0] } },
+                    enquire_visit_store: { $sum: { $cond: [{ $eq: ["$enquireStatus", "visit store"] }, 1, 0] } },
+                    enquire_won: { $sum: { $cond: [{ $eq: ["$enquireStatus", "won"] }, 1, 0] } },
 
                     // CallStatus counts
-                    call_not_updated: { $sum: { $cond: [{ $eq: ["$lead.callStatus", "not-updated"] }, 1, 0] } },
-                    call_connected: { $sum: { $cond: [{ $eq: ["$lead.callStatus", "connected"] }, 1, 0] } },
-                    call_busy: { $sum: { $cond: [{ $eq: ["$lead.callStatus", "busy"] }, 1, 0] } },
-                    call_switched_off: { $sum: { $cond: [{ $eq: ["$lead.callStatus", "switched-off"] }, 1, 0] } },
-                    call_call_back_requested: { $sum: { $cond: [{ $eq: ["$lead.callStatus", "call_back-requested"] }, 1, 0] } },
-                    call_follow_up_scheduled: { $sum: { $cond: [{ $eq: ["$lead.callStatus", "follow-up-scheduled"] }, 1, 0] } },
-                    call_not_reachable: { $sum: { $cond: [{ $eq: ["$lead.callStatus", "not-reachable"] }, 1, 0] } },
-                    call_connected_on_whatsapp: { $sum: { $cond: [{ $eq: ["$lead.callStatus", "connected-on-whatsapp"] }, 1, 0] } },
+                    call_connected: { $sum: { $cond: [{ $eq: ["$callStatus", "connected"] }, 1, 0] } },
+                    call_busy: { $sum: { $cond: [{ $eq: ["$callStatus", "busy"] }, 1, 0] } },
+                    call_switched_off: { $sum: { $cond: [{ $eq: ["$callStatus", "switched-off"] }, 1, 0] } },
+                    call_call_back_requested: { $sum: { $cond: [{ $eq: ["$callStatus", "call_back-requested"] }, 1, 0] } },
+                    call_follow_up_scheduled: { $sum: { $cond: [{ $eq: ["$callStatus", "follow-up-scheduled"] }, 1, 0] } },
+                    call_not_reachable: { $sum: { $cond: [{ $eq: ["$callStatus", "not-reachable"] }, 1, 0] } },
+                    call_connected_on_whatsapp: { $sum: { $cond: [{ $eq: ["$callStatus", "connected-on-whatsapp"] }, 1, 0] } },
                 }
             },
             {
@@ -721,7 +699,6 @@ export const callReports2 = async (req: Request, res: TypedResponse<CallReportsR
                     }
                 }
             }
-
         ]);
 
         if (data.length === 0) {
