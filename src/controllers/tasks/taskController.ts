@@ -607,7 +607,135 @@ export const getTodayTaskStat = async (req: Request, res: TypedResponse<{ dueTod
     }
 }
 
+export const callReports2 = async (req: Request, res: TypedResponse<CallReportsRes>) => {
+    try {
+        if (!req.userId) {
+            res.status(404).json({message: 'User not found'});
+            return;
+        }
+        const query = z.object({
+            managerId: ObjectIdSchema.optional(),
+            // startDate: IstToUtsOptionalFromStringSchema,
+            // endDate: IstToUtsOptionalFromStringSchema,
+            staffId: ObjectIdSchema.optional(),
+        }).merge(optionalDateQueryFiltersSchema).parse(req.query);
 
+        let dbMatchQuery: FilterQuery<ITask> = {
+            isCompleted: true,
+        };
+
+        if ((query.managerId || req.privilege === 'manager') && !query.staffId) {
+            const managerId = query.managerId ?? req.userId;
+            const staffIds = (await User.find({manager: managerId}, {_id: 1}).lean()).map(e => e._id);
+            dbMatchQuery.assigned = {$in: staffIds};
+        } else if (query.staffId) {
+            dbMatchQuery.assigned = query.staffId;
+        }
+        if (query.startDate || query.endDate) {
+            dbMatchQuery.createdAt = {};
+            if (query.startDate) dbMatchQuery.createdAt.$gte = query.startDate
+            if (query.endDate) dbMatchQuery.createdAt.$lte = query.endDate
+        }
+
+        const dialedLeads = await Activity.find({
+            activator: dbMatchQuery.assigned,
+            createdAt: dbMatchQuery.createdAt
+        }, {}).lean().then(e => e.map(e => e._id));
+
+        const total = dialedLeads.length;
+
+        const data = await Lead.aggregate([
+            {
+                $match: {
+                    _id: {$in: dialedLeads},
+                }
+            },
+            {
+                $project: {
+                    lead: "$$ROOT"
+                }
+            },
+            // {
+            //     $unwind: {
+            //         path: '$lead',
+            //         preserveNullAndEmptyArrays: true
+            //     }
+            // },
+            {
+                $group: {
+                    _id: null,
+                    total: { $sum: 1 },
+
+                    // EnquireStatus counts
+                    enquire_empty: { $sum: { $cond: [{ $eq: ["$lead.enquireStatus", "empty"] }, 1, 0] } },
+                    enquire_contacted: { $sum: { $cond: [{ $eq: ["$lead.enquireStatus", "contacted"] }, 1, 0] } },
+                    enquire_interested: { $sum: { $cond: [{ $eq: ["$lead.enquireStatus", "interested"] }, 1, 0] } },
+                    enquire_lost: { $sum: { $cond: [{ $eq: ["$lead.enquireStatus", "lost"] }, 1, 0] } },
+                    enquire_new: { $sum: { $cond: [{ $eq: ["$lead.enquireStatus", "new"] }, 1, 0] } },
+                    enquire_none: { $sum: { $cond: [{ $eq: ["$lead.enquireStatus", "none"] }, 1, 0] } },
+                    enquire_pending: { $sum: { $cond: [{ $eq: ["$lead.enquireStatus", "pending"] }, 1, 0] } },
+                    enquire_quotation_shared: { $sum: { $cond: [{ $eq: ["$lead.enquireStatus", "quotation shared"] }, 1, 0] } },
+                    enquire_visit_store: { $sum: { $cond: [{ $eq: ["$lead.enquireStatus", "visit store"] }, 1, 0] } },
+                    enquire_won: { $sum: { $cond: [{ $eq: ["$lead.enquireStatus", "won"] }, 1, 0] } },
+
+                    // CallStatus counts
+                    call_not_updated: { $sum: { $cond: [{ $eq: ["$lead.callStatus", "not-updated"] }, 1, 0] } },
+                    call_connected: { $sum: { $cond: [{ $eq: ["$lead.callStatus", "connected"] }, 1, 0] } },
+                    call_busy: { $sum: { $cond: [{ $eq: ["$lead.callStatus", "busy"] }, 1, 0] } },
+                    call_switched_off: { $sum: { $cond: [{ $eq: ["$lead.callStatus", "switched-off"] }, 1, 0] } },
+                    call_call_back_requested: { $sum: { $cond: [{ $eq: ["$lead.callStatus", "call_back-requested"] }, 1, 0] } },
+                    call_follow_up_scheduled: { $sum: { $cond: [{ $eq: ["$lead.callStatus", "follow-up-scheduled"] }, 1, 0] } },
+                    call_not_reachable: { $sum: { $cond: [{ $eq: ["$lead.callStatus", "not-reachable"] }, 1, 0] } },
+                    call_connected_on_whatsapp: { $sum: { $cond: [{ $eq: ["$lead.callStatus", "connected-on-whatsapp"] }, 1, 0] } },
+                }
+            },
+            {
+                $project: {
+                    _id: 0,
+                    completedCalls: "$total", // or however you define "completed"
+
+                    callStatusStatics: {
+                        connected: "$call_connected",
+                        notConnected: {
+                            $add: [
+                                "$call_busy",
+                                "$call_switched_off",
+                                "$call_not_reachable"
+                            ]
+                        },
+                        followUpScheduled: "$call_follow_up_scheduled",
+                        callBackRequested: "$call_call_back_requested",
+                        notUpdated: "$call_not_updated"
+                    },
+                    leadStatus: {
+                        empty: "$enquire_empty",
+                        contacted: "$enquire_contacted",
+                        interested: "$enquire_interested",
+                        lost: "$enquire_lost",
+                        new: "$enquire_new",
+                        none: "$enquire_none",
+                        pending: "$enquire_pending",
+                        quotation_shared: "$enquire_quotation_shared",
+                        visit_store: "$enquire_visit_store",
+                        won: "$enquire_won"
+                    }
+                }
+            }
+
+        ]);
+
+        if (data.length === 0) {
+            res.status(200).json(callReportsResponseSchema.parse({}));
+            return;
+        }
+        res.status(200).json(callReportsResponseSchema.parse({
+            ...data[0],
+            total: data[0].total > total ? data[0].total : total,
+        }));
+    } catch (e) {
+        onCatchError(e, res);
+    }
+};
 
 type TaskOrLeadParam =
     | { taskId: Types.ObjectId | string; leadId?: never }
