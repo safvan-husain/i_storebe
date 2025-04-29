@@ -632,7 +632,7 @@ export const getTransferableEmployees = async (req: Request, res: TypedResponse<
 }
 
 export function getUpdateStatusMessage<T extends EnquireSourceType | PurposeType | EnquireStatusType>(
-    category: 'source' | 'purpose' | 'status',
+    category: 'source' | 'purpose' | 'status' | 'call status',
     old: T,
     newV: T,
 ): string {
@@ -686,6 +686,19 @@ export const internalLeadStatusUpdate = async ({requestedUser, lead, updateData,
         message = message + getUpdateStatusMessage('purpose', lead.purpose, updateData.purpose);
         //after message, changing the value to save later.
         lead.purpose = updateData.purpose;
+        await Activity.create({
+            type: activityType,
+            activator: requestedUser._id,
+            lead: lead._id,
+            action: message,
+        });
+    }
+
+    if (updateData.callStatus && updateData.callStatus !== lead.callStatus) {
+        activityType = 'call_status_updated';
+        message = message + getUpdateStatusMessage('call status', lead.callStatus as any, updateData.callStatus)
+        //after message, changing the value to save later.
+        lead.callStatus = updateData.callStatus;
         await Activity.create({
             type: activityType,
             activator: requestedUser._id,

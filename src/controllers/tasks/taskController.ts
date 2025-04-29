@@ -24,6 +24,7 @@ import {
     optionalDateQueryFiltersSchema, secondUserPrivilegeSchema,
     UserPrivilegeSchema
 } from "../../common/types";
+import task from "../../models/Task";
 
 //TODO: check all response are consistent.
 
@@ -170,7 +171,7 @@ export const completeTask = asyncHandler(async (req: Request, res: TypedResponse
     message: string
 }>) => {
     try {
-        const data = completeTaskSchema.parse(req.body);
+        let data = completeTaskSchema.parse(req.body);
 
         let user = await User.findById(req.userId);
         if (!user) {
@@ -178,18 +179,24 @@ export const completeTask = asyncHandler(async (req: Request, res: TypedResponse
             return;
         }
 
-        let task = await Task.findByIdAndUpdate(
-            data.id,
-            {isCompleted: true},
-            {new: true, runValidators: true}
-        );
+        let taskCategory: Category = "call";
 
-        if (!task) {
-            res.status(404).json({message: 'Task not found'});
-            return;
+        if (data.id) {
+            let task = await Task.findByIdAndUpdate(
+                data.id,
+                {isCompleted: true},
+                {new: true, runValidators: true}
+            );
+
+            if (!task) {
+                res.status(404).json({message: 'Task not found'});
+                return;
+            }
+            taskCategory = task.category;
+            data.leadId = task.lead.toString();
         }
 
-        const lead: any = await Lead.findById(task.lead).populate('customer', 'name');
+        const lead: any = await Lead.findById(data.leadId).populate('customer', 'name');
 
         if (!lead) {
             res.status(404).json({message: 'Lead not found'});
@@ -206,47 +213,51 @@ export const completeTask = asyncHandler(async (req: Request, res: TypedResponse
                     purpose: data.purpose,
                     source: undefined,
                 },
-                taskId: task._id
+                taskId: data.id
             })
         }
 
         if (data.note) {
             await Activity.createActivity({
                 activator: new Types.ObjectId(req.userId),
-                lead: new Types.ObjectId(task.lead),
+                lead: new Types.ObjectId(data.leadId),
                 type: 'note_added',
                 optionalMessage: data.note,
             });
         }
 
-        // Create an activity for the task completetion
-        await Activity.create({
-            activator: req.userId,
-            lead: task!.lead,
-            task: task!._id,
-            action: `${user.username} completed task`,
-            type: 'completed',
-        });
+        if (data.id) {
+            // Create an activity for the task completetion
+            await Activity.create({
+                activator: req.userId,
+                lead: data.leadId,
+                task: data!.id,
+                action: `${user.username} completed task`,
+                type: 'completed',
+            });
+        }
+
+
 
         //when follow-up task is adding, create task and update on activity
         let newTask;
         if (data.followUpDate) {
-            if (await Task.findOne({lead: task.lead, isCompleted: false})) {
+            if (await Task.findOne({lead: data.leadId, isCompleted: false})) {
                 res.status(200).json({message: "Updated, but Task already exists for this lead"});
                 return;
             }
             newTask = await (await Task.create({
-                lead: task.lead,
-                assigned: task.assigned,
+                lead: data.leadId,
+                assigned: req.userId,
                 due: data.followUpDate,
-                category: task.category,
-                title: `${task.category} back ${lead.customer.name}`,
-                description: `${task.category} back ${lead.customer.name}`,
+                category: taskCategory,
+                title: `${taskCategory} back ${lead.customer.name}`,
+                description: `${taskCategory} back ${lead.customer.name}`,
             })).populate<{ assigned: { username: string } }>('assigned', 'username');
             // Create an activity for the task update
             await Activity.create({
                 activator: req.userId,
-                lead: task!.lead,
+                lead: data.leadId,
                 task: newTask._id,
                 action: `${user.username} created follow-up`,
                 type: 'followup_added',

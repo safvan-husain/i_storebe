@@ -26,14 +26,17 @@ export const TaskFilterSchema = z.object({
 }).merge(paginationSchema).merge(optionalDateQueryFiltersSchema);
 
 export const completeTaskSchema = z.object({
-    id: ObjectIdSchema,
+    id: ObjectIdSchema.optional(),
+    leadId: ObjectIdSchema.optional(),
     enquireStatus: EnquireStatus.optional(),
     purpose: Purpose.optional(),
     callStatus: callStatusSchema.optional(),
     note: z.string().optional(),
     //TODO: check ist or utc date.
     followUpDate: z.number().optional().transform(val => val ? new Date(val) : undefined),
-})
+}).refine(e => {
+    return !(!e.id && !e.leadId);
+}, {message: "Either id (task id) or leadId is required"});
 
 export const callReportsResponseSchema = z.object({
     completedCalls: z.number().default(0),

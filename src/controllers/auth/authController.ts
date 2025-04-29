@@ -29,6 +29,11 @@ export const loginUser = asyncHandler(async (req: Request, res: Response) => {
             return;
         }
 
+        if(!user.isActive) {
+            res.status(401).json({message: 'user is not active'});
+            return;
+        }
+
         const isMatch = await user.comparePassword(password);
         if (!isMatch) {
             res.status(401).json({message: 'incorrect password'});
