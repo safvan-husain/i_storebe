@@ -42,7 +42,9 @@ export const getActivity = asyncHandler(
             }
             if (reqFilter.activityType?.length ?? 0) query.type =  { $in: reqFilter.activityType };
             console.log("query acit", query)
-            const activities = await Activity.find(query, {updatedAt: false, __v: false})
+            const activities = await Activity
+                .find(query, {updatedAt: false, __v: false})
+                .sort({createdAt: -1})
                 .skip(reqFilter.skip)
                 .limit(reqFilter.limit)
                 .populate<{
@@ -84,7 +86,7 @@ export const getActivity = asyncHandler(
                                     ...e.task,
                                     due: e.task.due.getTime(),
                                     createdAt: e.task.createdAt?.getTime() ?? 0,
-                                    assigned: e.task.assigned.username,
+                                    assigned: e.task.assigned?.username ?? "Unknown",
                                 } : undefined
                             }
                         );
