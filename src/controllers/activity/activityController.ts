@@ -264,11 +264,55 @@ export const getStaffReport = async (req: Request, res: TypedResponse<any>) => {
             });
         }
 
-        const leadStatus = [];
-        const taskPending = 0;
+        const leadStatus = await Lead.aggregate([
+            {
+                $match: matchQuery
+            },
+            {
+                $lookup: {
+                    from: 'users',
+                    localField: 'handledBy',
+                    foreignField: '_id',
+                    pipeline: [
+                        {
+                            $lookup: {
+                                from: 'users',
+                                localField: 'manager',
+                                foreignField: '_id',
+                                as: 'manager'
+                            }
+                        },
+                        {
+                            $unwind: {
+                                path: "$manager",
+                                preserveNullAndEmptyArrays: true
+                            }
+                        },
+                        {
+                            $project: {
+                                _id: 0,
+                                manager: {$ifNull: ["$manager.username", "$username"]},
+                                username: 1
+                            }
+                        }
+                    ],
+                    as: 'handledBy'
+                }
+            },
+            {
+                $unwind: "$handledBy"
+            },
+            {
+                $group: {
+                    _id: "$handledBy.username",
+                    manager: { $first: "$handledBy.manager" },
+                    total_leads: { $sum: 1 },
+                    is_won: { $sum: { $cond: [{ $eq: ["$enquireStatus", "won"] }, 1, 0] } },
+                    is_visited: { $sum: { $cond: [{ $eq: ["$enquireStatus", "visited"] }, 1, 0] } }
+                }
+            }
+        ]);
 
-        // res.status(200).json(pipeline);
-        // return;
         const data = await Activity.aggregate(pipeline);
 
         // const pdfBuffer = await createPdf(generateTableHtml(data, query.startDate ?? new Date(0), query.endDate ?? new Date(), "Anshif"));
