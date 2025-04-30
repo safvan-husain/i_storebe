@@ -715,6 +715,10 @@ export const internalLeadStatusUpdate = async ({requestedUser, lead, updateData,
         });
     }
 
+    if (updateData.type) {
+        lead.type = updateData.type;
+    }
+
     lead = await lead.save()
 
     lead = lead.toObject();

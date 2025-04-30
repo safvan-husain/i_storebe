@@ -20,6 +20,7 @@ const LeadStatus = z.object({
     enquireStatus: EnquireStatus,
     purpose: Purpose,
     callStatus: callStatusSchema.optional(),
+    type: Type.default('fresh')
 });
 
 const LeadData = z.object({

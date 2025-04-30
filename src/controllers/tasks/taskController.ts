@@ -198,7 +198,7 @@ export const getTasksV2 = asyncHandler(async (req: Request, res: TypedResponse<a
 
         if (lead) query.lead = new mongoose.Types.ObjectId(lead);
         //filter with staff only when there is no filter for manager.
-        if (staffs.length > 0) query.assigned = {$in: staffs};
+        if (staffs.length > 0) query.assigned = {$in: staffs.map(e => Types.ObjectId.createFromHexString(e.toString()))};
         if (category) query.category = category;
 
         // Date range filter
@@ -215,6 +215,7 @@ export const getTasksV2 = asyncHandler(async (req: Request, res: TypedResponse<a
                 $facet: {
                     tasks: [
                         { $match: { isCompleted: false }},
+                        { $sort: { due: 1 }},
                         { $skip: skip},
                         {$limit: limit},
                         {
