@@ -145,8 +145,15 @@ export const getStaffReport = async (req: Request, res: TypedResponse<any>) => {
         let pipeline: PipelineStage[] = [];
 
         const matchQuery: FilterQuery<IActivity> = {};
+        let staffs: {$in?: Types.ObjectId[], $nin?:  Types.ObjectId[]} = {};
+        let createdAt;
 
         if (query.startDate && query.endDate) {
+            createdAt = {
+                $gte: query.startDate,
+                $lte: query.endDate
+            };
+
             matchQuery.createdAt = {
                 $gte: query.startDate,
                 $lte: query.endDate
@@ -158,178 +165,67 @@ export const getStaffReport = async (req: Request, res: TypedResponse<any>) => {
                 .find({manager: query.manager}, {_id: true})
                 .lean().then(e => e.map(e => e._id));
             const allEmployeeUnderTheBranch = [...staffsIds, Types.ObjectId.createFromHexString(query.manager)];
-            matchQuery.activator = {$in: allEmployeeUnderTheBranch};
-            pipeline.push({ $match: matchQuery });
+            staffs = {$in: allEmployeeUnderTheBranch};
         }
 
         if (query.staff) {
-            matchQuery.activator = Types.ObjectId.createFromHexString(query.staff);
-            pipeline.push({ $match: matchQuery })
+            staffs = {$in: [Types.ObjectId.createFromHexString(query.staff)]}
         }
 
         if (!query.manager && !query.staff) {
             //exclude admin activities. since we don't specify whom activity.
-            matchQuery.activator = {$nin: adminIds};
-            pipeline.push({ $match: matchQuery });
+            staffs = {$nin: adminIds}
         }
 
+        if(staffs) {
+            matchQuery.activator = staffs;
+        }
+        if(createdAt) {
+            matchQuery.createdAt = createdAt;
+        }
+
+        pipeline.push({ $match: matchQuery});
 
         pipeline.push({
-            $lookup: {
-                from: 'users',
-                localField: 'activator',
-                foreignField: '_id',
-                pipeline: [
-                    {
-                        $lookup: {
-                            from: 'users',
-                            localField: 'manager',
-                            foreignField: '_id',
-                            as: 'manager'
+                $lookup: {
+                    from: 'users',
+                    localField: 'activator',
+                    foreignField: '_id',
+                    pipeline: [
+                        {
+                            $lookup: {
+                                from: 'users',
+                                localField: 'manager',
+                                foreignField: '_id',
+                                as: 'manager'
+                            }
+                        },
+                        {
+                            $unwind: {
+                                path: "$manager",
+                                preserveNullAndEmptyArrays: true
+                            }
+                        },
+                        {
+                            $project: {
+                                _id: 0,
+                                manager: {$ifNull: ["$manager.username", "$username"]},
+                                username: 1
+                            }
                         }
-                    },
-                    {
-                        $unwind: {
-                            path: "$manager",
-                            preserveNullAndEmptyArrays: true
-                        }
-                    },
-                    {
-                        $project: {
-                            _id: 0,
-                            manager: {$ifNull: ["$manager.username", "$username"]},
-                            username: 1
-                        }
-                    }
-                ],
-                as: 'activator'
-            }
+                    ],
+                    as: 'activator'
+                }
             }, {
                 $unwind: "$activator"
             },
             {
                 $match: {
-                    "activator.username" : {$exists: true}
+                    "activator.username": {$exists: true}
                 }
             },
-            );
-
-        //to find, won, visited count, need to look into lead, also need to see call-center created, if yes, they should also get the credit.
-        pipeline.push({
-                $facet: {
-                    a1: [
-                        {
-                            $match: {
-                                type: "status_updated"
-                            }
-                        },
-                        {
-                            $lookup: {
-                                from: 'leads',
-                                localField: 'lead',
-                                foreignField: '_id',
-                                as: 'lead'
-                            }
-                        },
-                        {
-                            $group: {
-                                _id: "$lead",
-                                activator: {$first: "$activator"},
-                                //TODO: I want to check the
-                                is_won: {
-                                    $max: {
-                                        $cond: [{ $eq: ["$lead.enquireStatus", "won"] }, 1, 0]
-                                    }
-                                },
-                                is_visited: {
-                                    $max: {
-                                        $cond: [{ $eq: ["$lead.enquireStatus", "visit store"] }, 1, 0]
-                                    }
-                                }
-                            }
-                        },
-                        {
-                            $lookup: {
-                                from: 'users',
-                                localField: '_id.createdBy',
-                                foreignField: '_id',
-                                as: 'created'
-                            }
-                        },
-                        {
-                            $unwind: "$created"
-                        },
-                        {
-                          $lookup: {
-                              from: 'users',
-                              localField: 'created.manager',
-                              foreignField: '_id',
-                              as: 'created_manager'
-                          }
-                        },
-                        {
-                            $project: {
-                                lead: "$_id",
-                                activator: 1,
-                                is_won: 1,
-                                is_visited: 1
-                            }
-                        },
-                        {
-                            $project: {
-                                createdBy: "$lead.createdBy",
-                                handledBy: "$lead.handledBy",
-                            }
-                        },
-                        //TODO: below, I want to have two items if createdBy and hanledBy is not same, like copy
-                        {
-                            $project: {
-                                createdBy: "$lead.createdBy",
-                                handledBy: "$lead.handledBy",
-                                entries: {
-                                    $cond: {
-                                        if: {
-                                            $and: [
-                                                { $ne: ["$lead.createdBy", "$lead.handledBy"] },
-                                                { $eq: ["$created.secondPrivilege", "call-center"] }
-                                            ]
-                                        },
-                                        then: [
-                                            { activator: "$created", is_won: "$is_won", is_visited: "$is_visited"},
-                                            { activator: "$activator", is_won: "$is_won", is_visited: "$is_visited" },
-                                        ],
-                                        else: [{ activator: "$activator", is_won: "$is_won", is_visited: "$is_visited"}]
-                                    }
-                                }
-                            }
-                        },
-                        {
-                            $unwind: "$entries"
-                        }
-                    ],
-                    original: [
-                        {
-                            $project: {
-                                activator: 1,
-                                type: 1,
-                            }
-                        }
-                    ]
-                }
-            },
-            {
-                $project: {
-                    combined: {$concatArrays: ["$a1", "$original"]}
-                }
-            },
-            {
-                $unwind: "$combined"
-            },
-            {
-                $replaceRoot: {newRoot: "$combined"}
-            }
-        //     //TODO: need to compine them, it is like I amm appending to the array
         );
+
 
         pipeline.push({
             $group: {
@@ -364,11 +260,12 @@ export const getStaffReport = async (req: Request, res: TypedResponse<any>) => {
                     completed: { $sum: "$completed" },
                     call_status_updated: { $sum: "$call_status_updated" },
                     dialed: { $sum: "$dialed" },
-                    won: { $sum: "$is_won" },
-                    visited: { $sum: "$is_visited" },
                 }
             });
         }
+
+        const leadStatus = [];
+        const taskPending = 0;
 
         // res.status(200).json(pipeline);
         // return;
