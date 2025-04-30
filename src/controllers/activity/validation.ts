@@ -36,3 +36,17 @@ export const callReportsRequestSchema = z
         managerId: ObjectIdSchema.optional(),
         staffId: ObjectIdSchema.optional(),
     }).merge(optionalDateQueryFiltersSchema)
+
+
+export const statsSchema = z.object({
+    _id: z.string(),
+    count: z.number().default(0),
+    task_added: z.number().default(0),
+    lead_added: z.number().default(0),
+    status_updated: z.number().default(0),
+    call_status_updated: z.number().default(0),
+    total_leads: z.number().default(0),
+    total_won: z.number().default(0),
+    total_visited: z.number().default(0),
+    pending_tasks: z.number().default(0)
+});

@@ -1,15 +1,17 @@
 import {Request, Response} from 'express';
 import asyncHandler from 'express-async-handler';
 import {onCatchError} from "../../middleware/error";
-import {activityFilterSchema, createNoteSchema} from "./validation";
+import {activityFilterSchema, createNoteSchema, statsSchema} from "./validation";
 import Activity, {IActivity} from '../../models/Activity';
-import {convertToIstMillie} from "../../utils/ist_time";
-import {FilterQuery, ObjectId, PipelineStage, Types} from "mongoose";
+import {FilterQuery, PipelineStage, Types} from "mongoose";
 import User from "../../models/User";
 import {z} from "zod";
 import {dateFiltersSchema, ObjectIdSchema} from "../../common/types";
 import {TypedResponse} from "../../common/interface";
 import puppeteer from 'puppeteer';
+import Task, {ITask} from "../../models/Task";
+import Lead, {ILead} from "../../models/Lead";
+import {runtimeValidation} from "../../utils/validation";
 
 export const getActivity = asyncHandler(
     async (req: Request, res: Response) => {
@@ -147,6 +149,7 @@ export const getStaffReport = async (req: Request, res: TypedResponse<any>) => {
         const matchQuery: FilterQuery<IActivity> = {};
         let staffs: {$in?: Types.ObjectId[], $nin?:  Types.ObjectId[]} = {};
         let createdAt;
+        let managerName;
 
         if (query.startDate && query.endDate) {
             createdAt = {
@@ -166,6 +169,9 @@ export const getStaffReport = async (req: Request, res: TypedResponse<any>) => {
                 .lean().then(e => e.map(e => e._id));
             const allEmployeeUnderTheBranch = [...staffsIds, Types.ObjectId.createFromHexString(query.manager)];
             staffs = {$in: allEmployeeUnderTheBranch};
+            managerName = await User
+                .findById(query.manager, {username: true})
+                .lean().then(e => e?.username ?? "Unknown");
         }
 
         if (query.staff) {
@@ -264,108 +270,45 @@ export const getStaffReport = async (req: Request, res: TypedResponse<any>) => {
             });
         }
 
-        const leadStatus = await Lead.aggregate([
-            {
-                $match: matchQuery
-            },
-            {
-                $lookup: {
-                    from: 'users',
-                    localField: 'handledBy',
-                    foreignField: '_id',
-                    pipeline: [
-                        {
-                            $lookup: {
-                                from: 'users',
-                                localField: 'manager',
-                                foreignField: '_id',
-                                as: 'manager'
-                            }
-                        },
-                        {
-                            $unwind: {
-                                path: "$manager",
-                                preserveNullAndEmptyArrays: true
-                            }
-                        },
-                        {
-                            $project: {
-                                _id: 0,
-                                manager: {$ifNull: ["$manager.username", "$username"]},
-                                username: 1
-                            }
-                        }
-                    ],
-                    as: 'handledBy'
-                }
-            },
-            {
-                $unwind: "$handledBy"
-            },
-            {
-                $group: {
-                    _id: "$handledBy.username",
-                    manager: { $first: "$handledBy.manager" },
-                    total_leads: { $sum: 1 },
-                    is_won: { $sum: { $cond: [{ $eq: ["$enquireStatus", "won"] }, 1, 0] } },
-                    is_visited: { $sum: { $cond: [{ $eq: ["$enquireStatus", "visited"] }, 1, 0] } }
-                }
-            }
-        ]);
+        const leadDbQuery: FilterQuery<ILead> = {};
 
-        const pendingTasks = await Task.aggregate([
-            {
-                $match: {
-                    ...matchQuery,
-                    isCompleted: false
-                }
-            },
-            {
-                $lookup: {
-                    from: 'users',
-                    localField: 'assigned',
-                    foreignField: '_id',
-                    pipeline: [
-                        {
-                            $lookup: {
-                                from: 'users',
-                                localField: 'manager',
-                                foreignField: '_id',
-                                as: 'manager'
-                            }
-                        },
-                        {
-                            $unwind: {
-                                path: "$manager",
-                                preserveNullAndEmptyArrays: true
-                            }
-                        },
-                        {
-                            $project: {
-                                _id: 0,
-                                manager: {$ifNull: ["$manager.username", "$username"]},
-                                username: 1
-                            }
-                        }
-                    ],
-                    as: 'assigned'
-                }
-            },
-            {
-                $unwind: "$assigned"
-            },
-            {
-                $group: {
-                    _id: "$assigned.username",
-                    manager: { $first: "$assigned.manager" },
-                    pending_tasks: { $sum: 1 }
-                }
-            }
-        ]);
+        if(createdAt) {
+            leadDbQuery.createdAt = createdAt;
+        }
+
+        if(staffs) {
+            leadDbQuery.handledBy = staffs;
+        }
+
+        const leadStatus: {
+            _id: string;
+            manager: string;
+            total_leads: number;
+            is_won: number
+            is_visited: number;
+        }[] = await getLeadStatusByHandler(leadDbQuery);
+
+        let taskDbQuery: FilterQuery<ITask> = {
+            isCompleted: false
+        };
+
+        if(createdAt) {
+            taskDbQuery.createdAt = createdAt;
+        }
+
+        if(staffs) {
+            taskDbQuery.assigned = staffs;
+        }
+
+        const pendingTasks: {
+            _id: string;
+            manager: string;
+            pending_tasks: number;
+        }[] = await getPendingTasksByUser(taskDbQuery);
 
         // Merge leadStatus and pendingTasks data
-        const combinedData = leadStatus.map(staff => {
-            const taskData = pendingTasks.find(t => t._id === staff._id) || { pending_tasks: 0 };
+        const combinedData = leadStatus.map((staff: any) => {
+            const taskData = pendingTasks.find((t: any) => t._id === staff._id) || { pending_tasks: 0 };
             return {
                 ...staff,
                 pending_tasks: taskData.pending_tasks
@@ -374,17 +317,17 @@ export const getStaffReport = async (req: Request, res: TypedResponse<any>) => {
 
         const data = await Activity.aggregate(pipeline);
 
-        // const pdfBuffer = await createPdf(generateTableHtml(data, query.startDate ?? new Date(0), query.endDate ?? new Date(), "Anshif"));
-        res.status(200).json(data);
-        // console.log(data);
-        // res.set({
-        //     'Content-Type': 'application/pdf',
-        //     'Content-Disposition': 'attachment; filename="generated.pdf"',
-        //     'Content-Length': pdfBuffer.length
-        // });
-        // res.end(pdfBuffer);
+        const validData = runtimeValidation(statsSchema, compine(data, combinedData));
+
+        const pdfBuffer = await createPdf(generateTableHtml(validData, query.startDate ?? new Date(0), query.endDate ?? new Date(), managerName));
+        res.set({
+            'Content-Type': 'application/pdf',
+            'Content-Disposition': 'attachment; filename="generated.pdf"',
+            'Content-Length': pdfBuffer.length
+        });
+        res.end(pdfBuffer);
     } catch (e) {
-        console.log("error on new: ", e);
+        console.log("error on pdf report: ", e);
         onCatchError(e, res);
     }
 }
@@ -404,13 +347,13 @@ const createPdf = async (html: string) => {
 const generateTableHtml = (items: any, start: Date, end: Date, manager?: string) => {
     const headers = [
         "Username", "Tasks Added", "Leads Added",
-        "Status Updates", "Won", "Visit"
+        "Status Updates", "Won", "Visit", "Pending Task"
     ];
 
     const keys = [
         "_id", "task_added", "lead_added",
         "status_updated",
-        "won", 'visited'
+        "total_won", 'total_visited', 'pending_tasks'
     ];
 
     const rows = items.map((item: any) => {
@@ -431,7 +374,7 @@ const generateTableHtml = (items: any, start: Date, end: Date, manager?: string)
         h1 {
             text-align: center;
             color: #333;
-            font-size: 25px
+            font-size: 20px
         }
         table {
             width: 100%;
@@ -501,7 +444,7 @@ const generateTableHtml = (items: any, start: Date, end: Date, manager?: string)
 ` : "<div></div>"}
 
     <img src="data:image/png;base64,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" class="logo" alt="Logo">
-<h2>Activity Summary</h2>
+    <h1>Activity Summary</h1>
 <div id="table-container"></div>
     <table>
         <thead>
@@ -512,3 +455,160 @@ const generateTableHtml = (items: any, start: Date, end: Date, manager?: string)
     `;
 
 };
+
+
+const compine = (data: any, combinedData: any) => {
+    const activityMap: any = {};
+    data.forEach((activity: any) => {
+        activityMap[activity._id] = activity;
+    });
+
+// Create a mapping of manager ids to their associated leads
+    const managerLeads: any = {};
+    combinedData.forEach((lead: any) => {
+        const managerId: any = lead.manager;
+        if (!managerLeads[managerId]) {
+            managerLeads[managerId] = [];
+        }
+        managerLeads[managerId].push(lead);
+    });
+
+// Combine the data
+    return data.map((activity: any) => {
+        const associatedLeads = managerLeads[activity._id] || [];
+
+        // Calculate totals from associated leads
+        const totalLeads = associatedLeads.reduce((sum: any, lead: any) => sum + lead.total_leads, 0);
+        const totalWon = associatedLeads.reduce((sum: any, lead: any) => sum + lead.is_won, 0);
+        const totalVisited = associatedLeads.reduce((sum: any, lead: any) => sum + lead.is_visited, 0);
+        const totalPendingTasks = associatedLeads.reduce((sum: any, lead: any) => sum + lead.pending_tasks, 0);
+
+        return {
+            _id: activity._id,
+            // Activity metrics
+            count: activity.count,
+            task_added: activity.task_added,
+            lead_added: activity.lead_added,
+            note_added: activity.note_added,
+            followup_added: activity.followup_added,
+            status_updated: activity.status_updated,
+            completed: activity.completed,
+            call_status_updated: activity.call_status_updated,
+            dialed: activity.dialed,
+            // Lead metrics
+            total_leads: totalLeads,
+            total_won: totalWon,
+            total_visited: totalVisited,
+            pending_tasks: totalPendingTasks,
+        };
+    });
+}
+
+async function getPendingTasksByUser(taskQuery = {}): Promise<any[]> {
+    return Task.aggregate([
+        {
+            $match: taskQuery
+        },
+        {
+            $lookup: {
+                from: 'users',
+                localField: 'assigned',
+                foreignField: '_id',
+                pipeline: [
+                    {
+                        $lookup: {
+                            from: 'users',
+                            localField: 'manager',
+                            foreignField: '_id',
+                            as: 'manager'
+                        }
+                    },
+                    {
+                        $unwind: {
+                            path: "$manager",
+                            preserveNullAndEmptyArrays: true
+                        }
+                    },
+                    {
+                        $project: {
+                            _id: 0,
+                            manager: {$ifNull: ["$manager.username", "$username"]},
+                            username: 1
+                        }
+                    }
+                ],
+                as: 'assigned'
+            }
+        },
+        {
+            $unwind: "$assigned"
+        },
+        {
+            $group: {
+                _id: "$assigned.username",
+                manager: {$first: "$assigned.manager"},
+                pending_tasks: {$sum: 1}
+            }
+        }
+    ]);
+}
+
+interface LeadStatusResult {
+    _id: string;
+    manager: string;
+    total_leads: number;
+    is_won: number;
+    is_visited: number;
+}
+
+
+async function getLeadStatusByHandler(leadDbQuery: FilterQuery<ILead>): Promise<LeadStatusResult[]> {
+    return Lead.aggregate([
+        {
+            $match: leadDbQuery
+        },
+        {
+            $lookup: {
+                from: 'users',
+                localField: 'handledBy',
+                foreignField: '_id',
+                pipeline: [
+                    {
+                        $lookup: {
+                            from: 'users',
+                            localField: 'manager',
+                            foreignField: '_id',
+                            as: 'manager'
+                        }
+                    },
+                    {
+                        $unwind: {
+                            path: "$manager",
+                            preserveNullAndEmptyArrays: true
+                        }
+                    },
+                    {
+                        $project: {
+                            _id: 0,
+                            manager: {$ifNull: ["$manager.username", "$username"]},
+                            username: 1
+                        }
+                    }
+                ],
+                as: 'handledBy'
+            }
+        },
+        {
+            $unwind: "$handledBy"
+        },
+        {
+            $group: {
+                _id: "$handledBy.username",
+                manager: {$first: "$handledBy.manager"},
+                total_leads: {$sum: 1},
+                is_won: {$sum: {$cond: [{$eq: ["$enquireStatus", "won"]}, 1, 0]}},
+                is_visited: {$sum: {$cond: [{$eq: ["$enquireStatus", "visited"]}, 1, 0]}}
+            }
+        }
+    ]);
+}
