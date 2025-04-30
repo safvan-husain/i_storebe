@@ -121,30 +121,11 @@ const _getLeadsAnalytics = async ({startDate, endDate, managerId, handlerId}: {
         ...e,
         date: new Date(e._id).getTime()
     }));
-    let IstNowInMillie = convertToIstMillie(new Date());
-    let tasks = await Task.aggregate([
-        ...pipeline,
-        {
-            $group: {
-                _id: null,
-                completed: {$sum: {$cond: [{$eq: ["$isCompleted", true]}, 1, 0]}},
-                overDue: {$sum: {$cond: [{$lt: ["$due", new Date(IstNowInMillie)]}, 1, 0]}},
-                total: {$sum: 1}
-            }
-        }
-    ]);
-    const taskData = tasks.length > 0 ? tasks[0] : {completed: 0, overDue: 0, total: 0};
-    const taskStatus = {
-        completed: taskData.completed,
-        overDue: taskData.overDue,
-        total: taskData.total,
-        pending: taskData.total - (taskData.overDue + taskData.completed)
-    };
     if (startDate && endDate) {
         leadProgress = compressProgress(leadProgress, startDate, endDate);
     }
     return {
-        taskStatus: taskStatusSchema.parse(taskStatus),
+        taskStatus: taskStatusSchema.parse({}),
         enquireStatus: enquireStatusSchema.parse(leadStatus),
         enquireSource: enquireSourceSchema.parse(leadStatus),
         purpose: purposeSchema.parse(leadStatus),
