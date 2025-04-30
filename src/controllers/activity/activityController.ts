@@ -313,6 +313,65 @@ export const getStaffReport = async (req: Request, res: TypedResponse<any>) => {
             }
         ]);
 
+        const pendingTasks = await Task.aggregate([
+            {
+                $match: {
+                    ...matchQuery,
+                    isCompleted: false
+                }
+            },
+            {
+                $lookup: {
+                    from: 'users',
+                    localField: 'assigned',
+                    foreignField: '_id',
+                    pipeline: [
+                        {
+                            $lookup: {
+                                from: 'users',
+                                localField: 'manager',
+                                foreignField: '_id',
+                                as: 'manager'
+                            }
+                        },
+                        {
+                            $unwind: {
+                                path: "$manager",
+                                preserveNullAndEmptyArrays: true
+                            }
+                        },
+                        {
+                            $project: {
+                                _id: 0,
+                                manager: {$ifNull: ["$manager.username", "$username"]},
+                                username: 1
+                            }
+                        }
+                    ],
+                    as: 'assigned'
+                }
+            },
+            {
+                $unwind: "$assigned"
+            },
+            {
+                $group: {
+                    _id: "$assigned.username",
+                    manager: { $first: "$assigned.manager" },
+                    pending_tasks: { $sum: 1 }
+                }
+            }
+        ]);
+
+        // Merge leadStatus and pendingTasks data
+        const combinedData = leadStatus.map(staff => {
+            const taskData = pendingTasks.find(t => t._id === staff._id) || { pending_tasks: 0 };
+            return {
+                ...staff,
+                pending_tasks: taskData.pending_tasks
+            };
+        });
+
         const data = await Activity.aggregate(pipeline);
 
         // const pdfBuffer = await createPdf(generateTableHtml(data, query.startDate ?? new Date(0), query.endDate ?? new Date(), "Anshif"));
