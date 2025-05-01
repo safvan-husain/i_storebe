@@ -99,7 +99,7 @@ export const createTask = asyncHandler(async (req: Request, res: Response) => {
     }
 });
 
-// Get tasks with filters
+// Get tasks with filters - this is no longer using.
 export const getTasks = asyncHandler(async (req: Request, res: TypedResponse<TaskResponse[]>) => {
     try {
         const {lead, assigned, startDate, endDate, skip, limit, managers, category} = TaskFilterSchema.parse(req.body);
@@ -203,7 +203,7 @@ export const getTasksV2 = asyncHandler(async (req: Request, res: TypedResponse<a
 
         // Date range filter
         if (startDate || endDate) {
-            query.due = {};
+            query.createdAt = {};
             if (startDate) query.createdAt.$gte = startDate;
             if (endDate) query.createdAt.$lte = endDate;
         }

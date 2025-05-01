@@ -6,6 +6,8 @@ import Leave, {LeaveStatus, leaveStatusSchema} from "../../models/Leave";
 import {TypedResponse} from "../../common/interface";
 import {optionalDateQueryFiltersSchema, ObjectIdSchema, paginationSchema} from "../../common/types";
 import {Schema, Types} from "mongoose";
+import {createNotificationForUsers, sendPushNotification} from "../../services/notification-services";
+import User from "../../models/User";
 
 export const applyLeave = asyncHandler(
     async (req: Request, res: TypedResponse<void>) => {
@@ -24,6 +26,12 @@ export const applyLeave = asyncHandler(
                 reason: data.reason,
                 date: data.date
             });
+            const superAdmins = await User.find({ secondPrivilege: "super" }, { _id : true })
+                .lean().then(e => e.map(e => e._id));
+
+            for (const id of superAdmins) {
+                await sendPushNotification({ title: "New Leave request", body: `leave requested by ${req.username} on to ${new Date(data.date).toDateString()}`, userId: id.toString() });
+            }
             res.status(200).json({message: "Leave applied successfully"});
         } catch (e) {
             onCatchError(e, res);
@@ -141,6 +149,7 @@ export const updateLeaveStatus = async (req: Request, res: TypedResponse<ILeaveR
             res.status(404).json({message: "Leave not found"});
             return;
         }
+        await sendPushNotification({ title: "Update on leave request", body: `You leave request ${data.status}`, userId: leave.requester._id.toString()})
         res.status(200).json({
             username: leave.requester.username,
             date: leave.date.getTime(),

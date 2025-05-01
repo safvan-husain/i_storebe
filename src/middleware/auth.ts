@@ -12,6 +12,7 @@ declare global {
             privilege: UserPrivilege;
             secondPrivilege: SecondUserPrivilege;
             manager?: Types.ObjectId;
+            username?: string;
         }
     }
 }
@@ -40,10 +41,11 @@ export const protect = async (req: Request, res: Response, next: NextFunction) =
         req.secondPrivilege = decoded.secondPrivilege ?? "regular";
 
         const user = await User
-            .findById(req.userId, {_id: true, isActive: true, isNewPassword: true, manager: true })
-            .lean<{ _id: Types.ObjectId, isActive: boolean, isNewPassword: boolean, manager: Types.ObjectId  }>();
+            .findById(req.userId, {_id: true, isActive: true, isNewPassword: true, manager: true, username: true })
+            .lean<{ _id: Types.ObjectId, isActive: boolean, isNewPassword: boolean, manager: Types.ObjectId, username: string  }>();
 
         req.manager = user?.manager;
+        req.username = user?.username;
 
         if (!user) {
             res.status(401).json({message: 'Not authorized, user not found'});

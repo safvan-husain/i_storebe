@@ -223,8 +223,6 @@ export const getLeads = asyncHandler(async (req: Request, res: TypedResponse<Get
             matchStage.createdAt = {$lte: filter.endDate};
         }
 
-        console.log(`match create ${matchStage.createdAt}`);
-
         if ((filter.enquireStatus?.length ?? 0) > 0) {
             matchStage.enquireStatus = {$in: filter.enquireStatus};
         }

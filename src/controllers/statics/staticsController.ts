@@ -16,6 +16,7 @@ export const getLeadsStatics = asyncHandler(
                 return;
             }
             let {startDate, endDate, managerId} = staticsFilterSchema.parse(req.query);
+
             let manager;
             if (req.privilege === 'staff') {
                 const analytics = await _getLeadsAnalytics({
@@ -103,6 +104,13 @@ const _getLeadsAnalytics = async ({startDate, endDate, managerId, handlerId}: {
                     {
                         $group: {
                             _id: {$dateToString: {format: "%Y-%m-%d", date: "$createdAt"}},
+                            // _id: {
+                            //     $dateToString: {
+                            //         format: "%Y-%m-%d",
+                            //         date: "$createdAt",
+                            //         timezone: "Asia/Kolkata"
+                            //     }
+                            // },
                             count: {$sum: 1}
                         }
                     },

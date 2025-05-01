@@ -83,7 +83,7 @@ export const createNotificationForUsers =
         sendPushNotification({title: "You have new lead", body: title, userId: assigned}).catch(e => console.error(e));
     }
 
-const sendPushNotification = async ({title, body, userId}: {
+export const sendPushNotification = async ({title, body, userId}: {
     title: string,
     body: string,
     userId: string
