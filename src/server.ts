@@ -93,7 +93,7 @@ app.get('/api/token', async (req, res) => {
 })
 
 // Run daily at 12:00 AM IST
-cron.schedule('*/10 * * * *', async () => {
+cron.schedule('0 0 * * *', async () => {
     console.log("Running cron job", new Date());
     await wishBirthDayToCustomers();
 }, {
