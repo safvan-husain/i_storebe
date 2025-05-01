@@ -176,7 +176,7 @@ export const getUsers = asyncHandler(async (req: Request, res: TypedResponse<Man
             managerId = Types.ObjectId.createFromHexString(req.userId);
         }
         let query: FilterQuery<IUser> = {}
-        if (managerId) {
+        if (managerId && req.secondPrivilege !== 'call-center') {
             query.$or = [{manager: managerId}, {_id: managerId}]
         }
         query.privilege = {$ne: 'admin'}
