@@ -293,13 +293,21 @@ const getTargetDataForAdminOrManager = async (filter: FilterQuery<ITarget>): Pro
     }
 }
 
-export const handleTarget = async ({updater, lead}: { updater: ObjectId, lead: ILead<Types.ObjectId, any> }) => {
-    await incrementTargetAchievedCount(updater);
+export const handleTarget = async ({updater, lead, type}: { updater: ObjectId, lead: ILead<Types.ObjectId, any>, type: 'increment' | 'decrement' }) => {
+    if (type === 'increment') {
+        await incrementTargetAchievedCount(updater);
+    } else {
+        await decrementTargetAchievedCount(updater);
+    }
     if (updater.toString() !== lead.createdBy.toString()) {
         let creator = await User.findById(lead.createdBy, {privilege: true, secondPrivilege: true}).lean();
         if (creator?.secondPrivilege === 'call-center') {
             //if created by call center-staff, credit him also for this achievement.
-            await incrementTargetAchievedCount(lead.createdBy as unknown as ObjectId);
+            if (type === 'increment') {
+                await incrementTargetAchievedCount(lead.createdBy as unknown as ObjectId);
+            } else {
+                await decrementTargetAchievedCount(lead.createdBy as unknown as ObjectId);
+            }
         }
     }
 }
@@ -317,3 +325,23 @@ const incrementTargetAchievedCount = async (userId: ObjectId) => {
         })
     }
 }
+
+const decrementTargetAchievedCount = async (userId: ObjectId) => {
+    let thisMonth = getMonthOnly();
+    let target = await Target.findOneAndUpdate(
+        { assigned: userId, month: thisMonth },
+        { $inc: { achieved: -1 } }
+    );
+
+    if (!target) {
+        let existing = await Target.findOne({ assigned: userId, month: thisMonth });
+        if (!existing) {
+            await Target.create({
+                assigned: userId,
+                month: thisMonth,
+                achieved: -1,
+                total: 0
+            });
+        }
+    }
+};

@@ -153,6 +153,11 @@ export const updateLeadStatus = asyncHandler(async (req: Request, res: TypedResp
             }
         }
 
+        if (updateData.enquireStatus !== 'won' && lead.enquireStatus === 'won' && req.privilege !== 'admin') {
+            res.status(403).json({ message: "Only admin can change from won"});
+            return;
+        }
+
         let result = await internalLeadStatusUpdate({
             requestedUser,
             updateData,
@@ -663,8 +668,12 @@ export const internalLeadStatusUpdate = async ({requestedUser, lead, updateData,
         lead.enquireStatus = updateData.enquireStatus;
         //when won or lost, task should be updated as completed.
         //if won should reflect to target.
+        if (lead.enquireStatus === 'won' && updateData.enquireStatus !== 'won') {
+            //if switched from won.
+            await handleTarget({updater: lead.handledBy._id as unknown as ObjectId, lead, type: 'decrement'});
+        }
         if (updateData.enquireStatus === 'won') {
-            await handleTarget({updater: requestedUser._id as unknown as ObjectId, lead});
+            await handleTarget({updater: requestedUser._id as unknown as ObjectId, lead, type: 'increment'});
             //since this function is used on both lead status update and task status update, updating specific task or all task for a lead.
             await markTaskCompleted(taskId ? {taskId} : {leadId: lead._id});
         } else if (updateData.enquireStatus === 'lost') {
