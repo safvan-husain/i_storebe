@@ -4,7 +4,7 @@ import {onCatchError} from "../../middleware/error";
 import {activityFilterSchema, createNoteSchema, statsSchema} from "./validation";
 import Activity, {IActivity} from '../../models/Activity';
 import {FilterQuery, PipelineStage, Types} from "mongoose";
-import User from "../../models/User";
+import User, {IUser} from "../../models/User";
 import {z} from "zod";
 import {dateFiltersSchema, ObjectIdSchema} from "../../common/types";
 import {TypedResponse} from "../../common/interface";
@@ -142,12 +142,15 @@ export const getStaffReport = async (req: Request, res: TypedResponse<any>) => {
         const adminIds = await User
             .find({ privilege: 'admin' }, { _id: true})
             .lean().then(e => e.map(e => e._id));
-        // const adminIds: any[] = [];
 
         let pipeline: PipelineStage[] = [];
 
         const matchQuery: FilterQuery<IActivity> = {};
         let staffs: {$in?: Types.ObjectId[], $nin?:  Types.ObjectId[]} = {};
+        let usernames: string[] = [];
+
+        //if no manager or staff, specified, group them by manager.
+        const shouldGroupByManager = !query.manager && !query.staff;
         let createdAt;
         let managerName;
 
@@ -164,9 +167,11 @@ export const getStaffReport = async (req: Request, res: TypedResponse<any>) => {
         }
 
         if (query.manager) {
-            const staffsIds = await User
-                .find({manager: query.manager}, {_id: true})
-                .lean().then(e => e.map(e => e._id));
+            const result = await User
+                .find({ manager: query.manager }, { _id: 1, username: 1 })
+                .lean();
+
+            const staffsIds = result.map(e => e._id);
             const allEmployeeUnderTheBranch = [...staffsIds, Types.ObjectId.createFromHexString(query.manager)];
             staffs = {$in: allEmployeeUnderTheBranch};
             managerName = await User
@@ -178,13 +183,22 @@ export const getStaffReport = async (req: Request, res: TypedResponse<any>) => {
             staffs = {$in: [Types.ObjectId.createFromHexString(query.staff)]}
         }
 
-        if (!query.manager && !query.staff) {
+        if (shouldGroupByManager) {
             //exclude admin activities. since we don't specify whom activity.
             staffs = {$nin: adminIds}
+
         }
 
         if(staffs) {
             matchQuery.activator = staffs;
+            //taking usernames to map at last, so user with no activity will still be shown
+            let query: FilterQuery<IUser> = {}
+            query._id = staffs;
+            if(shouldGroupByManager) {
+                query.privilege = 'manager';
+            }
+            usernames = await User.find(query, { username: true })
+                .lean().then(e => e.map(e => e.username));
         }
         if(createdAt) {
             matchQuery.createdAt = createdAt;
@@ -246,26 +260,20 @@ export const getStaffReport = async (req: Request, res: TypedResponse<any>) => {
                 completed: { $sum: { $cond: [{ $eq: ["$type", "completed"] }, 1, 0] } },
                 call_status_updated: { $sum: { $cond: [{ $eq: ["$type", "call_status_updated"] }, 1, 0] } },
                 dialed: { $sum: { $cond: [{ $eq: ["$type", "dialed"] }, 1, 0] } },
-                is_won: { $sum: "$is_won" },
-                is_visited: { $sum: "$is_visited" }
             }
         });
 
         //if no specific manager or staff provided, show all managers, summed of their staff
-        if (!query.manager && !query.staff) {
+        if (shouldGroupByManager) {
             console.log("neither manager nor staff");
             pipeline.push({
                 $group: {
                     _id: "$manager",
-                    count: { $sum: "$count" },
                     task_added: { $sum: "$task_added" },
                     lead_added: { $sum: "$lead_added" },
-                    note_added: { $sum: "$note_added" },
                     followup_added: { $sum: "$followup_added" },
                     status_updated: { $sum: "$status_updated" },
-                    completed: { $sum: "$completed" },
                     call_status_updated: { $sum: "$call_status_updated" },
-                    dialed: { $sum: "$dialed" },
                 }
             });
         }
@@ -277,7 +285,7 @@ export const getStaffReport = async (req: Request, res: TypedResponse<any>) => {
         }
 
         if(staffs) {
-            leadDbQuery.handledBy = staffs;
+            leadDbQuery.createdBy = staffs;
         }
 
         const leadStatus: {
@@ -286,7 +294,7 @@ export const getStaffReport = async (req: Request, res: TypedResponse<any>) => {
             total_leads: number;
             is_won: number
             is_visited: number;
-        }[] = await getLeadStatusByHandler(leadDbQuery);
+        }[] = await getLeadStatusByHandler(leadDbQuery, shouldGroupByManager);
 
         let taskDbQuery: FilterQuery<ITask> = {
             isCompleted: false
@@ -304,20 +312,33 @@ export const getStaffReport = async (req: Request, res: TypedResponse<any>) => {
             _id: string;
             manager: string;
             pending_tasks: number;
-        }[] = await getPendingTasksByUser(taskDbQuery);
-
-        // Merge leadStatus and pendingTasks data
-        const combinedData = leadStatus.map((staff: any) => {
-            const taskData = pendingTasks.find((t: any) => t._id === staff._id) || { pending_tasks: 0 };
-            return {
-                ...staff,
-                pending_tasks: taskData.pending_tasks
-            };
-        });
+        }[] = await getPendingTasksByUser(taskDbQuery, shouldGroupByManager);
 
         const data = await Activity.aggregate(pipeline);
 
-        const validData = runtimeValidation(statsSchema, compine(data, combinedData));
+        const leadsMap = new Map(leadStatus.map(e => [e._id, e]));
+        const pendingTaskMap = new Map(pendingTasks.map(e => [e._id, e]));
+        const activityMap = new Map(data.map(e => [e._id, e]));
+
+        const allIds = usernames;
+        const combinedArray = Array.from(allIds).map(_id => ({
+            _id,
+            lead: leadsMap.get(_id) || null,
+            task: pendingTaskMap.get(_id) || null,
+            activity: activityMap.get(_id) || null,
+        }));
+
+        const newd = combinedArray.map(e => ({
+            _id: e._id,
+            ...e.lead,
+            ...e.task,
+            ...e.activity
+        }))
+
+        const validData = runtimeValidation(statsSchema, newd.map(e => ({
+            ...e,
+            task_added: (e.task_added ?? 0) + (e.followup_added ?? 0)
+        })));
 
         const pdfBuffer = await createPdf(generateTableHtml(validData, query.startDate ?? new Date(0), query.endDate ?? new Date(), managerName));
         res.set({
@@ -353,7 +374,7 @@ const generateTableHtml = (items: any, start: Date, end: Date, manager?: string)
     const keys = [
         "_id", "task_added", "lead_added",
         "status_updated",
-        "total_won", 'total_visited', 'pending_tasks'
+        "is_won", 'is_visited', 'pending_tasks'
     ];
 
     const rows = items.map((item: any) => {
@@ -456,101 +477,68 @@ const generateTableHtml = (items: any, start: Date, end: Date, manager?: string)
 
 };
 
+async function getPendingTasksByUser(taskQuery = {}, isManagerBased?: boolean): Promise<any[]> {
 
-const compine = (data: any, combinedData: any) => {
-    const activityMap: any = {};
-    data.forEach((activity: any) => {
-        activityMap[activity._id] = activity;
-    });
 
-// Create a mapping of manager ids to their associated leads
-    const managerLeads: any = {};
-    combinedData.forEach((lead: any) => {
-        const managerId: any = lead.manager;
-        if (!managerLeads[managerId]) {
-            managerLeads[managerId] = [];
-        }
-        managerLeads[managerId].push(lead);
-    });
-
-// Combine the data
-    return data.map((activity: any) => {
-        const associatedLeads = managerLeads[activity._id] || [];
-
-        // Calculate totals from associated leads
-        const totalLeads = associatedLeads.reduce((sum: any, lead: any) => sum + lead.total_leads, 0);
-        const totalWon = associatedLeads.reduce((sum: any, lead: any) => sum + lead.is_won, 0);
-        const totalVisited = associatedLeads.reduce((sum: any, lead: any) => sum + lead.is_visited, 0);
-        const totalPendingTasks = associatedLeads.reduce((sum: any, lead: any) => sum + lead.pending_tasks, 0);
-
-        return {
-            _id: activity._id,
-            // Activity metrics
-            count: activity.count,
-            task_added: activity.task_added,
-            lead_added: activity.lead_added,
-            note_added: activity.note_added,
-            followup_added: activity.followup_added,
-            status_updated: activity.status_updated,
-            completed: activity.completed,
-            call_status_updated: activity.call_status_updated,
-            dialed: activity.dialed,
-            // Lead metrics
-            total_leads: totalLeads,
-            total_won: totalWon,
-            total_visited: totalVisited,
-            pending_tasks: totalPendingTasks,
-        };
-    });
-}
-
-async function getPendingTasksByUser(taskQuery = {}): Promise<any[]> {
-    return Task.aggregate([
-        {
-            $match: taskQuery
-        },
-        {
-            $lookup: {
-                from: 'users',
-                localField: 'assigned',
-                foreignField: '_id',
-                pipeline: [
-                    {
-                        $lookup: {
-                            from: 'users',
-                            localField: 'manager',
-                            foreignField: '_id',
-                            as: 'manager'
+    const pipeline: PipelineStage[] =
+        [
+            {
+                $match: taskQuery
+            },
+            {
+                $lookup: {
+                    from: 'users',
+                    localField: 'assigned',
+                    foreignField: '_id',
+                    pipeline: [
+                        {
+                            $lookup: {
+                                from: 'users',
+                                localField: 'manager',
+                                foreignField: '_id',
+                                as: 'manager'
+                            }
+                        },
+                        {
+                            $unwind: {
+                                path: "$manager",
+                                preserveNullAndEmptyArrays: true
+                            }
+                        },
+                        {
+                            $project: {
+                                _id: 0,
+                                manager: {$ifNull: ["$manager.username", "$username"]},
+                                username: 1
+                            }
                         }
-                    },
-                    {
-                        $unwind: {
-                            path: "$manager",
-                            preserveNullAndEmptyArrays: true
-                        }
-                    },
-                    {
-                        $project: {
-                            _id: 0,
-                            manager: {$ifNull: ["$manager.username", "$username"]},
-                            username: 1
-                        }
-                    }
-                ],
-                as: 'assigned'
+                    ],
+                    as: 'assigned'
+                }
+            },
+            {
+                $unwind: "$assigned"
+            },
+            {
+                $group: {
+                    _id: "$assigned.username",
+                    manager: {$first: "$assigned.manager"},
+                    pending_tasks: {$sum: 1}
+                }
             }
-        },
-        {
-            $unwind: "$assigned"
-        },
-        {
+    ];
+
+    if(isManagerBased) {
+        pipeline.push({
             $group: {
-                _id: "$assigned.username",
-                manager: {$first: "$assigned.manager"},
-                pending_tasks: {$sum: 1}
+                _id: "$manager",
+                manager: {$first: "$manager"},
+                pending_tasks: {$sum: "$pending_tasks"}
             }
-        }
-    ]);
+        })
+    }
+
+    return Task.aggregate(pipeline);
 }
 
 interface LeadStatusResult {
@@ -561,9 +549,9 @@ interface LeadStatusResult {
     is_visited: number;
 }
 
+async function getLeadStatusByHandler(leadDbQuery: FilterQuery<ILead>, isManagerBased?: boolean): Promise<LeadStatusResult[]> {
 
-async function getLeadStatusByHandler(leadDbQuery: FilterQuery<ILead>): Promise<LeadStatusResult[]> {
-    return Lead.aggregate([
+    const pipeline: PipelineStage[] = [
         {
             $match: leadDbQuery
         },
@@ -610,5 +598,19 @@ async function getLeadStatusByHandler(leadDbQuery: FilterQuery<ILead>): Promise<
                 is_visited: {$sum: {$cond: [{$eq: ["$enquireStatus", "visited"]}, 1, 0]}}
             }
         }
-    ]);
+    ];
+
+    if (isManagerBased) {
+        pipeline.push({
+            $group: {
+                _id: "$manager",
+                manager: {$first: "$manager"},
+                total_leads: {$sum: "$total_leads"},
+                is_won: {$sum: "$is_won"},
+                is_visited: {$sum: "$is_visited"}
+            }
+        })
+    }
+
+    return Lead.aggregate(pipeline);
 }

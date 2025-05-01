@@ -46,7 +46,7 @@ export const istUtcOffset = 19800000;
 function getUtcStartOfIstDay(istMillis: number): Date {
     const istDate = new Date(istMillis);
     istDate.setHours(0, 0, 0, 0);
-    return new Date(istDate.getTime() - istUtcOffset);
+    return new Date(istDate.getTime());
 }
 
 /**
@@ -55,7 +55,7 @@ function getUtcStartOfIstDay(istMillis: number): Date {
 function getUtcEndOfIstDay(istMillis: number): Date {
     const istDate = new Date(istMillis);
     istDate.setHours(23, 59, 59, 999);
-    return new Date(istDate.getTime() - istUtcOffset);
+    return new Date(istDate.getTime());
 }
 
 /**
@@ -113,7 +113,7 @@ export const optionalDateQueryFiltersSchema = z.object({
 
 export const dateFiltersSchema = z.object({
     startDate: IstToUtsFromStringSchema.transform(date => {
-        const istMillis = date.getTime() + istUtcOffset;
+        const istMillis = date.getTime() //+ istUtcOffset;
         return getUtcStartOfIstDay(istMillis);
     }),
     endDate: IstToUtsFromStringSchema.transform(date => {
