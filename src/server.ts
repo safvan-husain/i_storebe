@@ -92,14 +92,14 @@ app.get('/api/token', async (req, res) => {
     }
 })
 
-app.listen(PORT, () => {
-    console.log(`Server is running on http://0.0.0.0:${PORT}`);
-});
-
 // Run daily at 12:00 AM IST
-cron.schedule('0 0 * * *', async () => {
+cron.schedule('*/10 * * * *', async () => {
     console.log("Running cron job", new Date());
     await wishBirthDayToCustomers();
 }, {
     timezone: "Asia/Kolkata"
 })
+
+app.listen(PORT, () => {
+    console.log(`Server is running on http://0.0.0.0:${PORT}`);
+});
