@@ -21,6 +21,7 @@ export const getNotifications = asyncHandler(
 
             const notifications = await Notification
                 .find({assigned: req.userId}, {title: 1, description: 1, lead: 1, createdAt: 1})
+                .sort({createdAt: -1})
                 .skip(skip).limit(limit)
                 .populate({
                     path: 'lead',
@@ -95,7 +96,28 @@ export const sendPushNotification = async ({title, body, userId}: {
                 title,
                 body
             },
-            token
+            notification: {
+              title,
+              body
+            },
+            token,
+            apns: {
+                headers: {
+                    'apns-priority': '10',          // High priority for immediate delivery
+                    'apns-push-type': 'alert',      // Required for iOS 13+
+                },
+                payload: {
+                    aps: {
+                        alert: {
+                            title,
+                            body,
+                        },
+                        sound: 'default',              // Plays default notification sound
+                        badge: 1,                      // Updates app badge count
+                        'content-available': 1,        // For background data fetch
+                    },
+                },
+            },
         }).then(e => {
             console.log(e);
         }).catch(e => {

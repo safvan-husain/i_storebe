@@ -56,7 +56,7 @@ const _getLeadsAnalytics = async ({startDate, endDate, managerId, handlerId}: {
     if (managerId) {
         match.manager = managerId;
     } else if (handlerId) {
-        match.handler = handlerId;
+        match.handledBy = handlerId;
     }
 
     let pipeline = [];

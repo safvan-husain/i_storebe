@@ -18,7 +18,7 @@ import {ActivityType} from "../activity/validation";
 import Customer, {ICustomer} from "../../models/Customer";
 import {handleTarget} from "../target/targetController";
 import {markTaskCompleted} from "../tasks/taskController";
-import {ObjectIdSchema, UserPrivilegeSchema} from "../../common/types";
+import {ObjectIdSchema, secondUserPrivilegeSchema, UserPrivilegeSchema} from "../../common/types";
 import {z} from "zod";
 import {TypedResponse} from "../../common/interface";
 import Task from "../../models/Task";
@@ -200,7 +200,7 @@ export const getLeads = asyncHandler(async (req: Request, res: TypedResponse<Get
         const matchStage: any = {};
         // Apply filters if provided
         if (filter.searchTerm) {
-            const searchRegex = {$regex: filter.searchTerm, $options: 'i'};
+            const searchRegex = {$regex: filter.searchTerm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), $options: 'i'};
             const customerIds = await Customer.find({
                 $or: [
                     {name: searchRegex},
@@ -554,7 +554,6 @@ export const updateLead = asyncHandler(async (req: Request, res: Response) => {
             return;
         }
 
-
         if (updateData.manager) {
             const managerExists = await User.findById(updateData.manager);
             if (!managerExists) {
@@ -563,11 +562,34 @@ export const updateLead = asyncHandler(async (req: Request, res: Response) => {
             }
         }
 
-        let customer: any = await Customer
-            .findByIdAndUpdate(
-                lead.customer,
-                updateData, {new: true}
-            );
+        let customer: any = await Customer.findById(lead.customer);
+
+        if(!customer) {
+            res.status(404).json({message: 'Customer not found'});
+            return;
+        }
+
+        if (req.privilege === 'admin') {
+            customer = await Customer
+                .findByIdAndUpdate(
+                    lead.customer,
+                    updateData, {new: true}
+                );
+        } else {
+            if (updateData.name !== customer.name) {
+                res.status(404).json({message: "Only admin can change customer data"});
+                return;
+            }
+            if (updateData.phone !== customer.phone) {
+                res.status(404).json({message: "Only admin can change customer data"});
+                return;
+            }
+
+            if (updateData.address !== customer.address) {
+                res.status(404).json({message: "Only admin can change customer data"});
+                return;
+            }
+        }
 
         let updatedLead: any = await Lead.findByIdAndUpdate(
             req.params.id,
@@ -609,13 +631,12 @@ export const updateLead = asyncHandler(async (req: Request, res: Response) => {
 
 export const getTransferableEmployees = async (req: Request, res: TypedResponse<string[]>) => {
     try {
-        let query: FilterQuery<IUser> = {};
+        let query: FilterQuery<IUser> = {
+            //call-center and admin should be able to transfer to anyone except admin
+            privilege : { $ne: UserPrivilegeSchema.enum.admin }
+        };
 
-        if (req.secondPrivilege === 'call-center' || req.privilege === 'manager') {
-            //call center should be able to transfer to other manager's
-            //manager's should be able to transfer to other manager's
-            query.privilege = UserPrivilegeSchema.enum.manager;
-        } else if (req.privilege === 'staff') {
+        if (req.privilege === 'staff' && req.secondPrivilege != 'call-center') {
             //staff should be able to transfer to his manager and peer staffs
             query.manager = req.manager;
             query.$or = [
@@ -631,7 +652,10 @@ export const getTransferableEmployees = async (req: Request, res: TypedResponse<
         if(req.privilege === 'manager') {
             //manager should be able to transfer to all his staffs
             query.manager = Types.ObjectId.createFromHexString(req.userId!);
+            //and other managers.
+            query.privilege = UserPrivilegeSchema.enum.manager;
         }
+
         const users = await User
             .find(query, { username: true })
             .lean<{ username: string }[]>()
@@ -663,13 +687,13 @@ export const internalLeadStatusUpdate = async ({requestedUser, lead, updateData,
         activityType = 'status_updated';
         message = message + getUpdateStatusMessage('status', lead.enquireStatus, updateData.enquireStatus);
         //after message, changing the value to save later.
-        lead.enquireStatus = updateData.enquireStatus;
         //when won or lost, task should be updated as completed.
         //if won should reflect to target.
         if (lead.enquireStatus === 'won' && updateData.enquireStatus !== 'won') {
             //if switched from won.
             await handleTarget({updater: lead.handledBy._id as unknown as ObjectId, lead, type: 'decrement'});
         }
+        lead.enquireStatus = updateData.enquireStatus;
         if (updateData.enquireStatus === 'won') {
             await handleTarget({updater: requestedUser._id as unknown as ObjectId, lead, type: 'increment'});
             //since this function is used on both lead status update and task status update, updating specific task or all task for a lead.
