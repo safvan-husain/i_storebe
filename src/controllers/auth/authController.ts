@@ -305,3 +305,15 @@ export const getUserById = asyncHandler(async (req: Request, res: TypedResponse<
         onCatchError(e, res);
     }
 });
+
+export const deleteAccount = async (req: Request, res: Response ) => {
+    try {
+        const user = await User.findByIdAndUpdate(req.userId, { isAccountDeleted: true });
+        if (!user) {
+            return res.status(404).json({ message: 'User not found' });
+        }
+        res.status(200).json({ message: 'Account deleted successfully' });
+    } catch (e) {
+       onCatchError(e, res);
+    }
+}

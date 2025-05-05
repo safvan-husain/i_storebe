@@ -41,13 +41,13 @@ export const protect = async (req: Request, res: Response, next: NextFunction) =
         req.secondPrivilege = decoded.secondPrivilege ?? "regular";
 
         const user = await User
-            .findById(req.userId, {_id: true, isActive: true, isNewPassword: true, manager: true, username: true })
-            .lean<{ _id: Types.ObjectId, isActive: boolean, isNewPassword: boolean, manager: Types.ObjectId, username: string  }>();
+            .findById(req.userId, {_id: true, isActive: true, isNewPassword: true, manager: true, username: true, isAccountDeleted: true })
+            .lean<{ _id: Types.ObjectId, isActive: boolean, isNewPassword: boolean, manager: Types.ObjectId, username: string, isAccountDeleted?: boolean  }>();
 
         req.manager = user?.manager;
         req.username = user?.username;
 
-        if (!user) {
+        if (!user || user.isAccountDeleted) {
             res.status(401).json({message: 'Not authorized, user not found'});
             return;
         } else if (!(user.isActive ?? true)) {

@@ -1,5 +1,5 @@
 import express from 'express';
-import {createUser, getUsers, getUserById, updateFcmToken} from '../controllers/auth/authController';
+import {createUser, getUsers, getUserById, updateFcmToken, deleteAccount} from '../controllers/auth/authController';
 import { protect } from '../middleware/auth';
 import {changeUserPassword, getManagers, getStaffs, updateActiveStatus} from "../controllers/user/usersController";
 import {getNotifications} from "../services/notification-services";
@@ -17,6 +17,7 @@ router.route('/update-active-status').put(protect, updateActiveStatus)
 router.route('/change-password').put(protect, changeUserPassword)
 router.route('/fcm-token').put(protect, updateFcmToken)
 router.route('/notifications').get(protect, getNotifications)
+router.route('/delete-account').get(protect, deleteAccount)
 
 router
   .route('/:id')
