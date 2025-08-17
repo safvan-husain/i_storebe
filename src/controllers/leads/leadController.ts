@@ -23,6 +23,7 @@ import {z} from "zod";
 import {TypedResponse} from "../../common/interface";
 import Task from "../../models/Task";
 import {createNotificationForUsers} from "../../services/notification-services";
+import {runtimeValidation} from "../../utils/validation";
 
 //search Note to see the notes for specific sections
 export const createLead = asyncHandler(async (req: Request, res: TypedResponse<ILeadResponse>) => {
@@ -247,15 +248,15 @@ export const getLeads = asyncHandler(async (req: Request, res: TypedResponse<Get
             matchStage._id = {$nin: taskedLeadIds};
         }
 
-        //if searched, ignore all the role based filter
+        //if searched, ignore all the role based filter - in other words - only apply role based filter on non search request.
         if (!filter.searchTerm) {
             // Role-based filtering
             if (req.privilege === 'manager' && (filter.staffs?.length ?? 0) === 0) { //when manager filter with staffs, it is unnecessary to filter with manager.
                 //when manager provide all the leads created by his staff.
                 matchStage.manager = new Types.ObjectId(req.userId!);
             } else if (req.privilege === 'staff') {
-                //when staff make request, only provide what he created. and handled by manager (if handled by manager it means it available all the staff under him)
-                matchStage.handledBy = {$in: [new Types.ObjectId(req.userId!), requester.manager!]};
+                //when staff make request, only provide what he created.
+                matchStage.handledBy = new Types.ObjectId(req.userId!);
             } else if (req.privilege === 'admin' && (filter.managers?.length ?? 0) > 0) {
                 //when admin pass managers.
                 matchStage.manager = {$in: filter.managers!.map(e => new Types.ObjectId(e))};
@@ -409,6 +410,65 @@ export const getLeads = asyncHandler(async (req: Request, res: TypedResponse<Get
         onCatchError(error, res);
     }
 });
+
+const searchTermSchema = z.object({
+    searchTerm: z.string().optional().transform(e => e?.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+});
+
+const responseTaskableLeadSchema = z.object({
+    _id: z.string(),
+    name: z.string(),
+    phone: z.string()
+})
+
+type ResponseTaskableLead = z.infer<typeof responseTaskableLeadSchema>;
+
+export const getTaskCreatableLead = async (req: Request, res: TypedResponse<ResponseTaskableLead[]>) => {
+    try {
+        const query = searchTermSchema.parse(req.query);
+        const dbQuery: FilterQuery<ILead> = {
+            enquireStatus: { $ne: "won"}
+        };
+
+        if (req.privilege === 'manager') {
+            const staffIds = await User
+                .find({manager: req.userId}, { _id: true })
+                .lean().then(e => e.map(e => e._id));
+            //when manager provide all the leads created by his staff.
+            dbQuery.$or = [
+                {
+                    manager: new Types.ObjectId(req.userId!)
+                },
+                {
+                    handledBy: { $in: [...staffIds, Types.ObjectId.createFromHexString(req.userId!)] }
+                }
+            ];
+        } else if (req.privilege === 'staff') {
+            //when staff make request, only provide what he created
+            dbQuery.handledBy = {$in: [new Types.ObjectId(req.userId!)]};
+        }
+
+        if (query.searchTerm) {
+            const searchRegex = {$regex: query.searchTerm, $options: 'i'};
+            let customersIds = await Customer
+                .find({ name: searchRegex }, { _id: true })
+                .lean<{ _id: Types.ObjectId }[]>().then(e => e.map(e => e._id));
+            dbQuery.customer = { $in: customersIds }
+        }
+        const data = await Lead
+            .find(dbQuery)
+            .populate<{ customer?: { name: string, phone: string}}>('customer', 'name phone')
+            .lean()
+
+        res.status(200).json(runtimeValidation(responseTaskableLeadSchema, data.map(e => ({
+            _id: e._id.toString(),
+            name: e.customer ? e.customer.name + " (" + e.customer.phone.slice(-4) + ")" : "Unknown",
+            phone: e.customer?.phone ?? "Unknown"
+        }))));
+    } catch (e) {
+        onCatchError(e, res);
+    }
+}
 
 interface GetLeadsResponse {
     leads: ILeadResponse[];

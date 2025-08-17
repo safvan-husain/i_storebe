@@ -5,7 +5,7 @@ export const EnquireSource = z.enum(['call', 'facebook', 'instagram', 'previous 
 export const Purpose = z.enum(['inquiry', 'purchase', 'sales', 'service request']);
 export const EnquireStatus = z.enum(['empty', 'contacted', 'interested', 'lost', 'new', 'none', 'pending', 'quotation shared', 'visit store', 'won']);
 export const Type = z.enum(['fresh', 'used']);
-export const callStatusSchema = z.enum(['not-updated', 'connected', 'busy', 'switched-off', 'call_back-requested', 'follow-up-scheduled', 'not-reachable', 'connected-on-whatsapp']);
+export const callStatusSchema = z.enum(['not-updated','not-connected', 'connected', 'busy', 'switched-off', 'call_back-requested', 'follow-up-scheduled', 'not-reachable', 'connected-on-whatsapp']);
 
 
 export type EnquireStatusType = z.infer<typeof EnquireStatus>;

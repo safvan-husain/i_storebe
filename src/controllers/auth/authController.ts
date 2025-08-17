@@ -24,7 +24,7 @@ export const loginUser = asyncHandler(async (req: Request, res: Response) => {
         const {username, password, fcmToken} = loginSchema.parse(req.body);
 
         const user = await User.findOne({username: username.trim()});
-        if (!user) {
+        if (!user || user.isAccountDeleted) {
             res.status(401).json({message: 'user does not exist'});
             return;
         }
