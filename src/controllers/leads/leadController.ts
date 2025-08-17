@@ -1,8 +1,8 @@
-import {Request, Response} from 'express';
-import mongoose, {FilterQuery, ObjectId, Types} from 'mongoose';
+import { Request, Response } from 'express';
+import mongoose, { FilterQuery, ObjectId, Types } from 'mongoose';
 import asyncHandler from 'express-async-handler';
-import Lead, {ILead} from '../../models/Lead';
-import User, {IUser} from '../../models/User';
+import Lead, { ILead } from '../../models/Lead';
+import User, { IUser } from '../../models/User';
 import {
     CallStatus,
     crateLeadSchema, EnquireSourceType,
@@ -11,19 +11,19 @@ import {
     PurposeType, updateLeadData, UpdateLeadStatus,
     updateLeadStatusSchema
 } from './validations';
-import {onCatchError} from '../../middleware/error';
+import { onCatchError } from '../../middleware/error';
 import Activity from "../../models/Activity";
-import {convertToIstMillie} from "../../utils/ist_time";
-import {ActivityType} from "../activity/validation";
-import Customer, {ICustomer} from "../../models/Customer";
-import {handleTarget} from "../target/targetController";
-import {markTaskCompleted} from "../tasks/taskController";
-import {ObjectIdSchema, secondUserPrivilegeSchema, UserPrivilegeSchema} from "../../common/types";
-import {z} from "zod";
-import {TypedResponse} from "../../common/interface";
+import { convertToIstMillie } from "../../utils/ist_time";
+import { ActivityType } from "../activity/validation";
+import Customer, { ICustomer } from "../../models/Customer";
+import { handleTarget } from "../target/targetController";
+import { markTaskCompleted } from "../tasks/taskController";
+import { ObjectIdSchema, secondUserPrivilegeSchema, UserPrivilegeSchema } from "../../common/types";
+import { z } from "zod";
+import { TypedResponse } from "../../common/interface";
 import Task from "../../models/Task";
-import {createNotificationForUsers} from "../../services/notification-services";
-import {runtimeValidation} from "../../utils/validation";
+import { createNotificationForUsers } from "../../services/notification-services";
+import { runtimeValidation } from "../../utils/validation";
 
 //search Note to see the notes for specific sections
 export const createLead = asyncHandler(async (req: Request, res: TypedResponse<ILeadResponse>) => {
@@ -34,7 +34,7 @@ export const createLead = asyncHandler(async (req: Request, res: TypedResponse<I
             name: true
         }).lean();
         if (!requester) {
-            res.status(401).json({message: "User not found"})
+            res.status(401).json({ message: "User not found" })
             return;
         }
 
@@ -42,7 +42,7 @@ export const createLead = asyncHandler(async (req: Request, res: TypedResponse<I
         const requestedPrivilege = req.privilege;
 
         if (requestedPrivilege === 'admin' && !leadData.manager) {
-            res.status(401).json({message: "manager: required"});
+            res.status(401).json({ message: "manager: required" });
             return;
         } else if (req.privilege === 'manager') {
             leadData.manager = req.userId;
@@ -54,15 +54,15 @@ export const createLead = asyncHandler(async (req: Request, res: TypedResponse<I
             }
         }
 
-        const managerExists = await User.findById(leadData.manager, {name: true}).lean();
+        const managerExists = await User.findById(leadData.manager, { name: true }).lean();
         if (!managerExists) {
-            res.status(404).json({message: 'Manager not found'});
+            res.status(404).json({ message: 'Manager not found' });
             return;
         }
-        let customer = await Customer.findOne({phone: leadData.phone})
+        let customer = await Customer.findOne({ phone: leadData.phone })
 
         if (customer) {
-            res.status(400).json({ message: "Lead already exists"});
+            res.status(400).json({ message: "Lead already exists" });
             return;
         }
         //keeping separate lead and customer data, so that there will be only customer even they need two leads.
@@ -70,7 +70,7 @@ export const createLead = asyncHandler(async (req: Request, res: TypedResponse<I
             customer = await Customer.create(leadData);
         }
         if (!customer?._id) {
-            res.status(401).json({message: "Could not create customer"});
+            res.status(401).json({ message: "Could not create customer" });
             return;
         }
         let lead: ILead = await Lead.create({
@@ -106,7 +106,7 @@ export const createLead = asyncHandler(async (req: Request, res: TypedResponse<I
                 createdAt: convertToIstMillie(lead.createdAt),
             })
         } else {
-            res.status(400).json({message: 'Failed to create lead'});
+            res.status(400).json({ message: 'Failed to create lead' });
         }
     } catch (error) {
         onCatchError(error, res);
@@ -115,13 +115,13 @@ export const createLead = asyncHandler(async (req: Request, res: TypedResponse<I
 
 export const updateLeadStatus = asyncHandler(async (req: Request, res: TypedResponse<ILeadResponse>) => {
     try {
-        const requestedUser = await User.findById(req.userId, {username: true}).lean();
+        const requestedUser = await User.findById(req.userId, { username: true }).lean();
         if (!requestedUser) {
-            res.status(401).json({message: "User not found"})
+            res.status(401).json({ message: "User not found" })
             return;
         }
         if (!Types.ObjectId.isValid(req.params.id)) {
-            res.status(401).json({message: "lead id: required"});
+            res.status(401).json({ message: "lead id: required" });
             return;
         }
         const updateData = updateLeadStatusSchema.parse(req.body);
@@ -131,19 +131,19 @@ export const updateLeadStatus = asyncHandler(async (req: Request, res: TypedResp
             .populate<{ customer: ICustomer }>('customer')
             .populate<{ handledBy: IUser }>('handledBy');
         if (!lead) {
-            res.status(401).json({message: "lead not found"});
+            res.status(401).json({ message: "lead not found" });
             return;
         }
         let handlerName;
         if (updateData.transferTo) {
             //when transfer available, we want to change handleBy also, and create activity accordingly.
-            let {errorMessage, lead: lead1, transferToName} = await internalLeadTransfer({
+            let { errorMessage, lead: lead1, transferToName } = await internalLeadTransfer({
                 lead,
                 transferTo: updateData.transferTo,
                 requester: requestedUser
             });
             if (errorMessage) {
-                res.status(401).json({message: errorMessage});
+                res.status(401).json({ message: errorMessage });
                 return;
             }
             if (lead1) {
@@ -155,7 +155,12 @@ export const updateLeadStatus = asyncHandler(async (req: Request, res: TypedResp
         }
 
         if (updateData.enquireStatus !== 'won' && lead.enquireStatus === 'won' && req.privilege !== 'admin') {
-            res.status(403).json({ message: "Only admin can change from won"});
+            res.status(403).json({ message: "Only admin can change from won" });
+            return;
+        }
+
+        if (requestedUser.privilege !== 'admin' && !requestedUser._id.equals(lead.handledBy._id)) {
+            res.status(403).json({ message: "You can't change status since you are not handling this lead" });
             return;
         }
 
@@ -190,9 +195,9 @@ export const updateLeadStatus = asyncHandler(async (req: Request, res: TypedResp
 export const getLeads = asyncHandler(async (req: Request, res: TypedResponse<GetLeadsResponse>) => {
     try {
         const filter = LeadFilterSchema.parse(req.body);
-        const requester = await User.findById(req.userId, {manager: true}).lean();
+        const requester = await User.findById(req.userId, { manager: true }).lean();
         if (!requester) {
-            res.status(401).json({message: "requester not found"});
+            res.status(401).json({ message: "requester not found" });
             return;
         }
         // Start building the aggregation pipeline
@@ -201,11 +206,11 @@ export const getLeads = asyncHandler(async (req: Request, res: TypedResponse<Get
         const matchStage: any = {};
         // Apply filters if provided
         if (filter.searchTerm) {
-            const searchRegex = {$regex: filter.searchTerm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), $options: 'i'};
+            const searchRegex = { $regex: filter.searchTerm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), $options: 'i' };
             const customerIds = await Customer.find({
                 $or: [
-                    {name: searchRegex},
-                    {phone: searchRegex}
+                    { name: searchRegex },
+                    { phone: searchRegex }
                 ]
             }, { _id: true }).lean().then(e => {
                 return e.map(e => e._id);
@@ -219,33 +224,33 @@ export const getLeads = asyncHandler(async (req: Request, res: TypedResponse<Get
                 $lte: filter.endDate
             };
         } else if (filter.startDate) {
-            matchStage.createdAt = {$gte: filter.startDate};
+            matchStage.createdAt = { $gte: filter.startDate };
         } else if (filter.endDate) {
-            matchStage.createdAt = {$lte: filter.endDate};
+            matchStage.createdAt = { $lte: filter.endDate };
         }
 
         if ((filter.enquireStatus?.length ?? 0) > 0) {
-            matchStage.enquireStatus = {$in: filter.enquireStatus};
+            matchStage.enquireStatus = { $in: filter.enquireStatus };
         }
 
         if ((filter.source?.length ?? 0) > 0) {
-            matchStage.source = {$in: filter.source};
+            matchStage.source = { $in: filter.source };
         }
 
         if ((filter.purpose?.length ?? 0) > 0) {
-            matchStage.purpose = {$in: filter.purpose};
+            matchStage.purpose = { $in: filter.purpose };
         }
 
         if ((filter.type?.length ?? 0) > 0) {
-            matchStage.type = {$in: filter.type};
+            matchStage.type = { $in: filter.type };
         }
 
-        if ((filter.staffs?.length ?? 0) > 0) matchStage.handledBy = {$in: filter.staffs!.map(e => new Types.ObjectId(e))};
+        if ((filter.staffs?.length ?? 0) > 0) matchStage.handledBy = { $in: filter.staffs!.map(e => new Types.ObjectId(e)) };
 
         if (filter.queryType === 'spotlight') {
             //to show leads that are not task assigned.
             const taskedLeadIds = (await Task.find({}, { lead: true }).lean()).map(e => e.lead);
-            matchStage._id = {$nin: taskedLeadIds};
+            matchStage._id = { $nin: taskedLeadIds };
         }
 
         //if searched, ignore all the role based filter - in other words - only apply role based filter on non search request.
@@ -259,25 +264,25 @@ export const getLeads = asyncHandler(async (req: Request, res: TypedResponse<Get
                 matchStage.handledBy = new Types.ObjectId(req.userId!);
             } else if (req.privilege === 'admin' && (filter.managers?.length ?? 0) > 0) {
                 //when admin pass managers.
-                matchStage.manager = {$in: filter.managers!.map(e => new Types.ObjectId(e))};
+                matchStage.manager = { $in: filter.managers!.map(e => new Types.ObjectId(e)) };
             }
         }
 
         // Add match stage to pipeline if there are any conditions
         if (Object.keys(matchStage).length > 0) {
-            pipeline.push({$match: matchStage});
+            pipeline.push({ $match: matchStage });
         }
 
         pipeline.push(
-            {$sort: {createdAt: -1}},
+            { $sort: { createdAt: -1 } },
             //
             {
                 $facet: {
                     //performing rest of the operations to get required data.
                     data: [
                         //pagination done here, so we also calculate the analytics for this filtered (above match)
-                        {$skip: filter.skip},
-                        {$limit: filter.limit},
+                        { $skip: filter.skip },
+                        { $limit: filter.limit },
                         // Add lookup stages for populating related data
                         {
                             $lookup: {
@@ -330,7 +335,7 @@ export const getLeads = asyncHandler(async (req: Request, res: TypedResponse<Get
                         },
                     ],
                     totalCount: [
-                        {$count: 'count'}
+                        { $count: 'count' }
                     ],
                     // Today's count
                     todayCount: [
@@ -341,7 +346,7 @@ export const getLeads = asyncHandler(async (req: Request, res: TypedResponse<Get
                                 }
                             }
                         },
-                        {$count: "count"}
+                        { $count: "count" }
                     ],
 
                     // This week's count
@@ -353,7 +358,7 @@ export const getLeads = asyncHandler(async (req: Request, res: TypedResponse<Get
                                 }
                             }
                         },
-                        {$count: "count"}
+                        { $count: "count" }
                     ],
 
                     // This month's count
@@ -365,7 +370,7 @@ export const getLeads = asyncHandler(async (req: Request, res: TypedResponse<Get
                                 }
                             }
                         },
-                        {$count: "count"}
+                        { $count: "count" }
                     ]
                 }
             }
@@ -374,7 +379,7 @@ export const getLeads = asyncHandler(async (req: Request, res: TypedResponse<Get
         // Execute the aggregation pipeline
         const result: any[] = await Lead.aggregate(pipeline);
         if (result.length < 1) {
-            res.status(401).json({message: "unexpected db behavior"});
+            res.status(401).json({ message: "unexpected db behavior" });
             return;
         }
         const leads: ILeadResponse[] = (result[0]['data'] ?? []).map((e: ILead<ICustomer, IUser>): ILeadResponse => ({
@@ -427,12 +432,12 @@ export const getTaskCreatableLead = async (req: Request, res: TypedResponse<Resp
     try {
         const query = searchTermSchema.parse(req.query);
         const dbQuery: FilterQuery<ILead> = {
-            enquireStatus: { $ne: "won"}
+            enquireStatus: { $ne: "won" }
         };
 
         if (req.privilege === 'manager') {
             const staffIds = await User
-                .find({manager: req.userId}, { _id: true })
+                .find({ manager: req.userId }, { _id: true })
                 .lean().then(e => e.map(e => e._id));
             //when manager provide all the leads created by his staff.
             dbQuery.$or = [
@@ -445,11 +450,11 @@ export const getTaskCreatableLead = async (req: Request, res: TypedResponse<Resp
             ];
         } else if (req.privilege === 'staff') {
             //when staff make request, only provide what he created
-            dbQuery.handledBy = {$in: [new Types.ObjectId(req.userId!)]};
+            dbQuery.handledBy = { $in: [new Types.ObjectId(req.userId!)] };
         }
 
         if (query.searchTerm) {
-            const searchRegex = {$regex: query.searchTerm, $options: 'i'};
+            const searchRegex = { $regex: query.searchTerm, $options: 'i' };
             let customersIds = await Customer
                 .find({ name: searchRegex }, { _id: true })
                 .lean<{ _id: Types.ObjectId }[]>().then(e => e.map(e => e._id));
@@ -457,7 +462,7 @@ export const getTaskCreatableLead = async (req: Request, res: TypedResponse<Resp
         }
         const data = await Lead
             .find(dbQuery)
-            .populate<{ customer?: { name: string, phone: string}}>('customer', 'name phone')
+            .populate<{ customer?: { name: string, phone: string } }>('customer', 'name phone')
             .lean()
 
         res.status(200).json(runtimeValidation(responseTaskableLeadSchema, data.map(e => ({
@@ -481,7 +486,7 @@ interface GetLeadsResponse {
 export const getLeadById = asyncHandler(async (req: Request, res: TypedResponse<ILeadResponse>) => {
     try {
         if (!Types.ObjectId.isValid(req.params.id)) {
-            res.status(400).json({message: 'Invalid lead id'});
+            res.status(400).json({ message: 'Invalid lead id' });
             return;
         }
 
@@ -500,7 +505,7 @@ export const getLeadById = asyncHandler(async (req: Request, res: TypedResponse<
 
         // Check if lead exists
         if (!lead) {
-            res.status(404).json({message: 'Lead not found'});
+            res.status(404).json({ message: 'Lead not found' });
             return;
         }
 
@@ -537,55 +542,55 @@ export const transferLead = asyncHandler(async (req: Request, res: Response) => 
         }).refine(v => {
             if (v.manager && v.staff) return false;
             return !(!v.manager && !v.staff);
-        }, {message: "Pass either manager or staff"}).parse(req.body);
+        }, { message: "Pass either manager or staff" }).parse(req.body);
 
         let transferUser = await User.findById(data.manager ?? data.staff);
         if (!transferUser) {
-            res.status(401).json({message: "transfer user not found"});
+            res.status(401).json({ message: "transfer user not found" });
             return;
         }
         let lead = await Lead.findById(data.lead).lean();
         if (!lead) {
-            res.status(401).json({message: "lead not found"});
+            res.status(401).json({ message: "lead not found" });
             return;
         }
         let requester = await User.findById(req.userId);
         if (!requester) {
-            res.status(401).json({message: "requester not found"});
+            res.status(401).json({ message: "requester not found" });
             return
         }
 
         if (data.manager) {
             //when transferring to manager, this will available to all staff under him
-            if (!await Lead.findByIdAndUpdate(data.lead, {manager: data.manager, handledBy: data.manager})) {
-                res.status(401).json({message: "lead not found"});
+            if (!await Lead.findByIdAndUpdate(data.lead, { manager: data.manager, handledBy: data.manager })) {
+                res.status(401).json({ message: "lead not found" });
                 return;
             }
         } else {
-            if (!await Lead.findByIdAndUpdate(data.lead, {handledBy: data.staff})) {
-                res.status(401).json({message: "lead not found"});
+            if (!await Lead.findByIdAndUpdate(data.lead, { handledBy: data.staff })) {
+                res.status(401).json({ message: "lead not found" });
                 return;
             }
         }
-        res.status(200).json({message: "transfer successful"})
+        res.status(200).json({ message: "transfer successful" })
     } catch (e) {
         onCatchError(e, res);
     }
 });
 
-const internalLeadTransfer = async ({lead, transferTo, requester}: {
+const internalLeadTransfer = async ({ lead, transferTo, requester }: {
     lead: ILead<ICustomer, any>,
     transferTo: string,
     requester: IUser
 }): Promise<{ errorMessage?: string, lead?: ILead<any, any>, transferToName?: string }> => {
-    let user = await User.findOne({ username: transferTo }, {username: true, privilege: true}).lean<{ username: string, privilege: string, _id: Types.ObjectId }>();
+    let user = await User.findOne({ username: transferTo }, { username: true, privilege: true }).lean<{ username: string, privilege: string, _id: Types.ObjectId }>();
     if (!user) {
-        return {errorMessage: "Transfer user not found"}
+        return { errorMessage: "Transfer user not found" }
     }
     if (user.privilege === "admin") {
-        return {errorMessage: "Cannot transfer to admin"}
+        return { errorMessage: "Cannot transfer to admin" }
     }
-    await createNotificationForUsers("New Lead",  `Name: ${lead.customer?.name}`,  lead._id.toString(),  user._id.toString());
+    await createNotificationForUsers("New Lead", `Name: ${lead.customer?.name}`, lead._id.toString(), user._id.toString());
     lead.handledBy = user._id;
     if (user.privilege === "manager") {
         lead.manager = user._id;
@@ -596,13 +601,13 @@ const internalLeadTransfer = async ({lead, transferTo, requester}: {
         type: 'lead_transfer',
         action: `${requester.username} transferred lead to ${user.username}`
     })
-    return {lead, transferToName: user.username};
+    return { lead, transferToName: user.username };
 }
 
 export const updateLead = asyncHandler(async (req: Request, res: Response) => {
     try {
         if (!Types.ObjectId.isValid(req.params.id)) {
-            res.status(400).json({message: 'Invalid lead id'});
+            res.status(400).json({ message: 'Invalid lead id' });
             return;
         }
         let updateData = updateLeadData.parse(req.body);
@@ -610,22 +615,22 @@ export const updateLead = asyncHandler(async (req: Request, res: Response) => {
         const lead = await Lead.findById(req.params.id);
 
         if (!lead) {
-            res.status(404).json({message: 'Lead not found'});
+            res.status(404).json({ message: 'Lead not found' });
             return;
         }
 
         if (updateData.manager) {
             const managerExists = await User.findById(updateData.manager);
             if (!managerExists) {
-                res.status(404).json({message: 'Manager not found'});
+                res.status(404).json({ message: 'Manager not found' });
                 return;
             }
         }
 
         let customer: any = await Customer.findById(lead.customer);
 
-        if(!customer) {
-            res.status(404).json({message: 'Customer not found'});
+        if (!customer) {
+            res.status(404).json({ message: 'Customer not found' });
             return;
         }
 
@@ -633,20 +638,20 @@ export const updateLead = asyncHandler(async (req: Request, res: Response) => {
             customer = await Customer
                 .findByIdAndUpdate(
                     lead.customer,
-                    updateData, {new: true}
+                    updateData, { new: true }
                 );
         } else {
             if (updateData.name !== customer.name) {
-                res.status(404).json({message: "Only admin can change customer data"});
+                res.status(404).json({ message: "Only admin can change customer data" });
                 return;
             }
             if (updateData.phone !== customer.phone) {
-                res.status(404).json({message: "Only admin can change customer data"});
+                res.status(404).json({ message: "Only admin can change customer data" });
                 return;
             }
 
             if (updateData.address !== customer.address) {
-                res.status(404).json({message: "Only admin can change customer data"});
+                res.status(404).json({ message: "Only admin can change customer data" });
                 return;
             }
         }
@@ -654,12 +659,12 @@ export const updateLead = asyncHandler(async (req: Request, res: Response) => {
         let updatedLead: any = await Lead.findByIdAndUpdate(
             req.params.id,
             updateData,
-            {new: true, runValidators: true}
+            { new: true, runValidators: true }
         ).select('enquireStatus callStatus purpose product source type createdAt customer')
             .populate('manager', 'name');
 
         if (!updatedLead || !updatedLead.customer) {
-            res.status(404).json({message: 'Lead or Customer not found'});
+            res.status(404).json({ message: 'Lead or Customer not found' });
             return;
         }
 
@@ -693,7 +698,7 @@ export const getTransferableEmployees = async (req: Request, res: TypedResponse<
     try {
         let query: FilterQuery<IUser> = {
             //call-center and admin should be able to transfer to anyone except admin
-            privilege : { $ne: UserPrivilegeSchema.enum.admin }
+            privilege: { $ne: UserPrivilegeSchema.enum.admin }
         };
 
         if (req.privilege === 'staff' && req.secondPrivilege != 'call-center') {
@@ -709,7 +714,7 @@ export const getTransferableEmployees = async (req: Request, res: TypedResponse<
             ];
             query._id = { $ne: Types.ObjectId.createFromHexString(req.userId!) }
         }
-        if(req.privilege === 'manager') {
+        if (req.privilege === 'manager') {
             //manager should be able to transfer to all his staffs
             query.manager = Types.ObjectId.createFromHexString(req.userId!);
             //and other managers.
@@ -734,7 +739,7 @@ export function getUpdateStatusMessage<T extends EnquireSourceType | PurposeType
     return `${category} to ${newV} from ${old}`;
 }
 
-export const internalLeadStatusUpdate = async ({requestedUser, lead, updateData, taskId}: {
+export const internalLeadStatusUpdate = async ({ requestedUser, lead, updateData, taskId }: {
     requestedUser: IUser,
     lead: ILead<any, IUser>,
     updateData: UpdateLeadStatus,
@@ -751,15 +756,15 @@ export const internalLeadStatusUpdate = async ({requestedUser, lead, updateData,
         //if won should reflect to target.
         if (lead.enquireStatus === 'won' && updateData.enquireStatus !== 'won') {
             //if switched from won.
-            await handleTarget({updater: lead.handledBy._id as unknown as ObjectId, lead, type: 'decrement'});
+            await handleTarget({ updater: lead.handledBy._id as unknown as ObjectId, lead, type: 'decrement' });
         }
         lead.enquireStatus = updateData.enquireStatus;
         if (updateData.enquireStatus === 'won') {
-            await handleTarget({updater: requestedUser._id as unknown as ObjectId, lead, type: 'increment'});
+            await handleTarget({ updater: requestedUser._id as unknown as ObjectId, lead, type: 'increment' });
             //since this function is used on both lead status update and task status update, updating specific task or all task for a lead.
-            await markTaskCompleted(taskId ? {taskId} : {leadId: lead._id});
+            await markTaskCompleted(taskId ? { taskId } : { leadId: lead._id });
         } else if (updateData.enquireStatus === 'lost') {
-            await markTaskCompleted(taskId ? {taskId} : {leadId: lead._id});
+            await markTaskCompleted(taskId ? { taskId } : { leadId: lead._id });
         }
         await Activity.create({
             type: activityType,
@@ -845,7 +850,7 @@ export const markDialed = async (req: Request, res: TypedResponse<any>) => {
             lead: Types.ObjectId.createFromHexString(data.leadId!),
             type: "dialed",
         });
-        res.status(200).json({message: "success"});
+        res.status(200).json({ message: "success" });
     } catch (e) {
         onCatchError(e, res);
     }
