@@ -1,4 +1,3 @@
-
 import express from "express";
 import connectDb from "./config/db";
 import cors from "cors";
@@ -20,6 +19,7 @@ import {credential} from "firebase-admin";
 import serviceAccount from "./secret/serviceAccountKey.json";
 import cron from 'node-cron';
 import {wishBirthDayToCustomers} from "./services/wish-birth-day";
+import {startTaskScheduler} from "./services/task-scheduler";
 
 require("dotenv").config();
 const PORT = 3000;
@@ -99,6 +99,8 @@ cron.schedule('0 0 * * *', async () => {
 }, {
     timezone: "Asia/Kolkata"
 })
+
+startTaskScheduler();
 
 app.listen(PORT, () => {
     console.log(`Server is running on http://0.0.0.0:${PORT}`);
