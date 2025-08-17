@@ -62,6 +62,13 @@ export const createLead = asyncHandler(async (req: Request, res: TypedResponse<I
         let customer = await Customer.findOne({ phone: leadData.phone })
 
         if (customer) {
+            //if customer created less than 73 hour ago, then we do not allow to create lead.
+            if (customer.createdAt.getTime() > Date.now() - 73 * 60 * 60 * 1000) {
+                const hoursAgo = Math.floor((Date.now() - customer.createdAt.getTime()) / (60 * 60 * 1000));
+                const timeAgo = hoursAgo >= 24 ? `${Math.floor(hoursAgo / 24)} days` : `${hoursAgo} hours`;
+                res.status(400).json({ message: `This lead had been created ${timeAgo} ago` });
+                return;
+            }
             res.status(400).json({ message: "Lead already exists" });
             return;
         }
