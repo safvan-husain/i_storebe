@@ -1,24 +1,25 @@
 import asyncHandler from "express-async-handler";
-import {Request, Response} from "express";
-import {onCatchError} from "../../middleware/error";
-import {z} from "zod";
-import Leave, {LeaveStatus, leaveStatusSchema} from "../../models/Leave";
-import {TypedResponse} from "../../common/interface";
-import {optionalDateQueryFiltersSchema, ObjectIdSchema, paginationSchema} from "../../common/types";
-import {Schema, Types} from "mongoose";
-import {createNotificationForUsers, sendPushNotification} from "../../services/notification-services";
+import { Request, Response } from "express";
+import { onCatchError } from "../../middleware/error";
+import { z } from "zod";
+import Leave, { LeaveStatus, leaveStatusSchema } from "../../models/Leave";
+import { TypedResponse } from "../../common/interface";
+import { optionalDateQueryFiltersSchema, ObjectIdSchema, paginationSchema } from "../../common/types";
+import { Schema, Types } from "mongoose";
+import { createNotificationForUsers, sendPushNotification } from "../../services/notification-services";
 import User from "../../models/User";
 
 export const applyLeave = asyncHandler(
     async (req: Request, res: TypedResponse<void>) => {
         try {
             if (!req.userId) {
-                res.status(401).json({message: "User not found"});
+                res.status(401).json({ message: "User not found" });
                 return;
             }
             const data = z.object({
                 reason: z.string().min(4, "Minimum 4 char required"),
-                date: z.number().transform(e => new Date(e))
+                date: z.number().transform(e => new Date(e)),
+                dates: z.array(z.number().transform(e => new Date(e))).default([])
             }).parse(req.body);
 
             await Leave.create({
@@ -26,13 +27,13 @@ export const applyLeave = asyncHandler(
                 reason: data.reason,
                 date: data.date
             });
-            const superAdmins = await User.find({ secondPrivilege: "super" }, { _id : true })
+            const superAdmins = await User.find({ secondPrivilege: "super" }, { _id: true })
                 .lean().then(e => e.map(e => e._id));
 
             for (const id of superAdmins) {
                 await sendPushNotification({ title: "New Leave request", body: `leave requested by ${req.username} on to ${new Date(data.date).toDateString()}`, userId: id.toString() });
             }
-            res.status(200).json({message: "Leave applied successfully"});
+            res.status(200).json({ message: "Leave applied successfully" });
         } catch (e) {
             onCatchError(e, res);
         }
@@ -54,7 +55,7 @@ export const getLeaves = async (req: Request, res: TypedResponse<ILeaveResponse[
             userId: ObjectIdSchema.optional()
         }).merge(paginationSchema).merge(optionalDateQueryFiltersSchema).parse(req.query);
         if (!req.userId) {
-            res.status(401).json({message: "User not found"});
+            res.status(401).json({ message: "User not found" });
             return;
         }
         const matchStage: any = {};
@@ -66,7 +67,7 @@ export const getLeaves = async (req: Request, res: TypedResponse<ILeaveResponse[
             matchStage.requester = new Types.ObjectId(data.userId);
         }
         //only super admin can see all the leaves.
-        if(req.privilege === "admin" && req.secondPrivilege === "regular") {
+        if (req.privilege === "admin" && req.secondPrivilege === "regular") {
             matchStage.requester = Types.ObjectId.createFromHexString(req.userId)
         }
 
@@ -77,14 +78,14 @@ export const getLeaves = async (req: Request, res: TypedResponse<ILeaveResponse[
             if (data.endDate) matchStage.date.$lte = data.endDate;
         }
 
-        pipeline.push({$match: matchStage});
+        pipeline.push({ $match: matchStage });
         const leaves = await Leave.aggregate([
             ...pipeline,
             {
-                $sort: {createdAt: -1}
+                $sort: { createdAt: -1 }
             },
-            {$skip: data.skip},
-            {$limit: data.limit},
+            { $skip: data.skip },
+            { $limit: data.limit },
             {
                 $lookup: {
                     from: 'users',
@@ -127,12 +128,12 @@ export const getLeaves = async (req: Request, res: TypedResponse<ILeaveResponse[
 export const updateLeaveStatus = async (req: Request, res: TypedResponse<ILeaveResponse>) => {
     try {
         if (!req.userId) {
-            res.status(401).json({message: "User not found"});
+            res.status(401).json({ message: "User not found" });
             return;
         }
         //super admin can only update leave status.
-        if(req.privilege !== "admin" || req.secondPrivilege !== "super") {
-            res.status(200).json({ message: "Not allowed"});
+        if (req.privilege !== "admin" || req.secondPrivilege !== "super") {
+            res.status(200).json({ message: "Not allowed" });
             return;
         }
         //collecting request body.
@@ -142,14 +143,14 @@ export const updateLeaveStatus = async (req: Request, res: TypedResponse<ILeaveR
         }).parse(req.body);
 
         const leave = await Leave
-            .findByIdAndUpdate(data.id, {status: data.status}, {new: true})
-            .populate<{ requester: { username: string, _id: string }}>('requester', 'username');
+            .findByIdAndUpdate(data.id, { status: data.status }, { new: true })
+            .populate<{ requester: { username: string, _id: string } }>('requester', 'username');
 
         if (!leave) {
-            res.status(404).json({message: "Leave not found"});
+            res.status(404).json({ message: "Leave not found" });
             return;
         }
-        await sendPushNotification({ title: "Update on leave request", body: `You leave request ${data.status}`, userId: leave.requester._id.toString()})
+        await sendPushNotification({ title: "Update on leave request", body: `You leave request ${data.status}`, userId: leave.requester._id.toString() })
         res.status(200).json({
             username: leave.requester.username,
             date: leave.date.getTime(),
