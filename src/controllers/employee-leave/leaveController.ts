@@ -2,7 +2,7 @@ import asyncHandler from "express-async-handler";
 import { Request, Response } from "express";
 import { onCatchError } from "../../middleware/error";
 import { z } from "zod";
-import Leave, { LeaveStatus, leaveStatusSchema } from "../../models/Leave";
+import Leave, {LeaveDayType, LeaveStatus, leaveStatusSchema, leaveDayTypeSchema} from "../../models/Leave";
 import { TypedResponse } from "../../common/interface";
 import { optionalDateQueryFiltersSchema, ObjectIdSchema, paginationSchema } from "../../common/types";
 import { Schema, Types } from "mongoose";
@@ -19,19 +19,23 @@ export const applyLeave = asyncHandler(
             const data = z.object({
                 reason: z.string().min(4, "Minimum 4 char required"),
                 date: z.number().transform(e => new Date(e)),
-                dates: z.array(z.number().transform(e => new Date(e))).default([])
+                dates: z.array(z.object({
+                    date: z.number().transform(e => new Date(e)),
+                    dayType: leaveDayTypeSchema
+                })).default([])
             }).parse(req.body);
 
             await Leave.create({
                 requester: req.userId,
                 reason: data.reason,
-                date: data.date
+                date: data.date,
+                dates: data.dates
             });
             const superAdmins = await User.find({ secondPrivilege: "super" }, { _id: true })
                 .lean().then(e => e.map(e => e._id));
 
             for (const id of superAdmins) {
-                await sendPushNotification({ title: "New Leave request", body: `leave requested by ${req.username} on to ${new Date(data.date).toDateString()}`, userId: id.toString() });
+                sendPushNotification({ title: "New Leave request", body: `leave requested by ${req.username} on to ${new Date(data.date).toDateString()} for ${data.dates.length} days`, userId: id.toString() });
             }
             res.status(200).json({ message: "Leave applied successfully" });
         } catch (e) {
@@ -47,6 +51,7 @@ interface ILeaveResponse {
     username: string;
     status: LeaveStatus;
     _id: string;
+    dates: { date: number, dayType: LeaveDayType }[];
 }
 
 export const getLeaves = async (req: Request, res: TypedResponse<ILeaveResponse[]>) => {
@@ -107,6 +112,7 @@ export const getLeaves = async (req: Request, res: TypedResponse<ILeaveResponse[
                     reason: 1,
                     requester: '$requester._id',
                     status: 1,
+                    dates: 1,
                     _id: 1
                 }
             }
@@ -118,6 +124,7 @@ export const getLeaves = async (req: Request, res: TypedResponse<ILeaveResponse[
             reason: e.reason as string,
             userId: e.requester,
             status: e.status as LeaveStatus,
+            dates: e.dates?.map((d: { date: Date, dayType: LeaveDayType }) => ({ date: d.date.getTime(), dayType: d.dayType })) ?? [],
             _id: e._id
         })));
     } catch (e) {
@@ -150,7 +157,7 @@ export const updateLeaveStatus = async (req: Request, res: TypedResponse<ILeaveR
             res.status(404).json({ message: "Leave not found" });
             return;
         }
-        await sendPushNotification({ title: "Update on leave request", body: `You leave request ${data.status}`, userId: leave.requester._id.toString() })
+        sendPushNotification({ title: "Update on leave request", body: `You leave request ${data.status}`, userId: leave.requester._id.toString() })
         res.status(200).json({
             username: leave.requester.username,
             date: leave.date.getTime(),
@@ -158,6 +165,7 @@ export const updateLeaveStatus = async (req: Request, res: TypedResponse<ILeaveR
             userId: leave.requester._id,
             status: leave.status,
             _id: leave._id.toString(),
+            dates: leave.dates?.map((d: { date: Date, dayType: LeaveDayType }) => ({ date: d.date.getTime(), dayType: d.dayType })) ?? [],
         });
     } catch (e) {
         onCatchError(e, res);

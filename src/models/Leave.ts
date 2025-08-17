@@ -2,12 +2,21 @@ import mongoose, {Document, Types} from 'mongoose';
 import {z} from "zod";
 
 export const leaveStatusSchema = z.enum(['pending', 'approved', 'rejected']);
+export const leaveDayTypeSchema = z.enum(['full', 'half']);
+
 export type LeaveStatus = z.infer<typeof leaveStatusSchema>;
+export type LeaveDayType = z.infer<typeof leaveDayTypeSchema>;
+
+export interface ILeaveDay {
+    date: Date;
+    dayType: LeaveDayType;
+}
 
 export interface ILeave<P = Types.ObjectId> extends Document {
     _id: Types.ObjectId;
     date: Date;
     requester: P;
+    dates: ILeaveDay[];
     reason: string;
     status: LeaveStatus
 }
@@ -25,6 +34,13 @@ const leaveSchema = new mongoose.Schema(
         date: {
             type: Date,
             required: true,
+        },
+        dates: {
+            type: [{
+                date: {type: Date, required: true},
+                dayType: {type: String, enum: ['full', 'half'], required: true, default: 'full'}
+            }],
+            default: [],
         },
         status: {
             type: String,
