@@ -4,13 +4,10 @@ pipeline {
 
   environment {
     // --- App / Runtime ---
-    NODE_VERSION = '20'
+    NODE_VERSION = '20'     // required MAJOR version already installed on the box
     APP_NAME     = 'i-store-be'
     PORT         = '4000'
     NODE_ENV     = 'production'
-
-    // Force a stable NVM home for every shell (fixes durable-task tmp dir issue)
-    NVM_DIR      = "${HOME}/.nvm"
 
     // --- Deploy paths on the target server (same box Jenkins is building on) ---
     BASE_DIR     = '/opt/i-store-be'
@@ -27,19 +24,25 @@ pipeline {
       steps { checkout scm }
     }
 
-    stage('Setup Node (nvm)') {
+    stage('Verify Node.js (system)') {
       steps {
         sh '''
-          set -e
-          export NVM_DIR="${NVM_DIR}"
-          if [ ! -s "$NVM_DIR/nvm.sh" ]; then
-            mkdir -p "$NVM_DIR"
-            curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
+          set -euo pipefail
+          if ! command -v node >/dev/null 2>&1 || ! command -v npm >/dev/null 2>&1; then
+            echo "Node.js and npm must be pre-installed on this agent." >&2
+            exit 1
           fi
-          . "$NVM_DIR/nvm.sh"
-          nvm install ${NODE_VERSION}
-          nvm use ${NODE_VERSION}
-          node -v
+
+          NODE_ACTUAL="$(node -p 'process.versions.node')"
+          NODE_MAJOR="$(node -p 'process.versions.node.split(\".\")[0]')"
+          echo "Found Node.js ${NODE_ACTUAL}"
+          echo "Required major: ${NODE_VERSION}"
+
+          if [ "${NODE_MAJOR}" != "${NODE_VERSION}" ]; then
+            echo "Node.js major version mismatch: have ${NODE_MAJOR}, need ${NODE_VERSION}." >&2
+            exit 1
+          fi
+
           npm -v
         '''
       }
@@ -49,10 +52,6 @@ pipeline {
       steps {
         sh '''
           set -e
-          export NVM_DIR="${NVM_DIR}"
-          . "$NVM_DIR/nvm.sh"
-          nvm use ${NODE_VERSION}
-
           npm ci
           npm run build
         '''
@@ -87,14 +86,10 @@ pipeline {
           sh '''
             set -euo pipefail
 
-            # Ensure Node in this shell
-            export NVM_DIR="${NVM_DIR}"
-            . "$NVM_DIR/nvm.sh"
-            nvm use ${NODE_VERSION}
-
-            # Ensure pm2 exists
+            # Ensure pm2 exists (do NOT install here)
             if ! command -v pm2 >/dev/null 2>&1; then
-              npm i -g pm2
+              echo "pm2 not found on PATH. Please install pm2 globally on the host before running this job." >&2
+              exit 1
             fi
 
             # Prepare dirs and ownership
