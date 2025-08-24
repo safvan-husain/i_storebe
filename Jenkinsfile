@@ -3,31 +3,40 @@ pipeline {
   options { timestamps() }
 
   environment {
+    // --- App / Runtime ---
     NODE_VERSION = '20'
     APP_NAME     = 'i-store-be'
     PORT         = '4000'
     NODE_ENV     = 'production'
 
+    // Force a stable NVM home for every shell (fixes durable-task tmp dir issue)
+    NVM_DIR      = "${HOME}/.nvm"
+
+    // --- Deploy paths on the target server (same box Jenkins is building on) ---
     BASE_DIR     = '/opt/i-store-be'
     RELEASES_DIR = "${BASE_DIR}/releases"
     CURRENT_LINK = "${BASE_DIR}/current"
     SHARED_DIR   = "${BASE_DIR}/shared"
+
+    // housekeeping
     KEEP_RELEASES = '5'
   }
 
   stages {
-    stage('Checkout') { steps { checkout scm } }
+    stage('Checkout') {
+      steps { checkout scm }
+    }
 
-    stage('Setup Node') {
+    stage('Setup Node (nvm)') {
       steps {
         sh '''
-          export NVM_DIR="$HOME/.nvm"
-          if [ -s "$NVM_DIR/nvm.sh" ]; then
-            . "$NVM_DIR/nvm.sh"
-          else
+          set -e
+          export NVM_DIR="${NVM_DIR}"
+          if [ ! -s "$NVM_DIR/nvm.sh" ]; then
+            mkdir -p "$NVM_DIR"
             curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
-            . "$NVM_DIR/nvm.sh"
           fi
+          . "$NVM_DIR/nvm.sh"
           nvm install ${NODE_VERSION}
           nvm use ${NODE_VERSION}
           node -v
@@ -39,7 +48,11 @@ pipeline {
     stage('Install dev deps & Build (tsc)') {
       steps {
         sh '''
-          . "$HOME/.nvm/nvm.sh" && nvm use ${NODE_VERSION}
+          set -e
+          export NVM_DIR="${NVM_DIR}"
+          . "$NVM_DIR/nvm.sh"
+          nvm use ${NODE_VERSION}
+
           npm ci
           npm run build
         '''
@@ -50,8 +63,12 @@ pipeline {
       steps {
         sh '''
           set -e
+          rm -rf artifact artifact.tgz
           mkdir -p artifact
+
+          # Include runtime necessities only
           cp -a dist package.json package-lock.json ecosystem.config.js artifact/
+
           (cd artifact && tar -czf ../artifact.tgz .)
           ls -lh artifact.tgz
         '''
@@ -61,25 +78,30 @@ pipeline {
     stage('Deploy & Reload with PM2 (with rollback)') {
       steps {
         withCredentials([
-          string(credentialsId: 'cred-secret',       variable: 'SECRET'),
-          string(credentialsId: 'cred-client-id',    variable: 'CLIENT_ID'),
-          string(credentialsId: 'cred-refresh-token',variable: 'REFRESH_TOKEN'),
-          string(credentialsId: 'cred-email',        variable: 'EMAIL'),
-          string(credentialsId: 'cred-redirect-uri', variable: 'REDIRECT_URI')
+          string(credentialsId: 'cred-secret',        variable: 'SECRET'),
+          string(credentialsId: 'cred-client-id',     variable: 'CLIENT_ID'),
+          string(credentialsId: 'cred-refresh-token', variable: 'REFRESH_TOKEN'),
+          string(credentialsId: 'cred-email',         variable: 'EMAIL'),
+          string(credentialsId: 'cred-redirect-uri',  variable: 'REDIRECT_URI')
         ]) {
           sh '''
             set -euo pipefail
-            . "$HOME/.nvm/nvm.sh" && nvm use ${NODE_VERSION}
 
+            # Ensure Node in this shell
+            export NVM_DIR="${NVM_DIR}"
+            . "$NVM_DIR/nvm.sh"
+            nvm use ${NODE_VERSION}
+
+            # Ensure pm2 exists
             if ! command -v pm2 >/dev/null 2>&1; then
               npm i -g pm2
             fi
 
-            # Prepare dirs
+            # Prepare dirs and ownership
             sudo mkdir -p "${RELEASES_DIR}" "${SHARED_DIR}"
             sudo chown -R "$(id -u)":"$(id -g)" "${BASE_DIR}"
 
-            # Create/refresh shared .env with locked permissions (not printed to logs)
+            # Write shared .env securely (masked in Jenkins logs)
             cat > "${SHARED_DIR}/.env" <<EOF
 NODE_ENV=${NODE_ENV}
 PORT=${PORT}
@@ -91,27 +113,27 @@ REDIRECT_URI=${REDIRECT_URI}
 EOF
             chmod 600 "${SHARED_DIR}/.env"
 
-            # New release dir
+            # Create new release dir
             TS="$(date +%Y%m%d%H%M%S)"
             GITREV="$(git rev-parse --short HEAD || echo no-git)"
             NEW_RELEASE="${RELEASES_DIR}/${TS}-${GITREV}"
             mkdir -p "${NEW_RELEASE}"
 
-            # Unpack artifact and install prod deps
+            # Unpack artifact and install production deps
             tar -xzf artifact.tgz -C "${NEW_RELEASE}"
             (cd "${NEW_RELEASE}" && npm ci --omit=dev)
 
-            # Link shared .env into release so PM2 env_file picks it up
+            # Link shared .env into this release for PM2 env_file
             ln -sfn "${SHARED_DIR}/.env" "${NEW_RELEASE}/.env"
 
-            # Flip current symlink (remember previous)
+            # Flip current symlink atomically (remember previous for rollback)
             PREV_TARGET=""
             if [ -L "${CURRENT_LINK}" ]; then
               PREV_TARGET="$(readlink -f "${CURRENT_LINK}")"
             fi
             ln -sfn "${NEW_RELEASE}" "${CURRENT_LINK}"
 
-            # Reload/start via ecosystem (uses env_file)
+            # Reload/start via PM2 ecosystem (zero-downtime)
             set +e
             pm2 startOrReload "${CURRENT_LINK}/ecosystem.config.js" --only "${APP_NAME}"
             PM2_RC=$?
@@ -128,10 +150,10 @@ EOF
               exit 1
             fi
 
-            # Persist PM2 so reboot resurrects this exact app + env_file
+            # Persist PM2 process list so reboot resurrects the current app
             pm2 save || true
 
-            # Cleanup old releases
+            # Cleanup old releases (keep last N)
             ls -1dt "${RELEASES_DIR}"/* 2>/dev/null | awk "NR>${KEEP_RELEASES}" | xargs -r rm -rf
           '''
         }
@@ -140,7 +162,11 @@ EOF
   }
 
   post {
-    success { echo "Deployed successfully. PM2 managing ${APP_NAME} on :${PORT} with secrets from Jenkins." }
-    failure { echo "Deploy failed — automatically reverted to last known good release." }
+    success {
+      echo "✅ Deployed successfully. PM2 managing ${APP_NAME} on :${PORT}."
+    }
+    failure {
+      echo "❌ Deploy failed — kept/rolled back to last known good release."
+    }
   }
 }
