@@ -60,7 +60,7 @@ pipeline {
           string(credentialsId: 'cred-client-id',     variable: 'CLIENT_ID'),
           string(credentialsId: 'cred-refresh-token', variable: 'REFRESH_TOKEN'),
           string(credentialsId: 'cred-email',         variable: 'EMAIL'),
-          string(credentialsId: 'cred-redirect-uri',  variable: 'REDIRECT_URI')
+          string(credentialsId: 'cred-redirect-uri',  variable: 'REDIRECT_URI'),
           string(credentialsId: 'cred-firebase-sa-b64', variable: 'FIREBASE_SA_B64')
         ]) {
           sh '''
