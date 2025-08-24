@@ -15,19 +15,49 @@ import {leaveRouter} from "./routes/leave-routes";
 import {onCatchError} from "./middleware/error";
 import {customerRouter} from "./routes/customer-router";
 import {initializeApp} from "firebase-admin/app";
-import {credential} from "firebase-admin";
+import {credential, ServiceAccount} from "firebase-admin";
 import serviceAccount from "./secret/serviceAccountKey.json";
 import cron from 'node-cron';
 import {wishBirthDayToCustomers} from "./services/wish-birth-day";
 import {startTaskScheduler} from "./services/task-scheduler";
+import fs from 'fs';
+import path from 'path'
 
 require("dotenv").config();
 const PORT = 3000;
 
 const app = express();
 
+function loadServiceAccount(): ServiceAccount {
+  if (process.env.FIREBASE_SA_JSON) {
+    return JSON.parse(process.env.FIREBASE_SA_JSON) as ServiceAccount;
+  }
+
+  if (process.env.FIREBASE_SA_JSON_B64) {
+    const json = Buffer.from(process.env.FIREBASE_SA_JSON_B64, 'base64').toString('utf8');
+    return JSON.parse(json) as ServiceAccount;
+  }
+
+  const saPath =
+    process.env.GOOGLE_APPLICATION_CREDENTIALS ||
+    path.resolve(__dirname, '../secret/serviceAccountKey.json');
+
+  if (!fs.existsSync(saPath)) {
+    throw new Error(
+      `Firebase service account JSON not found. Set FIREBASE_SA_JSON, FIREBASE_SA_JSON_B64, or GOOGLE_APPLICATION_CREDENTIALS. Looked at: ${saPath}`
+    );
+  }
+
+  const content = fs.readFileSync(saPath, 'utf8');
+  return JSON.parse(content) as ServiceAccount;
+}
+
 connectDb().catch(err => console.log(err));
-initializeApp({credential: credential.cert(serviceAccount as unknown as any)});
+
+initializeApp({
+  credential: credential.cert(loadServiceAccount()),
+});
+
 app.use(express.urlencoded({ extended: true }));
 app.use(cors());
 app.use(express.json());
