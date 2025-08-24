@@ -35,6 +35,8 @@ function loadServiceAccount(): ServiceAccount {
   if (process.env.FIREBASE_SA_B64) {
     const json = Buffer.from(process.env.FIREBASE_SA_B64, 'base64').toString('utf8');
     return JSON.parse(json) as ServiceAccount;
+  } else {
+    console.warn('FIREBASE_SA_B64 not set');
   }
 
   const saPath =
@@ -43,7 +45,7 @@ function loadServiceAccount(): ServiceAccount {
 
   if (!fs.existsSync(saPath)) {
     throw new Error(
-      `Firebase service account JSON not found. Set FIREBASE_SA_JSON, FIREBASE_SA_JSON_B64, or GOOGLE_APPLICATION_CREDENTIALS. Looked at: ${saPath}`
+      `Firebase service account JSON not found. Set FIREBASE_SA_B64, or GOOGLE_APPLICATION_CREDENTIALS. Looked at: ${saPath}`
     );
   }
 
