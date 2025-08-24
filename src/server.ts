@@ -16,7 +16,6 @@ import {onCatchError} from "./middleware/error";
 import {customerRouter} from "./routes/customer-router";
 import {initializeApp} from "firebase-admin/app";
 import {credential, ServiceAccount} from "firebase-admin";
-import serviceAccount from "./secret/serviceAccountKey.json";
 import cron from 'node-cron';
 import {wishBirthDayToCustomers} from "./services/wish-birth-day";
 import {startTaskScheduler} from "./services/task-scheduler";

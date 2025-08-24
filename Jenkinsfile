@@ -24,14 +24,18 @@ pipeline {
     }
 
     stage('Install dev deps & Build (tsc)') {
-      steps {
-        sh '''
-          set -eu
-          npm ci
-          npm run build
-        '''
-      }
+  steps {
+    withCredentials([
+      string(credentialsId: 'cred-firebase-sa', variable: 'FIREBASE_SERVICE_ACCOUNT')
+    ]) {
+      sh '''
+        set -eu
+        npm ci --production=false
+      '''
     }
+  }
+}
+
 
     stage('Package artifact') {
       steps {
@@ -57,6 +61,7 @@ pipeline {
           string(credentialsId: 'cred-refresh-token', variable: 'REFRESH_TOKEN'),
           string(credentialsId: 'cred-email',         variable: 'EMAIL'),
           string(credentialsId: 'cred-redirect-uri',  variable: 'REDIRECT_URI')
+          string(credentialsId: 'cred-firebase-sa-b64', variable: 'FIREBASE_SA_B64')
         ]) {
           sh '''
             set -eu
@@ -80,6 +85,7 @@ CLIENT_ID=${CLIENT_ID}
 REFRESH_TOKEN=${REFRESH_TOKEN}
 EMAIL=${EMAIL}
 REDIRECT_URI=${REDIRECT_URI}
+FIREBASE_SA_B64=${FIREBASE_SA_B64}
 EOF
             chmod 600 "${SHARED_DIR}/.env"
 
