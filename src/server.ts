@@ -32,8 +32,8 @@ function loadServiceAccount(): ServiceAccount {
     return JSON.parse(process.env.FIREBASE_SA_JSON) as ServiceAccount;
   }
 
-  if (process.env.FIREBASE_SA_JSON_B64) {
-    const json = Buffer.from(process.env.FIREBASE_SA_JSON_B64, 'base64').toString('utf8');
+  if (process.env.FIREBASE_SA_B64) {
+    const json = Buffer.from(process.env.FIREBASE_SA_B64, 'base64').toString('utf8');
     return JSON.parse(json) as ServiceAccount;
   }
 
