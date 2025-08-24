@@ -69,8 +69,8 @@ pipeline {
             fi
 
             # Prepare dirs and ownership
-            sudo mkdir -p "${RELEASES_DIR}" "${SHARED_DIR}"
-            sudo chown -R "$(id -u)":"$(id -g)" "${BASE_DIR}"
+            mkdir -p "${RELEASES_DIR}" "${SHARED_DIR}"
+            chown -R "$(id -u)":"$(id -g)" "${BASE_DIR}" 2>/dev/null || true
 
             # Write shared .env securely (masked in Jenkins logs)
             cat > "${SHARED_DIR}/.env" <<EOF
