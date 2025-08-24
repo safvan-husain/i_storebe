@@ -24,15 +24,11 @@ pipeline {
     }
 
     stage('Install dev deps & Build (tsc)') {
-  steps {
-    withCredentials([
-      string(credentialsId: 'cred-firebase-sa', variable: 'FIREBASE_SERVICE_ACCOUNT')
-    ]) {
+  steps {     
       sh '''
         set -eu
         npm ci --production=false
       '''
-    }
   }
 }
 
