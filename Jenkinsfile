@@ -24,14 +24,14 @@ pipeline {
     }
 
     stage('Install dev deps & Build (tsc)') {
-  steps {     
-      sh '''
-        set -eu
-        npm ci --production=false
-      '''
-  }
-}
-
+      steps {     
+        sh '''
+          set -eu
+          npm ci --production=false
+          npm run build  # Add this to regenerate dist/ based on current source code
+        '''
+      }
+    }
 
     stage('Package artifact') {
       steps {
