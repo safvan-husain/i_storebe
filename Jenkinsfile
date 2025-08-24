@@ -4,7 +4,6 @@ pipeline {
 
   environment {
     // --- App / Runtime ---
-    NODE_VERSION = '20'     // required MAJOR version already installed on the box
     APP_NAME     = 'i-store-be'
     PORT         = '4000'
     NODE_ENV     = 'production'
@@ -24,34 +23,10 @@ pipeline {
       steps { checkout scm }
     }
 
-    stage('Verify Node.js (system)') {
-      steps {
-        sh '''
-          set -euo pipefail
-          if ! command -v node >/dev/null 2>&1 || ! command -v npm >/dev/null 2>&1; then
-            echo "Node.js and npm must be pre-installed on this agent." >&2
-            exit 1
-          fi
-
-          NODE_ACTUAL="$(node -p 'process.versions.node')"
-          NODE_MAJOR="$(node -p 'process.versions.node.split(\".\")[0]')"
-          echo "Found Node.js ${NODE_ACTUAL}"
-          echo "Required major: ${NODE_VERSION}"
-
-          if [ "${NODE_MAJOR}" != "${NODE_VERSION}" ]; then
-            echo "Node.js major version mismatch: have ${NODE_MAJOR}, need ${NODE_VERSION}." >&2
-            exit 1
-          fi
-
-          npm -v
-        '''
-      }
-    }
-
     stage('Install dev deps & Build (tsc)') {
       steps {
         sh '''
-          set -e
+          set -eu
           npm ci
           npm run build
         '''
@@ -61,7 +36,7 @@ pipeline {
     stage('Package artifact') {
       steps {
         sh '''
-          set -e
+          set -eu
           rm -rf artifact artifact.tgz
           mkdir -p artifact
 
@@ -84,7 +59,7 @@ pipeline {
           string(credentialsId: 'cred-redirect-uri',  variable: 'REDIRECT_URI')
         ]) {
           sh '''
-            set -euo pipefail
+            set -eu
 
             # Ensure pm2 exists (do NOT install here)
             if ! command -v pm2 >/dev/null 2>&1; then
