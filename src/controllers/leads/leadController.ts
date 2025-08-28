@@ -69,8 +69,6 @@ export const createLead = asyncHandler(async (req: Request, res: TypedResponse<I
                 res.status(400).json({ message: `This lead had been created ${timeAgo} ago` });
                 return;
             }
-            res.status(400).json({ message: "Lead already exists" });
-            return;
         }
         //keeping separate lead and customer data, so that there will be only customer even they need two leads.
         if (!customer) {
