@@ -62,10 +62,25 @@ export const createLead = asyncHandler(async (req: Request, res: TypedResponse<I
         let customer = await Customer.findOne({ phone: leadData.phone })
 
         if (customer) {
-            //if customer created less than 73 hour ago, then we do not allow to create lead.
-            if (customer.createdAt.getTime() > Date.now() - 73 * 60 * 60 * 1000) {
-                const hoursAgo = Math.floor((Date.now() - customer.createdAt.getTime()) / (60 * 60 * 1000));
-                const timeAgo = hoursAgo >= 24 ? `${Math.floor(hoursAgo / 24)} days` : `${hoursAgo} hours`;
+            // Disallow creating a new lead if the latest lead for this customer
+            // was created within the last 73 hours.
+            const latestLead = await Lead.findOne({ customer: customer._id })
+                .sort({ createdAt: -1 })
+                .lean();
+            if (latestLead?.createdAt && new Date(latestLead.createdAt).getTime() > Date.now() - 73 * 60 * 60 * 1000) {
+                const diffInMs = Date.now() - new Date(latestLead.createdAt).getTime();
+                const hoursAgo = Math.floor(diffInMs / (60 * 60 * 1000));
+                const minutesAgo = Math.floor((diffInMs % (60 * 60 * 1000)) / (60 * 1000));
+                let timeAgo;
+
+                if (hoursAgo >= 24) {
+                    timeAgo = `${Math.floor(hoursAgo / 24)} days`;
+                } else if (hoursAgo >= 1) {
+                    timeAgo = `${hoursAgo} hour${hoursAgo > 1 ? 's' : ''} and ${minutesAgo} minute${minutesAgo > 1 ? 's' : ''}`;
+                } else {
+                    timeAgo = `${minutesAgo} minute${minutesAgo > 1 ? 's' : ''}`;
+                }
+
                 res.status(400).json({ message: `This lead had been created ${timeAgo} ago` });
                 return;
             }
