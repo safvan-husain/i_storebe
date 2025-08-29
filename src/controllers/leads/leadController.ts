@@ -179,10 +179,12 @@ export const updateLeadStatus = asyncHandler(async (req: Request, res: TypedResp
             return;
         }
 
-        if (requestedUser.privilege !== 'admin' && !requestedUser._id.equals(lead.handledBy._id) && updateData.enquireStatus !== lead.enquireStatus) {
+        if (requestedUser.privilege !== 'admin' && !requestedUser._id.equals(lead.handledBy._id)) {
+            if(updateData.enquireStatus && updateData.enquireStatus !== lead.enquireStatus) {
             //the status can only changed by the handler or admin.
             res.status(403).json({ message: "You can't change status since you are not handling this lead" });
             return;
+            } 
         }
 
         let result = await internalLeadStatusUpdate({
