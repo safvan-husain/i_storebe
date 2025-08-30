@@ -63,11 +63,11 @@ export const createLead = asyncHandler(async (req: Request, res: TypedResponse<I
 
         if (customer) {
             // Disallow creating a new lead if the latest lead for this customer
-            // was created within the last 73 hours.
+            // was created within the last 24 hours.
             const latestLead = await Lead.findOne({ customer: customer._id })
                 .sort({ createdAt: -1 })
                 .lean();
-            if (latestLead?.createdAt && new Date(latestLead.createdAt).getTime() > Date.now() - 73 * 60 * 60 * 1000) {
+            if (latestLead?.createdAt && new Date(latestLead.createdAt).getTime() > Date.now() - 24 * 60 * 60 * 1000) {
                 const diffInMs = Date.now() - new Date(latestLead.createdAt).getTime();
                 const hoursAgo = Math.floor(diffInMs / (60 * 60 * 1000));
                 const minutesAgo = Math.floor((diffInMs % (60 * 60 * 1000)) / (60 * 1000));
