@@ -98,6 +98,13 @@ export const createLead = asyncHandler(async (req: Request, res: TypedResponse<I
             customer: customer._id,
             createdBy: req.userId,
             handledBy: req.userId,
+            contactSnapshot: {
+                name: leadData.name,
+                phone: leadData.phone,
+                email: leadData.email,
+                address: leadData.address,
+                dob: leadData.dob,
+            }
         });
 
         if (lead) {
@@ -118,11 +125,11 @@ export const createLead = asyncHandler(async (req: Request, res: TypedResponse<I
                 type: lead.type,
                 product: lead.product,
                 nearestStore: lead.nearestStore,
-                name: customer.name,
-                phone: customer.phone,
-                email: customer.email,
-                address: customer.address ?? "",
-                dob: customer.dob?.getTime(),
+                name: (lead as any).contactSnapshot?.name ?? customer.name,
+                phone: (lead as any).contactSnapshot?.phone ?? customer.phone,
+                email: (lead as any).contactSnapshot?.email ?? customer.email,
+                address: (lead as any).contactSnapshot?.address ?? customer.address ?? "",
+                dob: (lead as any).contactSnapshot?.dob?.getTime?.() ?? customer.dob?.getTime(),
                 createdAt: convertToIstMillie(lead.createdAt),
             })
         } else {
@@ -195,18 +202,18 @@ export const updateLeadStatus = asyncHandler(async (req: Request, res: TypedResp
         res.status(200).json({
             _id: lead._id,
             product: lead.product,
-            phone: lead.customer.phone,
-            name: lead.customer.name,
-            email: lead.customer.email,
-            address: lead.customer.address ?? "",
-            dob: lead.customer.dob?.getTime(),
+            phone: (lead as any).contactSnapshot?.phone ?? lead.customer.phone,
+            name: (lead as any).contactSnapshot?.name ?? lead.customer.name,
+            email: (lead as any).contactSnapshot?.email ?? lead.customer.email,
+            address: (lead as any).contactSnapshot?.address ?? lead.customer.address ?? "",
+            dob: (lead as any).contactSnapshot?.dob ? new Date((lead as any).contactSnapshot.dob).getTime() : lead.customer.dob?.getTime(),
             createdAt: convertToIstMillie(lead.createdAt),
             source: lead.source,
             enquireStatus: lead.enquireStatus,
             purpose: lead.purpose,
             callStatus: lead.callStatus,
             nearestStore: lead.nearestStore,
-            handlerName: handlerName ?? lead.handledBy.username,
+            handlerName: handlerName ?? (lead as any).handledBy.username,
             type: lead.type
         });
     } catch (error) {
@@ -354,6 +361,7 @@ export const getLeads = asyncHandler(async (req: Request, res: TypedResponse<Get
                                 // Other fields you need
                                 handledBy: 1,
                                 customer: 1,
+                                contactSnapshot: 1,
                             }
                         },
                     ],
@@ -405,7 +413,7 @@ export const getLeads = asyncHandler(async (req: Request, res: TypedResponse<Get
             res.status(401).json({ message: "unexpected db behavior" });
             return;
         }
-        const leads: ILeadResponse[] = (result[0]['data'] ?? []).map((e: ILead<ICustomer, IUser>): ILeadResponse => ({
+        const leads: ILeadResponse[] = (result[0]['data'] ?? []).map((e: any): ILeadResponse => ({
             _id: e._id,
             handlerName: e.handledBy.username,
             source: e.source,
@@ -415,12 +423,12 @@ export const getLeads = asyncHandler(async (req: Request, res: TypedResponse<Get
             type: e.type,
             product: e.product,
             nearestStore: e.nearestStore,
-            name: e.customer?.name ?? "",
-            phone: e.customer?.phone ?? "",
-            email: e.customer?.email,
-            address: e.customer?.address ?? "",
-            dob: e.customer.dob ? e.customer.dob.getTime() : undefined,
-            createdAt: e.createdAt.getTime(),
+            name: e.contactSnapshot?.name ?? e.customer?.name ?? "",
+            phone: e.contactSnapshot?.phone ?? e.customer?.phone ?? "",
+            email: e.contactSnapshot?.email ?? e.customer?.email,
+            address: e.contactSnapshot?.address ?? e.customer?.address ?? "",
+            dob: e.contactSnapshot?.dob ? new Date(e.contactSnapshot.dob).getTime() : (e.customer?.dob ? new Date(e.customer.dob).getTime() : undefined),
+            createdAt: new Date(e.createdAt).getTime(),
         }));
         const totalCount = result[0]['totalCount'][0]?.count ?? 0;
         const todayCount = result[0]['todayCount'][0]?.count ?? 0;
@@ -488,11 +496,18 @@ export const getTaskCreatableLead = async (req: Request, res: TypedResponse<Resp
             .populate<{ customer?: { name: string, phone: string } }>('customer', 'name phone')
             .lean()
 
-        res.status(200).json(runtimeValidation(responseTaskableLeadSchema, data.map(e => ({
-            _id: e._id.toString(),
-            name: e.customer ? e.customer.name + " (" + e.customer.phone.slice(-4) + ")" : "Unknown",
-            phone: e.customer?.phone ?? "Unknown"
-        }))));
+        res.status(200).json(runtimeValidation(responseTaskableLeadSchema, data.map((e: any) => {
+            const snapName: string | undefined = e.contactSnapshot?.name;
+            const snapPhone: string | undefined = e.contactSnapshot?.phone;
+            const custName: string | undefined = e.customer?.name;
+            const custPhone: string | undefined = e.customer?.phone;
+            const phone = snapPhone ?? custPhone;
+            return {
+                _id: e._id.toString(),
+                name: (snapName ?? custName) ? `${snapName ?? custName} (${(phone ?? '').slice(-4)})` : 'Unknown',
+                phone: phone ?? 'Unknown'
+            };
+        })));
     } catch (e) {
         onCatchError(e, res);
     }
@@ -522,6 +537,7 @@ export const getLeadById = asyncHandler(async (req: Request, res: TypedResponse<
             type: true,
             createdAt: true,
             manager: true,
+            contactSnapshot: true,
         })
             .populate<{ handledBy: { username: string } }>('handledBy', 'username')
             .populate<{ customer: ICustomer }>('customer').lean();
@@ -543,11 +559,11 @@ export const getLeadById = asyncHandler(async (req: Request, res: TypedResponse<
             type: lead.type,
             product: lead.product,
             nearestStore: lead.nearestStore,
-            name: lead.customer?.name ?? "",
-            phone: lead.customer?.phone ?? "",
-            email: lead.customer?.email,
-            address: lead.customer?.address ?? "",
-            dob: lead?.customer?.dob?.getTime(),
+            name: (lead as any).contactSnapshot?.name ?? lead.customer?.name ?? "",
+            phone: (lead as any).contactSnapshot?.phone ?? lead.customer?.phone ?? "",
+            email: (lead as any).contactSnapshot?.email ?? lead.customer?.email,
+            address: (lead as any).contactSnapshot?.address ?? lead.customer?.address ?? "",
+            dob: (lead as any).contactSnapshot?.dob ? new Date((lead as any).contactSnapshot.dob).getTime() : lead?.customer?.dob?.getTime(),
             createdAt: convertToIstMillie(lead.createdAt),
         });
     } catch (error) {
@@ -657,33 +673,31 @@ export const updateLead = asyncHandler(async (req: Request, res: Response) => {
             return;
         }
 
-        if (req.privilege === 'admin') {
-            customer = await Customer
-                .findByIdAndUpdate(
-                    lead.customer,
-                    updateData, { new: true }
-                );
-        } else {
-            if (updateData.name !== customer.name) {
-                res.status(404).json({ message: "Only admin can change customer data" });
-                return;
-            }
-            if (updateData.phone !== customer.phone) {
-                res.status(404).json({ message: "Only admin can change customer data" });
-                return;
-            }
+        // Build updates for Lead document
+        const leadFieldUpdates: any = {};
+        if (typeof updateData.product !== 'undefined') leadFieldUpdates.product = updateData.product;
+        if (typeof updateData.type !== 'undefined') leadFieldUpdates.type = updateData.type;
+        if (typeof updateData.manager !== 'undefined') leadFieldUpdates.manager = updateData.manager as any;
+        if (typeof updateData.nearestStore !== 'undefined') leadFieldUpdates.nearestStore = updateData.nearestStore as any;
 
-            if (updateData.address !== customer.address) {
-                res.status(404).json({ message: "Only admin can change customer data" });
-                return;
-            }
+        // Build snapshot updates from provided contact fields
+        const snapshotSet: any = {};
+        if (typeof updateData.name !== 'undefined') snapshotSet['contactSnapshot.name'] = updateData.name;
+        if (typeof updateData.phone !== 'undefined') snapshotSet['contactSnapshot.phone'] = updateData.phone;
+        if (typeof updateData.email !== 'undefined') snapshotSet['contactSnapshot.email'] = updateData.email;
+        if (typeof updateData.address !== 'undefined') snapshotSet['contactSnapshot.address'] = updateData.address;
+        if (typeof updateData.dob !== 'undefined') snapshotSet['contactSnapshot.dob'] = updateData.dob as any;
+
+        // Admins can also update the canonical Customer doc
+        if (req.privilege === 'admin') {
+            customer = await Customer.findByIdAndUpdate(lead.customer, updateData, { new: true });
         }
 
         let updatedLead: any = await Lead.findByIdAndUpdate(
             req.params.id,
-            updateData,
+            { $set: { ...leadFieldUpdates, ...snapshotSet } },
             { new: true, runValidators: true }
-        ).select('enquireStatus callStatus purpose product source type createdAt customer')
+        ).select('enquireStatus callStatus purpose product source type createdAt customer contactSnapshot')
             .populate('manager', 'name');
 
         if (!updatedLead || !updatedLead.customer) {
@@ -706,11 +720,11 @@ export const updateLead = asyncHandler(async (req: Request, res: Response) => {
         updatedLead.createdAt = convertToIstMillie(updatedLead.createdAt);
         res.status(200).json({
             ...updatedLead,
-            name: customer.name,
-            phone: customer.phone,
-            email: customer.email,
-            address: customer.address,
-            dob: customer.dob?.getTime()
+            name: updatedLead.contactSnapshot?.name ?? customer.name,
+            phone: updatedLead.contactSnapshot?.phone ?? customer.phone,
+            email: updatedLead.contactSnapshot?.email ?? customer.email,
+            address: updatedLead.contactSnapshot?.address ?? customer.address,
+            dob: updatedLead.contactSnapshot?.dob ? new Date(updatedLead.contactSnapshot.dob).getTime() : customer.dob?.getTime()
         });
     } catch (error) {
         onCatchError(error, res);
@@ -841,7 +855,8 @@ export const internalLeadStatusUpdate = async ({ requestedUser, lead, updateData
     lead = await lead.save()
 
     lead = lead.toObject();
-    let customer = lead.customer;
+    const customer = lead.customer as any;
+    const snap = (lead as any).contactSnapshot;
     return {
         _id: lead._id,
         handlerName: requestedUser.username,
@@ -852,11 +867,11 @@ export const internalLeadStatusUpdate = async ({ requestedUser, lead, updateData
         type: lead.type,
         product: lead.product,
         nearestStore: lead.nearestStore,
-        name: customer.name,
-        phone: customer.phone,
-        email: customer.email,
-        address: customer.address,
-        dob: customer.dob?.getTime(),
+        name: snap?.name ?? customer?.name,
+        phone: snap?.phone ?? customer?.phone,
+        email: snap?.email ?? customer?.email,
+        address: snap?.address ?? customer?.address,
+        dob: snap?.dob ? new Date(snap.dob).getTime() : customer?.dob?.getTime(),
         createdAt: lead.createdAt.getTime(),
     };
 }

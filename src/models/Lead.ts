@@ -19,6 +19,13 @@ export interface ILead<T = Types.ObjectId, S = Types.ObjectId> extends Document 
     product: string;
     createdAt: Date;
     nearestStore?:string;
+    contactSnapshot?: {
+        name: string;
+        phone: string;
+        email?: string;
+        address?: string;
+        dob?: Date;
+    }
 }
 
 const LeadSchema = new mongoose.Schema(
@@ -73,6 +80,13 @@ const LeadSchema = new mongoose.Schema(
         },
         nearestStore: {
             type: String
+        },
+        contactSnapshot: {
+            name: { type: String, required: false },
+            phone: { type: String, required: false },
+            email: { type: String, required: false },
+            address: { type: String, required: false },
+            dob: { type: Date, required: false },
         }
     },
     {
