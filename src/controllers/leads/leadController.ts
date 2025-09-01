@@ -695,7 +695,7 @@ export const updateLead = asyncHandler(async (req: Request, res: Response) => {
 
         let updatedLead: any = await Lead.findByIdAndUpdate(
             req.params.id,
-            { $set: { ...leadFieldUpdates, ...snapshotSet } },
+            { $set: { ...leadFieldUpdates } },
             { new: true, runValidators: true }
         ).select('enquireStatus callStatus purpose product source type createdAt customer contactSnapshot')
             .populate('manager', 'name');
