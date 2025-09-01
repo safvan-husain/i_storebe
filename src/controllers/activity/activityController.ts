@@ -11,6 +11,7 @@ import {TypedResponse} from "../../common/interface";
 import puppeteer from 'puppeteer';
 import Task, {ITask} from "../../models/Task";
 import Lead, {ILead} from "../../models/Lead";
+import Target, { ITarget } from "../../models/Target";
 import {runtimeValidation} from "../../utils/validation";
 
 export const getActivity = asyncHandler(
@@ -288,13 +289,29 @@ export const getStaffReport = async (req: Request, res: TypedResponse<any>) => {
             leadDbQuery.createdBy = staffs;
         }
 
-        const leadStatus: {
+        let leadStatus: {
             _id: string;
             manager: string;
             total_leads: number;
             is_won: number
             is_visited: number;
         }[] = await getLeadStatusByHandler(leadDbQuery, shouldGroupByManager);
+
+        // override won count from Target collection (sum of achieved)
+        // inititaly we were counting from lead collection, 
+        // but since won happen later than lead created, it will be incorrect data, 
+        // so using target collection to count the won
+        const targetDbQuery: FilterQuery<ITarget> = {};
+        if (createdAt) {
+            // use month field for date filtering in Target
+            (targetDbQuery as any).month = createdAt;
+        }
+        if (staffs) {
+            targetDbQuery.assigned = staffs as any;
+        }
+        const targetWon = await getWonFromTargetByHandler(targetDbQuery, shouldGroupByManager);
+        const targetWonMap = new Map(targetWon.map(e => [e._id, e.is_won]));
+        leadStatus = leadStatus.map(e => ({ ...e, is_won: targetWonMap.get(e._id) ?? 0 }));
 
         let taskDbQuery: FilterQuery<ITask> = {
             isCompleted: false
@@ -541,6 +558,72 @@ async function getPendingTasksByUser(taskQuery = {}, isManagerBased?: boolean): 
     return Task.aggregate(pipeline);
 }
 
+interface WonFromTargetResult {
+    _id: string;
+    manager: string;
+    is_won: number;
+}
+
+async function getWonFromTargetByHandler(targetQuery: FilterQuery<ITarget> = {}, isManagerBased?: boolean): Promise<WonFromTargetResult[]> {
+
+    const pipeline: PipelineStage[] = [
+        {
+            $match: targetQuery
+        },
+        {
+            $lookup: {
+                from: 'users',
+                localField: 'assigned',
+                foreignField: '_id',
+                pipeline: [
+                    {
+                        $lookup: {
+                            from: 'users',
+                            localField: 'manager',
+                            foreignField: '_id',
+                            as: 'manager'
+                        }
+                    },
+                    {
+                        $unwind: {
+                            path: "$manager",
+                            preserveNullAndEmptyArrays: true
+                        }
+                    },
+                    {
+                        $project: {
+                            _id: 0,
+                            manager: { $ifNull: ["$manager.username", "$username"] },
+                            username: 1
+                        }
+                    }
+                ],
+                as: 'assigned'
+            }
+        },
+        { $unwind: "$assigned" },
+        {
+            $group: {
+                _id: "$assigned.username",
+                manager: { $first: "$assigned.manager" },
+                is_won: { $sum: "$achieved" }
+            }
+        }
+    ];
+
+    if (isManagerBased) {
+        pipeline.push({
+            $group: {
+                _id: "$manager",
+                manager: { $first: "$manager" },
+                is_won: { $sum: "$is_won" }
+            }
+        })
+    }
+
+    return Target.aggregate(pipeline);
+}
+
 interface LeadStatusResult {
     _id: string;
     manager: string;
@@ -595,7 +678,7 @@ async function getLeadStatusByHandler(leadDbQuery: FilterQuery<ILead>, isManager
                 manager: {$first: "$handledBy.manager"},
                 total_leads: {$sum: 1},
                 is_won: {$sum: {$cond: [{$eq: ["$enquireStatus", "won"]}, 1, 0]}},
-                is_visited: {$sum: {$cond: [{$eq: ["$enquireStatus", "visited"]}, 1, 0]}}
+                is_visited: {$sum: {$cond: [{$eq: ["$enquireStatus", "visit store"]}, 1, 0]}}
             }
         }
     ];
