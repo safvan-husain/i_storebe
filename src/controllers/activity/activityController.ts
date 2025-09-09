@@ -329,6 +329,7 @@ export const getStaffReport = async (req: Request, res: TypedResponse<any>) => {
             _id: string;
             manager: string;
             pending_tasks: number;
+            overdue_tasks: number;
         }[] = await getPendingTasksByUser(taskDbQuery, shouldGroupByManager);
 
         const data = await Activity.aggregate(pipeline);
@@ -385,13 +386,13 @@ const createPdf = async (html: string) => {
 const generateTableHtml = (items: any, start: Date, end: Date, manager?: string) => {
     const headers = [
         "Username", "Tasks Added", "Leads Added",
-        "Status Updates", "Won", "Visit", "Pending Task"
+        "Status Updates", "Won", "Visit", "Pending Task", "Overdue Task"
     ];
 
     const keys = [
         "_id", "task_added", "lead_added",
         "status_updated",
-        "is_won", 'is_visited', 'pending_tasks'
+        "is_won", 'is_visited', 'pending_tasks', 'overdue_tasks'
     ];
 
     const rows = items.map((item: any) => {
@@ -540,7 +541,16 @@ async function getPendingTasksByUser(taskQuery = {}, isManagerBased?: boolean): 
                 $group: {
                     _id: "$assigned.username",
                     manager: {$first: "$assigned.manager"},
-                    pending_tasks: {$sum: 1}
+                    pending_tasks: {$sum: 1},
+                    overdue_tasks: {
+                        $sum: {
+                            $cond: [
+                                { $lt: ["$due", new Date()] },
+                                1,
+                                0
+                            ]
+                        }
+                    }
                 }
             }
     ];
@@ -550,7 +560,8 @@ async function getPendingTasksByUser(taskQuery = {}, isManagerBased?: boolean): 
             $group: {
                 _id: "$manager",
                 manager: {$first: "$manager"},
-                pending_tasks: {$sum: "$pending_tasks"}
+                pending_tasks: {$sum: "$pending_tasks"},
+                overdue_tasks: { $sum: "$overdue_tasks" }
             }
         })
     }

@@ -47,5 +47,6 @@ export const statsSchema = z.object({
     total_leads: z.number().default(0),
     is_won: z.number().default(0),
     is_visited: z.number().default(0),
-    pending_tasks: z.number().default(0)
+    pending_tasks: z.number().default(0),
+    overdue_tasks: z.number().default(0)
 });
