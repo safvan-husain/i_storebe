@@ -25,7 +25,7 @@ export const applyLeave = asyncHandler(
                 })).default([])
             }).parse(req.body);
 
-            await Leave.create({
+            const createdLeave = await Leave.create({
                 requester: req.userId,
                 reason: data.reason,
                 date: data.date,
@@ -35,7 +35,12 @@ export const applyLeave = asyncHandler(
                 .lean().then(e => e.map(e => e._id));
 
             for (const id of superAdmins) {
-                sendPushNotification({ title: "New Leave request", body: `leave requested by ${req.username} on to ${new Date(data.date).toDateString()} for ${data.dates.length} days`, userId: id.toString() });
+                sendPushNotification({
+                    title: "New Leave request",
+                    body: `leave requested by ${req.username} on to ${new Date(data.date).toDateString()} for ${data.dates.length} days`,
+                    userId: id.toString(),
+                    leaveId: createdLeave._id.toString(),
+                });
             }
             res.status(200).json({ message: "Leave applied successfully" });
         } catch (e) {
@@ -157,7 +162,7 @@ export const updateLeaveStatus = async (req: Request, res: TypedResponse<ILeaveR
             res.status(404).json({ message: "Leave not found" });
             return;
         }
-        sendPushNotification({ title: "Update on leave request", body: `You leave request ${data.status}`, userId: leave.requester._id.toString() })
+        sendPushNotification({ title: "Update on leave request", body: `You leave request ${data.status}`, userId: leave.requester._id.toString(), leaveId: leave._id.toString() })
         res.status(200).json({
             username: leave.requester.username,
             date: leave.date.getTime(),
