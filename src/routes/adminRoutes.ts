@@ -5,7 +5,7 @@ import { backupDatabase } from '../controllers/admin/backupController';
 const router = Router();
 
 // GET /api/admin/backup -> streams a gzipped mongodump archive
-router.get('/backup', backupDatabase);
+router.get('/backup', protect, backupDatabase);
 
 export default router;
 

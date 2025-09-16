@@ -5,17 +5,21 @@ import { pipeline } from 'stream';
 /**
  * Streams a gzipped mongodump archive directly to the HTTP response.
  * Requires req.privilege === 'admin'.
+ * 
+ * restore by the below command:
+ * 
+ * mongorestore --uri "mongodb://localhost:27017" --archive=C:\Users\msafv\Downloads\mongodb-backup-2025-09-16T05-42-21-821Z.gz --gzip --nsInclude 'i-store-db.*' --nsFrom 'i-store-db.*' --nsTo 'i-store-db-test.*'
  */
 export async function backupDatabase(req: Request, res: Response) {
   try {
-    // if (req.privilege !== 'admin') {
-    //   res.status(403).json({ message: 'Forbidden' });
-    //   return;
-    // }
+    if (req.privilege !== 'admin') {
+      res.status(403).json({ message: 'Forbidden' });
+      return;
+    }
 
     const mongoUri = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/i-store-db';
     const ts = new Date().toISOString().replace(/[:.]/g, '-');
-    const filename = `mongodb-backup-${ts}.tar.gz`;
+    const filename = `mongodb-backup-${ts}.archive.gz`;
 
     res.setHeader('Content-Type', 'application/gzip');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
