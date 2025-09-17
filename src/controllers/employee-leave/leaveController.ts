@@ -148,8 +148,8 @@ export const updateLeaveStatus = async (req: Request, res: TypedResponse<ILeaveR
             res.status(401).json({ message: "User not found" });
             return;
         }
-        //super admin can only update leave status.
-        if (req.privilege !== "admin" || req.secondPrivilege !== "super") {
+        //staff connot update leave status.
+        if (req.privilege === "staff") {
             res.status(200).json({ message: "Not allowed" });
             return;
         }
@@ -159,20 +159,40 @@ export const updateLeaveStatus = async (req: Request, res: TypedResponse<ILeaveR
             status: leaveStatusSchema
         }).parse(req.body);
 
-        const leave = await Leave
-            .findByIdAndUpdate(data.id, { status: data.status }, { new: true })
+        // first fetch leave to validate dates before updating status
+        const existingLeave = await Leave
+            .findById(data.id)
             .populate<{ requester: { username: string, _id: string } }>('requester', 'username');
 
-        if (!leave) {
+        if (!existingLeave) {
             res.status(404).json({ message: "Leave not found" });
             return;
         }
-        sendPushNotification({ title: "Update on leave request", body: `You leave request ${data.status}`, userId: leave.requester._id.toString(), leaveId: leave._id.toString() })
+
+        // Determine the last requested leave date (considering single and multiple dates)
+        const allDates: Date[] = [existingLeave.date, ...(existingLeave.dates ?? []).map((d: { date: Date }) => d.date)];
+        const latestLeaveDateMs = Math.max(...allDates.map(d => new Date(d).getTime()));
+
+        // Allow updates up to one day (24h) after the latest leave date
+        const oneDayMs = 24 * 60 * 60 * 1000;
+        const cutoffMs = latestLeaveDateMs + oneDayMs;
+        const nowMs = Date.now();
+
+        if (nowMs > cutoffMs) {
+            res.status(200).json({ message: "Not allowed: Leave date has passed (1-day grace exceeded)" });
+            return;
+        }
+
+        // proceed with update after validation
+        existingLeave.status = data.status;
+        const leave = await existingLeave.save();
+
+        sendPushNotification({ title: "Update on leave request", body: `You leave request ${data.status}` , userId: existingLeave.requester._id.toString(), leaveId: leave._id.toString() })
         res.status(200).json({
-            username: leave.requester.username,
+            username: (existingLeave.requester as any).username,
             date: leave.date.getTime(),
             reason: leave.reason as string,
-            userId: leave.requester._id,
+            userId: (existingLeave.requester as any)._id,
             status: leave.status,
             _id: leave._id.toString(),
             dates: leave.dates?.map((d: { date: Date, dayType: LeaveDayType }) => ({ date: d.date.getTime(), dayType: d.dayType })) ?? [],
