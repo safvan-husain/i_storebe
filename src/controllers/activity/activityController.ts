@@ -300,22 +300,7 @@ export const getStaffReport = async (req: Request, res: TypedResponse<any>) => {
             is_won: number
             is_visited: number;
         }[] = await getLeadStatusByHandler(leadDbQuery, shouldGroupByManager);
-
-        // override won count from Target collection (sum of achieved)
-        // inititaly we were counting from lead collection, 
-        // but since won happen later than lead created, it will be incorrect data, 
-        // so using target collection to count the won
-        const targetDbQuery: FilterQuery<ITarget> = {};
-        if (createdAt) {
-            // use month field for date filtering in Target
-            (targetDbQuery as any).month = createdAt;
-        }
-        if (staffs) {
-            targetDbQuery.assigned = staffs as any;
-        }
-        const targetWon = await getWonFromTargetByHandler(targetDbQuery, shouldGroupByManager);
-        const targetWonMap = new Map(targetWon.map(e => [e._id, e.is_won]));
-        leadStatus = leadStatus.map(e => ({ ...e, is_won: targetWonMap.get(e._id) ?? 0 }));
+        // Note: Do not override won from Target/Lead; will compute from Activity
 
         let taskDbQuery: FilterQuery<ITask> = {
             isCompleted: false
@@ -359,7 +344,9 @@ export const getStaffReport = async (req: Request, res: TypedResponse<any>) => {
 
         const validData = runtimeValidation(statsSchema, newd.map(e => ({
             ...e,
-            task_added: (e.task_added ?? 0) + (e.followup_added ?? 0)
+            task_added: (e.task_added ?? 0) + (e.followup_added ?? 0),
+            // Compute won from activity: made_won - removed_won
+            is_won: (e.made_won ?? 0) - (e.removed_won ?? 0)
         })));
 
         const pdfBuffer = await createPdf(generateTableHtml(validData, query.startDate ?? new Date(0), query.endDate ?? new Date(), managerName));
@@ -396,8 +383,6 @@ const generateTableHtml = (items: any, start: Date, end: Date, manager?: string)
     const keys = [
         "_id", "task_added", "lead_added", "overdue_tasks",
         "status_updated",
-        "made_won",
-        "removed_won",
         "is_won", 'is_visited', 'pending_tasks'
     ];
 
