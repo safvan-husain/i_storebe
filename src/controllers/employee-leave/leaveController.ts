@@ -2,7 +2,7 @@ import asyncHandler from "express-async-handler";
 import { Request, Response } from "express";
 import { onCatchError } from "../../middleware/error";
 import { z } from "zod";
-import Leave, {LeaveDayType, LeaveStatus, leaveStatusSchema, leaveDayTypeSchema} from "../../models/Leave";
+import Leave, { LeaveDayType, LeaveStatus, leaveStatusSchema, leaveDayTypeSchema } from "../../models/Leave";
 import { TypedResponse } from "../../common/interface";
 import { optionalDateQueryFiltersSchema, ObjectIdSchema, paginationSchema } from "../../common/types";
 import { Schema, Types } from "mongoose";
@@ -59,26 +59,31 @@ interface ILeaveResponse {
     dates: { date: number, dayType: LeaveDayType }[];
 }
 
+const leaveRequestQuerySchema = z.object({
+    userId: ObjectIdSchema.optional(),
+    view_self: z.string().default('false').transform(e => e === 'true'),
+}).merge(paginationSchema).merge(optionalDateQueryFiltersSchema);
+
 export const getLeaves = async (req: Request, res: TypedResponse<ILeaveResponse[]>) => {
     try {
-        let data = z.object({
-            userId: ObjectIdSchema.optional()
-        }).merge(paginationSchema).merge(optionalDateQueryFiltersSchema).parse(req.query);
+        let data = leaveRequestQuerySchema.parse(req.query);
         if (!req.userId) {
             res.status(401).json({ message: "User not found" });
             return;
         }
         const matchStage: any = {};
 
-        if (['manager', 'staff'].includes(req.privilege)) {
-            //when it is manager or staff, only show of them.
+        if (['staff'].includes(req.privilege) || data.view_self) {
+            //when staff or the manager want self, show then their own leave requests only.
             matchStage.requester = new Types.ObjectId(req.userId);
         } else if (data.userId) {
             matchStage.requester = new Types.ObjectId(data.userId);
         }
-        //only super admin can see all the leaves.
-        if (req.privilege === "admin" && req.secondPrivilege === "regular") {
-            matchStage.requester = Types.ObjectId.createFromHexString(req.userId)
+
+        if (req.privilege === 'manager' && !data.view_self) {
+            //when manager don't want his own only, send all his staffs.
+            const staffsIds = await User.find({ manager: req.userId }, { _id: 1 }).lean().then((e) => e.map((i) => i._id));
+            matchStage.requester = { $in: staffsIds }
         }
 
         const pipeline = [];
@@ -107,7 +112,7 @@ export const getLeaves = async (req: Request, res: TypedResponse<ILeaveResponse[
             {
                 $unwind: {
                     path: '$requester',
-                    preserveNullAndEmptyArrays: true
+                    preserveNullAndEmptyArrays: false
                 }
             },
             {
