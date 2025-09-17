@@ -8,6 +8,7 @@ import taskRoutes from "./routes/taskRoutes";
 import {activityRoutes} from "./routes/activityRoutes";
 import {staticsRoutes} from "./routes/staticsRoutes";
 import Lead from "./models/Lead";
+import Activity from "./models/Activity";
 import User from "./models/User";
 import Task from "./models/Task";
 import Leave from "./models/Leave";
@@ -89,24 +90,32 @@ const random10DigitNumber = (): number => {
 
 app.get('/api/transform', async (_, res) => {
     try {
-        let leads = await Lead.find({ handledBy: { $exists: false}});
-        let s = await Promise.all(leads.map(async (e: any) => {
-            e.createdBy = e.createdBy ?? e.toObject().manager;
-            e.handledBy = e.handledBy ?? e.toObject().manager;
-            return await e.save();
-        }));
-        // let users = await User.find({ token: { $exists: false }});
-        // await Promise.all(users.map(async (e) => {
-        //     e.token = generateToken(e);
-        //     return await e.save();
-        // }))
-        // let users = await User.find({ username: { $exists: false }});
-        // let s = await Promise.all(users.map(async (e) => {
-        //    e.username = (e as any).phone;
-        //     console.log(e.username, " ", (e as any).phone);
-        //    return await e.save();
-        // }));
-        res.status(200).json({ s });
+        // Migration: reclassify status updates involving 'won' into new activity types
+        // made_won: when status changed TO won
+        // removed_won: when status changed FROM won
+        const toWonQuery = {
+            type: 'status_updated',
+            action: { $regex: /status\s+to\s+won\b/i }
+        } as any;
+        const fromWonQuery = {
+            type: 'status_updated',
+            action: { $regex: /\bfrom\s+won\b/i }
+        } as any;
+
+        const [toWonResult, fromWonResult] = await Promise.all([
+            Activity.updateMany(toWonQuery, { $set: { type: 'made_won' } }),
+            Activity.updateMany(fromWonQuery, { $set: { type: 'removed_won' } })
+        ]);
+
+        res.status(200).json({
+            ok: true,
+            summary: {
+                toWonMatched: (toWonResult as any).matchedCount ?? undefined,
+                toWonModified: (toWonResult as any).modifiedCount ?? undefined,
+                fromWonMatched: (fromWonResult as any).matchedCount ?? undefined,
+                fromWonModified: (fromWonResult as any).modifiedCount ?? undefined,
+            }
+        });
     } catch (e) {
         console.log(e);
         res.status(500).json(e)
