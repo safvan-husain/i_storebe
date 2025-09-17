@@ -786,21 +786,27 @@ export const internalLeadStatusUpdate = async ({ requestedUser, lead, updateData
     let message = `${requestedUser.username} Changed `;
     //if the given value is not null update accordingly and create new activity.
     if (updateData.enquireStatus && updateData.enquireStatus !== lead.enquireStatus) {
-        activityType = 'status_updated';
-        message = message + getUpdateStatusMessage('status', lead.enquireStatus, updateData.enquireStatus);
+        const previousStatus = lead.enquireStatus;
+        const nextStatus = updateData.enquireStatus;
+        activityType = nextStatus === 'won'
+            ? 'made_won'
+            : previousStatus === 'won'
+                ? 'removed_won'
+                : 'status_updated';
+        message = message + getUpdateStatusMessage('status', previousStatus, nextStatus);
         //after message, changing the value to save later.
         //when won or lost, task should be updated as completed.
         //if won should reflect to target.
-        if (lead.enquireStatus === 'won' && updateData.enquireStatus !== 'won') {
+        if (previousStatus === 'won' && nextStatus !== 'won') {
             //if switched from won.
             await handleTarget({ updater: lead.handledBy._id as unknown as ObjectId, lead, type: 'decrement' });
         }
-        lead.enquireStatus = updateData.enquireStatus;
-        if (updateData.enquireStatus === 'won') {
+        lead.enquireStatus = nextStatus;
+        if (nextStatus === 'won') {
             await handleTarget({ updater: requestedUser._id as unknown as ObjectId, lead, type: 'increment' });
             //since this function is used on both lead status update and task status update, updating specific task or all task for a lead.
             await markTaskCompleted(taskId ? { taskId } : { leadId: lead._id });
-        } else if (updateData.enquireStatus === 'lost') {
+        } else if (nextStatus === 'lost') {
             await markTaskCompleted(taskId ? { taskId } : { leadId: lead._id });
         }
         await Activity.create({
@@ -810,6 +816,7 @@ export const internalLeadStatusUpdate = async ({ requestedUser, lead, updateData
             action: message,
         });
     }
+
     if (updateData.source && updateData.source !== lead.source) {
         activityType = 'lead_updated'
         message = message + getUpdateStatusMessage('source', lead.source, updateData.source);
@@ -911,3 +918,5 @@ export interface ILeadResponse {
     product: string;
     nearestStore?: string;
 }
+
+

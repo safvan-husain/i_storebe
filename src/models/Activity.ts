@@ -61,6 +61,12 @@ activitySchema.statics.createActivity = async function (activityData) {
             case 'followup_added':
                 activityData.action = `${activatorName} added a followup`;
                 break;
+            case 'made_won':
+                activityData.action = `${activatorName} marked the lead as won`;
+                break;
+            case 'removed_won':
+                activityData.action = `${activatorName} removed the won status`;
+                break;
             case 'status_updated':
                 activityData.action = `${activatorName} updated status`;
                 break;
@@ -89,5 +95,6 @@ activitySchema.statics.createActivity = async function (activityData) {
 const Activity = mongoose.model<IActivity, IActivityModel>('Activity', activitySchema);
 
 export default Activity;
+
 
 

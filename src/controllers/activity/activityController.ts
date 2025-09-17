@@ -257,6 +257,8 @@ export const getStaffReport = async (req: Request, res: TypedResponse<any>) => {
                 lead_added: { $sum: { $cond: [{ $eq: ["$type", "lead_added"] }, 1, 0] } },
                 note_added: { $sum: { $cond: [{ $eq: ["$type", "note_added"] }, 1, 0] } },
                 followup_added: { $sum: { $cond: [{ $eq: ["$type", "followup_added"] }, 1, 0] } },
+                made_won: { $sum: { $cond: [{ $eq: ["$type", "made_won"] }, 1, 0] } },
+                removed_won: { $sum: { $cond: [{ $eq: ["$type", "removed_won"] }, 1, 0] } },
                 status_updated: { $sum: { $cond: [{ $eq: ["$type", "status_updated"] }, 1, 0] } },
                 completed: { $sum: { $cond: [{ $eq: ["$type", "completed"] }, 1, 0] } },
                 call_status_updated: { $sum: { $cond: [{ $eq: ["$type", "call_status_updated"] }, 1, 0] } },
@@ -273,6 +275,8 @@ export const getStaffReport = async (req: Request, res: TypedResponse<any>) => {
                     task_added: { $sum: "$task_added" },
                     lead_added: { $sum: "$lead_added" },
                     followup_added: { $sum: "$followup_added" },
+                    made_won: { $sum: "$made_won" },
+                    removed_won: { $sum: "$removed_won" },
                     status_updated: { $sum: "$status_updated" },
                     call_status_updated: { $sum: "$call_status_updated" },
                 }
@@ -392,6 +396,8 @@ const generateTableHtml = (items: any, start: Date, end: Date, manager?: string)
     const keys = [
         "_id", "task_added", "lead_added", "overdue_tasks",
         "status_updated",
+        "made_won",
+        "removed_won",
         "is_won", 'is_visited', 'pending_tasks'
     ];
 
@@ -572,7 +578,7 @@ async function getPendingTasksByUser(taskQuery = {}, isManagerBased?: boolean): 
 interface WonFromTargetResult {
     _id: string;
     manager: string;
-    is_won: number;
+    is_won: number
 }
 
 async function getWonFromTargetByHandler(targetQuery: FilterQuery<ITarget> = {}, isManagerBased?: boolean): Promise<WonFromTargetResult[]> {
@@ -639,7 +645,7 @@ interface LeadStatusResult {
     _id: string;
     manager: string;
     total_leads: number;
-    is_won: number;
+    is_won: number
     is_visited: number;
 }
 
