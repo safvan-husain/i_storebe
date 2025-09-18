@@ -3,7 +3,7 @@ import { Request } from 'express';
 import { TypedResponse } from "../../common/interface";
 
 import * as ExcelJS from 'exceljs';
-import Customer, {ICustomer} from '../../models/Customer';
+import Lead from '../../models/Lead';
 import {optionalDateQueryFiltersSchema} from "../../common/types";
 import {FilterQuery} from "mongoose";
 import {onCatchError} from "../../middleware/error";
@@ -12,7 +12,7 @@ export const generateCustomerExcelFile = async (req: Request, res: TypedResponse
     try {
         const { startDate, endDate } = optionalDateQueryFiltersSchema.parse(req.query);
         
-        const query: FilterQuery<ICustomer> = {};
+        const query: FilterQuery<any> = {};
         if (startDate && endDate) {
             query.createdAt = {
                 $gte: startDate,
@@ -20,28 +20,37 @@ export const generateCustomerExcelFile = async (req: Request, res: TypedResponse
             };
         }
 
-        const customers = await Customer.find(query).lean();
+        const leads: any[] = await Lead
+            .find(query)
+            .populate('customer', 'name phone email address')
+            .lean();
         
         const workbook = new ExcelJS.Workbook();
-        const worksheet = workbook.addWorksheet('Customers');
+        const worksheet = workbook.addWorksheet('Leads');
 
         worksheet.columns = [
             { header: 'Name', key: 'name', width: 20 },
             { header: 'Phone', key: 'phone', width: 15 },
             { header: 'Email', key: 'email', width: 25 },
             { header: 'Address', key: 'address', width: 30 },
-            { header: 'Date of Birth', key: 'dob', width: 15 },
+            { header: 'Product', key: 'product', width: 20 },
             { header: 'Created At', key: 'createdAt', width: 20 }
         ];
 
-        customers.forEach(customer => {
+        leads.forEach(lead => {
+            const snapshot = lead.contactSnapshot || {};
+            const customer = lead.customer || {};
+            const name = snapshot.name ?? customer.name ?? '';
+            const phone = snapshot.phone ?? customer.phone ?? '';
+            const email = snapshot.email ?? customer.email ?? '';
+            const address = snapshot.address ?? customer.address ?? '';
             worksheet.addRow({
-                name: customer.name,
-                phone: customer.phone,
-                email: customer.email || '',
-                address: customer.address,
-                dob: customer.dob ? new Date(customer.dob).toLocaleDateString() : '',
-                createdAt: new Date(customer.createdAt).toLocaleDateString()
+                name,
+                phone,
+                email,
+                address,
+                product: lead.product ?? '',
+                createdAt: lead.createdAt ? new Date(lead.createdAt).toLocaleDateString() : ''
             });
         });
 
