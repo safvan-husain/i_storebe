@@ -4,6 +4,7 @@ import { TypedResponse } from "../../common/interface";
 import * as ExcelJS from 'exceljs';
 import Lead from '../../models/Lead';
 import Activity from '../../models/Activity';
+import Task from '../../models/Task';
 import {optionalDateQueryFiltersSchema} from "../../common/types";
 import {FilterQuery} from "mongoose";
 import {onCatchError} from "../../middleware/error";
@@ -22,12 +23,13 @@ export const generateCustomerExcelFile = async (req: Request, res: TypedResponse
 
         const leads: any[] = await Lead
             .find(query)
-            .populate('customer', 'name phone email address')
+            .populate('customer', 'name phone nearestStore')
             .lean();
 
         // Build a map of leadId -> last dialed datetime
         const leadIds = leads.map(l => l._id).filter(Boolean);
         let lastDialedMap = new Map<string, Date>();
+        let lastCompletedTaskMap = new Map<string, Date>();
         if (leadIds.length) {
             const lastDialed = await Activity.aggregate<{ _id: any, lastDialed: Date }>([
                 { $match: { type: 'dialed', lead: { $in: leadIds } } },
@@ -35,6 +37,15 @@ export const generateCustomerExcelFile = async (req: Request, res: TypedResponse
             ]);
             lastDialed.forEach(doc => {
                 lastDialedMap.set(String(doc._id), doc.lastDialed);
+            });
+
+            // Build a map of leadId -> last completed task (by updatedAt)
+            const lastCompleted = await Task.aggregate<{ _id: any, lastCompleted: Date }>([
+                { $match: { isCompleted: true, lead: { $in: leadIds } } },
+                { $group: { _id: '$lead', lastCompleted: { $max: '$updatedAt' } } }
+            ]);
+            lastCompleted.forEach(doc => {
+                lastCompletedTaskMap.set(String(doc._id), doc.lastCompleted);
             });
         }
         
@@ -44,10 +55,10 @@ export const generateCustomerExcelFile = async (req: Request, res: TypedResponse
         worksheet.columns = [
             { header: 'Name', key: 'name', width: 20 },
             { header: 'Phone', key: 'phone', width: 15 },
-            { header: 'Email', key: 'email', width: 25 },
-            { header: 'Address', key: 'address', width: 30 },
+            { header: 'Branch', key: 'nearestStore', width: 25 },
             { header: 'Product', key: 'product', width: 20 },
             { header: 'Last Contacted', key: 'lastContacted', width: 24 },
+            { header: 'Last Task Completed', key: 'lastTaskCompleted', width: 26 },
             { header: 'Created At', key: 'createdAt', width: 20 }
         ];
 
@@ -59,13 +70,16 @@ export const generateCustomerExcelFile = async (req: Request, res: TypedResponse
             const email = snapshot.email ?? customer.email ?? '';
             const address = snapshot.address ?? customer.address ?? '';
             const lastContacted = lastDialedMap.get(String(lead._id));
+            const lastTaskCompleted = lastCompletedTaskMap.get(String(lead._id));
             worksheet.addRow({
                 name,
                 phone,
                 email,
                 address,
+                nearestStore: lead.nearestStore ?? '',
                 product: lead.product ?? '',
                 lastContacted: lastContacted ? new Date(lastContacted).toLocaleString() : '',
+                lastTaskCompleted: lastTaskCompleted ? new Date(lastTaskCompleted).toLocaleString() : '',
                 createdAt: lead.createdAt ? new Date(lead.createdAt).toLocaleDateString() : ''
             });
         });
