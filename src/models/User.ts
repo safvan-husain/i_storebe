@@ -65,7 +65,7 @@ const UserSchema = new mongoose.Schema(
         },
         secondPrivilege: {
             type: String,
-            enum: ['super', 'call-center', 'regular', 'accountant'],
+            enum: ['super', 'call-center', 'regular', 'accountant', 'technician', 'hr', 'inventory', 'marketing-executive'],
             default: 'regular'
         },
         manager: {
