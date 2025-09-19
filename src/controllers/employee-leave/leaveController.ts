@@ -160,10 +160,17 @@ export const updateLeaveStatus = async (req: Request, res: TypedResponse<ILeaveR
         // first fetch leave to validate dates before updating status
         const existingLeave = await Leave
             .findById(data.id)
-            .populate<{ requester: { username: string, _id: string } }>('requester', 'username');
+            .populate<{ requester: { username: string, _id: string, privilege: string, secondPrivilege?: string } }>('requester', 'username privilege secondPrivilege');
 
         if (!existingLeave) {
             res.status(404).json({ message: "Leave not found" });
+            return;
+        }
+
+        // If the requester is an admin, only super admins can update the status
+        const requesterPrivilege = (existingLeave.requester as any)?.privilege as string | undefined;
+        if (requesterPrivilege === 'admin' && req.secondPrivilege !== 'super') {
+            res.status(200).json({ message: "Not allowed" });
             return;
         }
 
