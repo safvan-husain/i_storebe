@@ -78,9 +78,7 @@ export const getLeaves = async (req: Request, res: TypedResponse<ILeaveResponse[
             matchStage.requester = new Types.ObjectId(req.userId);
         } else if (data.userId) {
             matchStage.requester = new Types.ObjectId(data.userId);
-        }
-
-        if (req.privilege === 'manager' && !data.view_self) {
+        } else if (req.privilege === 'manager' && !data.view_self) {
             //when manager don't want his own only, send all his staffs.
             const staffsIds = await User.find({ manager: req.userId }, { _id: 1 }).lean().then((e) => e.map((i) => i._id));
             matchStage.requester = { $in: staffsIds }
