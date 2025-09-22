@@ -1,8 +1,11 @@
 import express from 'express';
 import { protect } from '../middleware/auth';
-import { createReport, getReport, publishVersion, submitResponse, listResponses, viewResponse } from '../controllers/custom-report/customReportController';
+import { createReport, getReport, publishVersion, submitResponse, listResponses, viewResponse, listLatestReportsForUser } from '../controllers/custom-report/customReportController';
 
 const router = express.Router();
+
+// List all available reports for requester with latest version embedded
+router.get('/', protect, listLatestReportsForUser);
 
 // Create a new report (draft)
 router.post('/', protect, createReport);

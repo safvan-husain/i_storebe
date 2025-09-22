@@ -334,3 +334,38 @@ export const viewResponse = async (req: Request, res: Response) => {
     onCatchError(e, res);
   }
 };
+
+export const listLatestReportsForUser = async (req: Request, res: Response) => {
+  try {
+    const isAdmin = req.privilege === 'admin';
+    const query: any = { status: 'published', 'versions.0': { $exists: true } };
+    if (!isAdmin) {
+      // Strict match: both privilege and SecondPrivileage must match requester
+      query.prvilege = req.privilege;
+      query.SecondPrivileage = req.secondPrivilege;
+    }
+
+    const docs = await CustomReportModel.find(query).lean();
+    const items = docs.map((d: any) => {
+      const versions = d.versions ?? [];
+      if (versions.length === 0) return null;
+      const latest = versions.reduce((acc: any, v: any) => (v.version > acc.version ? v : acc), versions[0]);
+      return {
+        id: String(d._id),
+        title: d.title,
+        description: d.description,
+        prvilege: d.prvilege,
+        SecondPrivileage: d.SecondPrivileage,
+        interval: d.interval ?? null,
+        status: d.status,
+        version: latest.version,
+        questions: latest.questions,
+        publishedAt: latest.publishedAt,
+      };
+    }).filter(Boolean);
+
+    res.status(200).json(items);
+  } catch (e) {
+    onCatchError(e, res);
+  }
+};
