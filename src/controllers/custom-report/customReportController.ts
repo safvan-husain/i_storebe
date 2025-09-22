@@ -3,8 +3,9 @@ import { z } from 'zod';
 import CustomReportModel, { AnyQuestion } from '../../models/CustomReport';
 import ReportResponseModel from '../../models/ReportResponse';
 import { onCatchError, AppError } from '../../middleware/error';
-import { createReportSchema, publishVersionSchema, submitResponseSchema, AnyQuestionInput } from './validation';
+import { createReportSchema, publishVersionSchema, submitResponseSchema, AnyQuestionInput, listResponsesSchema } from './validation';
 import { Types } from 'mongoose';
+import User from '../../models/User';
 
 function materializeQuestions(input: AnyQuestionInput[]): AnyQuestion[] {
   // Generate stable ids for questionId and option ids
@@ -234,6 +235,101 @@ export const submitResponse = async (req: Request, res: Response) => {
     });
 
     res.status(201).json({ id: String(toSave._id) });
+  } catch (e) {
+    onCatchError(e, res);
+  }
+};
+
+export const listResponses = async (req: Request, res: Response) => {
+  try {
+    const reportId = req.params.id;
+    if (!Types.ObjectId.isValid(reportId)) throw new AppError('Invalid report id', 400);
+    const filters = listResponsesSchema.parse(req.body ?? {});
+
+    const query: any = { reportId: new Types.ObjectId(reportId) };
+    if (filters.respondentId) query.respondentId = new Types.ObjectId(filters.respondentId);
+    if (filters.startDate || filters.endDate) {
+      query.submittedAt = {} as any;
+      if (filters.startDate) (query.submittedAt as any).$gte = filters.startDate;
+      if (filters.endDate) (query.submittedAt as any).$lte = filters.endDate;
+    }
+
+    const docs = await ReportResponseModel.find(query)
+      .sort({ submittedAt: -1 })
+      .skip(filters.skip)
+      .limit(filters.limit)
+      .lean();
+
+    const userIds = Array.from(new Set(docs.map(d => String(d.respondentId))))
+      .map(id => new Types.ObjectId(id));
+    const users = await User.find({ _id: { $in: userIds } }, { _id: 1, username: 1 }).lean();
+    const nameMap = new Map(users.map(u => [String(u._id), u.username]));
+
+    const items = docs.map(d => ({
+      id: String(d._id),
+      version: d.version,
+      respondentId: String(d.respondentId),
+      respondentName: nameMap.get(String(d.respondentId)) ?? null,
+      submittedAt: d.submittedAt,
+      answersCount: d.answers?.length ?? 0,
+    }));
+
+    res.status(200).json({ total: items.length, items });
+  } catch (e) {
+    onCatchError(e, res);
+  }
+};
+
+export const viewResponse = async (req: Request, res: Response) => {
+  try {
+    const reportId = req.params.id;
+    const responseId = req.params.responseId;
+    if (!Types.ObjectId.isValid(reportId) || !Types.ObjectId.isValid(responseId)) {
+      throw new AppError('Invalid id', 400);
+    }
+    const response = await ReportResponseModel.findOne({ _id: responseId, reportId }).lean();
+    if (!response) throw new AppError('Response not found', 404);
+
+    const report = await CustomReportModel.findById(reportId).lean();
+    if (!report) throw new AppError('Report not found', 404);
+    const version = (report.versions ?? []).find(v => v.version === response.version);
+    if (!version) throw new AppError('Report version not found', 404);
+
+    const qMap = new Map<string, any>();
+    for (const q of (version.questions as any[])) qMap.set(String(q.questionId), q);
+
+    const user = await User.findById(response.respondentId, { username: 1 }).lean();
+
+    const items = (response.answers ?? []).map((a: any) => {
+      const q = qMap.get(String(a.questionId));
+      if (!q) return null;
+      if (q.kind === 'textField') {
+        return { questionId: String(q.questionId), kind: q.kind, query: q.query, required: q.required, answer: a.textValue };
+      }
+      if (q.kind === 'numberField') {
+        return { questionId: String(q.questionId), kind: q.kind, query: q.query, required: q.required, answer: a.numberValue };
+      }
+      if (q.kind === 'choice' || q.kind === 'choiceMultiSelect') {
+        const selected = new Set((a.choiceValue?.optionIds ?? []).map((id: any) => String(id)));
+        const options = (q.options ?? []).filter((opt: any) => selected.has(String(opt._id)))
+          .map((opt: any) => ({ optionId: String(opt._id), label: opt.label, value: opt.value }));
+        const other: any = {};
+        if (a.choiceValue?.otherText !== undefined) other.otherText = a.choiceValue.otherText;
+        if (a.choiceValue?.otherNumber !== undefined) other.otherNumber = a.choiceValue.otherNumber;
+        return { questionId: String(q.questionId), kind: q.kind, query: q.query, required: q.required, answer: { options, ...other } };
+      }
+      return null;
+    }).filter(Boolean);
+
+    res.status(200).json({
+      id: String(response._id),
+      reportId: String(response.reportId),
+      version: response.version,
+      respondentId: String(response.respondentId),
+      respondentName: user?.username ?? null,
+      submittedAt: response.submittedAt,
+      items,
+    });
   } catch (e) {
     onCatchError(e, res);
   }

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { ObjectIdSchema, ReportIntervalSchema, QuestionKindSchema } from '../../common/types';
+import { ObjectIdSchema, ReportIntervalSchema, QuestionKindSchema, optionalDateQueryFiltersSchema, paginationSchema } from '../../common/types';
 
 // Base question schema
 const baseQuestion = z.object({
@@ -104,3 +104,7 @@ export const submitResponseSchema = z.object({
 });
 
 export type SubmitResponseInput = z.infer<typeof submitResponseSchema>;
+
+export const listResponsesSchema = z.object({
+  respondentId: ObjectIdSchema.optional(),
+}).merge(optionalDateQueryFiltersSchema).merge(paginationSchema);

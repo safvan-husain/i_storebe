@@ -1,6 +1,6 @@
 import express from 'express';
 import { protect } from '../middleware/auth';
-import { createReport, getReport, publishVersion, submitResponse } from '../controllers/custom-report/customReportController';
+import { createReport, getReport, publishVersion, submitResponse, listResponses, viewResponse } from '../controllers/custom-report/customReportController';
 
 const router = express.Router();
 
@@ -16,5 +16,10 @@ router.post('/:id/publish', protect, publishVersion);
 // Submit a response for a specific version
 router.post('/:id/responses', protect, submitResponse);
 
-export default router;
+// Query responses for a report with filters
+router.post('/:id/responses/query', protect, listResponses);
 
+// View a specific response with resolved questions/answers
+router.get('/:id/responses/:responseId', protect, viewResponse);
+
+export default router;
