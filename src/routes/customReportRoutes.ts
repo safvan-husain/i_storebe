@@ -1,0 +1,20 @@
+import express from 'express';
+import { protect } from '../middleware/auth';
+import { createReport, getReport, publishVersion, submitResponse } from '../controllers/custom-report/customReportController';
+
+const router = express.Router();
+
+// Create a new report (draft)
+router.post('/', protect, createReport);
+
+// Get full report with versions
+router.get('/:id', protect, getReport);
+
+// Publish a new version with questions
+router.post('/:id/publish', protect, publishVersion);
+
+// Submit a response for a specific version
+router.post('/:id/responses', protect, submitResponse);
+
+export default router;
+

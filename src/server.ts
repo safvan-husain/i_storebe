@@ -18,6 +18,7 @@ import {leaveRouter} from "./routes/leave-routes";
 import {onCatchError} from "./middleware/error";
 import {customerRouter} from "./routes/customer-router";
 import adminRoutes from "./routes/adminRoutes";
+import customReportRoutes from "./routes/customReportRoutes";
 import {initializeApp} from "firebase-admin/app";
 import {credential, ServiceAccount} from "firebase-admin";
 import cron from 'node-cron';
@@ -83,6 +84,7 @@ app.use('/api/target', targetRoutes);
 app.use('/api/leave', leaveRouter);
 app.use('/api/data', customerRouter);
 app.use('/api/admin', adminRoutes);
+app.use('/api/custom-reports', customReportRoutes);
 
 const random10DigitNumber = (): number => {
     return Math.floor(1000000000 + Math.random() * 9000000000);
