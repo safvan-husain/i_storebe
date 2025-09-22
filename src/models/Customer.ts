@@ -45,7 +45,6 @@ const customerSchema = new mongoose.Schema(
     }
 );
 
-customerSchema.index({ phone: 1})
 customerSchema.index({ name: 1})
 
 const Customer = mongoose.model<ICustomer>('Customer', customerSchema);

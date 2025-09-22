@@ -1,258 +1,27 @@
-create a controller for custom_report,
+. Keep our current Express + Zod, then generate OpenAPI from your Zod schemas, 
 
-Question {
-    index: Number,
-    query: String,
-    type: "choice" | "choiceMultiSelect" | "textField" | "numberField", 
-    secondType: "textField" | "numberField" | undefined,
-}
-
- typegoose mode: CustomReport {
-    SecondPrivileage: SecondPrivileage,
-    prvilege: UserPrivilege,
-    questions: [],
-    interval: {
-        type: "daily" | "weekly" | "monthly" | "yearly",
-        times: [Date]
-    }
- }
-
- -----------------------------------------------------------------------
-
- Great idea—treating this like a mini “Google Form” is the right mental model. You’ll want three clean layers:
-
-1. a **Report (form) definition** (immutable once published)
-2. **Sub-doc question definitions** (typed, validated)
-3. **Responses** that reference a specific *published version* of the report and store answers normalized to question ids
-
-Below is a Typegoose-first design, with pragmatic improvements and an example controller.
-
----
-
-# 1) Data model (Typegoose)
-
-### Enums and shared types
-
-```ts
-// question kinds
-export enum QuestionKind {
-  Choice = "choice",
-  ChoiceMulti = "choiceMultiSelect",
-  Text = "textField",
-  Number = "numberField",
-}
-
-// report intervals
-export enum ReportInterval {
-  Daily = "daily",
-  Weekly = "weekly",
-  Monthly = "monthly",
-  Yearly = "yearly",
-}
-```
-
-### Why tweak your shape?
-
-* **Discriminated questions**: cleaner than stuffing everything into one union with optional fields.
-* **Options as objects** (with ids) for choice questions—stable references make responses easy to validate.
-* **Versioning**: publish immutable snapshots so historical responses stay valid even if admins later edit questions.
-* **Follow-up (“secondType”)**: model it explicitly as an optional “other/extra input” config on choice questions rather than a generic `secondType`.
-
-### Question subtypes
-
-```ts
-import { prop, getModelForClass, modelOptions, Severity } from "@typegoose/typegoose";
-import { Types } from "mongoose";
-
-class ChoiceOption {
-  @prop({ required: true }) label!: string;
-  @prop({ required: true }) value!: string; // unique within this question
-  @prop() description?: string;
-  @prop({ default: () => new Types.ObjectId() }) _id!: Types.ObjectId; // stable id for answers
-}
-
-@modelOptions({ options: { allowMixed: Severity.ALLOW } })
-export class BaseQuestion {
-  @prop({ required: true }) index!: number; // display order
-  @prop({ required: true, trim: true }) query!: string; // the prompt
-  @prop({ required: true, enum: QuestionKind }) kind!: QuestionKind;
-
-  // explicit stable id for mapping answers (do NOT rely only on array index)
-  @prop({ default: () => new Types.ObjectId() }) questionId!: Types.ObjectId;
-
-  // optional help text, required flag
-  @prop() helpText?: string;
-  @prop({ default: false }) required?: boolean;
-}
-
-export class ChoiceQuestion extends BaseQuestion {
-  @prop({ required: true, enum: QuestionKind, default: QuestionKind.Choice })
-  kind!: QuestionKind.Choice;
-
-  @prop({ type: () => [ChoiceOption], required: true })
-  options!: ChoiceOption[];
-
-  // allow an “Other” free-text or number follow-up
-  @prop({ default: false }) allowOther?: boolean;
-  @prop({ enum: [QuestionKind.Text, QuestionKind.Number] })
-  otherAnswerType?: QuestionKind.Text | QuestionKind.Number;
-}
-
-export class ChoiceMultiQuestion extends ChoiceQuestion {
-  @prop({ required: true, enum: QuestionKind, default: QuestionKind.ChoiceMulti })
-  kind!: QuestionKind.ChoiceMulti;
-
-  // Optional min/max selections
-  @prop() minSelect?: number;
-  @prop() maxSelect?: number;
-}
-
-export class TextQuestion extends BaseQuestion {
-  @prop({ required: true, enum: QuestionKind, default: QuestionKind.Text })
-  kind!: QuestionKind.Text;
-
-  @prop() placeholder?: string;
-  @prop() minLength?: number;
-  @prop() maxLength?: number;
-}
-
-export class NumberQuestion extends BaseQuestion {
-  @prop({ required: true, enum: QuestionKind, default: QuestionKind.Number })
-  kind!: QuestionKind.Number;
-
-  @prop() min?: number;
-  @prop() max?: number;
-}
-```
-
-### Report (form) definition + versioning
-
-```ts
-class IntervalConfig {
-  @prop({ required: true, enum: ReportInterval }) type!: ReportInterval;
-  @prop({ type: () => [Date], default: [] }) times!: Date[]; // optional scheduled times
-}
-
-export enum ReportStatus {
-  Draft = "draft",
-  Published = "published",
-  Archived = "archived",
-}
-
-export class CustomReportVersion {
-  @prop({ required: true }) version!: number; // 1,2,3...
-  @prop({ type: () => [BaseQuestion], discriminate: {
-    key: 'kind',
-    values: [QuestionKind.Choice, QuestionKind.ChoiceMulti, QuestionKind.Text, QuestionKind.Number],
-    subTypes: [
-      { value: ChoiceQuestion, name: QuestionKind.Choice },
-      { value: ChoiceMultiQuestion, name: QuestionKind.ChoiceMulti },
-      { value: TextQuestion, name: QuestionKind.Text },
-      { value: NumberQuestion, name: QuestionKind.Number }
-    ]
-  }})
-  questions!: (ChoiceQuestion | ChoiceMultiQuestion | TextQuestion | NumberQuestion)[];
-
-  @prop({ default: () => new Date() }) publishedAt?: Date;
-  @prop({ default: false }) locked!: boolean; // lock questions after publish
-}
-
-export class CustomReport {
-  @prop({ required: true, trim: true }) title!: string;
-  @prop() description?: string;
-
-  // your privileges (use your own enums)
-  @prop({ required: true }) prvilege!: string; // UserPrivilege
-  @prop() SecondPrivileage?: string; // SecondPrivilege
-
-  @prop({ _id: false }) interval?: IntervalConfig;
-
-  // version history; responses point to a specific version
-  @prop({ type: () => [CustomReportVersion], default: [] })
-  versions!: CustomReportVersion[];
-
-  @prop({ required: true, enum: ReportStatus, default: ReportStatus.Draft })
-  status!: ReportStatus;
-}
-
-export const CustomReportModel = getModelForClass(CustomReport);
-```
-
-### Responses (answers)
-
-Keep answers in a separate collection, referencing **reportId + version**. Store values normalized by `questionId`. For choice questions, store selected `optionId`s and optional `other` value.
-
-```ts
-class ChoiceAnswerValue {
-  @prop({ type: () => [Types.ObjectId], default: [] }) optionIds!: Types.ObjectId[]; // one or many
-  @prop() otherText?: string;
-  @prop() otherNumber?: number;
-}
-
-class AnswerItem {
-  @prop({ required: true }) questionId!: Types.ObjectId;
-
-  // one of these will be filled based on question kind
-  @prop() textValue?: string;
-  @prop() numberValue?: number;
-  @prop({ _id: false }) choiceValue?: ChoiceAnswerValue;
-}
-
-export class ReportResponse {
-  @prop({ required: true }) reportId!: Types.ObjectId;
-  @prop({ required: true }) version!: number; // snapshot version answered
-  @prop({ required: true }) respondentId!: Types.ObjectId; // user/team/etc
-  @prop({ type: () => [AnswerItem], required: true }) answers!: AnswerItem[];
-
-  @prop({ default: () => new Date() }) submittedAt?: Date;
-}
-
-export const ReportResponseModel = getModelForClass(ReportResponse);
-
-// Helpful indexes
-// db.reportresponses.createIndex({ reportId: 1, version: 1, respondentId: 1, submittedAt: -1 })
-```
-
----
-
-# 2) Controller sketch (Express)
-
-### Validation first
-
-Use zod or class-validator to validate input. Example zod (pseudo):
-
-```ts
-import { z } from "zod";
-const createReportSchema = z.object({
-  title: z.string().min(1),
-  description: z.string().optional(),
-  prvilege: z.string(),
-  SecondPrivileage: z.string().optional(),
-  interval: z.object({
-    type: z.nativeEnum(ReportInterval),
-    times: z.array(z.coerce.date()).optional(),
-  }).optional(),
-  // initial questions (optional; you can add questions in draft)
-  questions: z.array(z.any()).optional()
-});
-```
-
-* **Conditional logic (“showIf”)** on questions:
+* **@asteasolutions/zod-to-openapi**: annotate Zod, register routes, generate a doc, serve with Swagger UI:
 
   ```ts
-  @prop() showIf?: { questionId: Types.ObjectId; optionIdEquals?: Types.ObjectId; exists?: boolean; };
+  import { z } from 'zod';
+  import swaggerUi from 'swagger-ui-express';
+  import { OpenAPIRegistry, OpenApiGeneratorV3, extendZodWithOpenApi } from '@asteasolutions/zod-to-openapi';
+  extendZodWithOpenApi(z);
+
+  const registry = new OpenAPIRegistry();
+  const User = registry.register('User', z.object({ id: z.string(), name: z.string() }));
+  registry.registerPath({
+    method: 'get',
+    path: '/users/{id}',
+    request: { params: z.object({ id: z.string() }) },
+    responses: { 200: { description: 'OK', content: { 'application/json': { schema: User }}}}
+  });
+
+  const spec = new OpenApiGeneratorV3(registry.definitions).generateDocument({
+    openapi: '3.0.0', info: { title: 'API', version: '1.0.0' }
+  });
+  app.use('/docs', swaggerUi.serve, swaggerUi.setup(spec));
   ```
-* **Soft delete/archive** for versions; **“closeAt”** to stop submissions.
-* **Rate limiting** per respondent per interval.
-* **Server-side schema validation** with zod based on `kind`.
----
 
-## TL;DR
-
-Your initial design is close. The key improvements are:
-
-* Split questions into **discriminated subtypes**.
-* Replace `secondType` with **allowOther + otherAnswerType** on choice questions.
-* **Version** reports and **lock** published versions.
-* Store responses in a separate collection keyed by **(reportId, version)** with answers tied to **stable questionId/optionIds**.
+  Note: if you’re on Zod v3, pin `@asteasolutions/zod-to-openapi@7.3.4`; newer versions target Zod v4. ([GitHub][2])
 
