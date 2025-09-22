@@ -148,9 +148,10 @@ components:
           $ref: '#/components/schemas/ReportInterval'
         times:
           type: array
+          description: Milliseconds since epoch
           items:
-            type: string
-            format: date-time
+            type: integer
+            format: int64
 
     # Question input (client → server)
     ChoiceOptionInput:
@@ -181,10 +182,12 @@ components:
         showIf:
           type: object
           properties:
-            questionId:
-              type: string
-            optionIdEquals:
-              type: string
+            questionIndex:
+              type: integer
+              minimum: 0
+            choiceIndexEquals:
+              type: integer
+              minimum: 0
             exists:
               type: boolean
     ChoiceQuestionInput:
@@ -283,6 +286,8 @@ components:
           type: string
         description:
           type: string
+        index:
+          type: integer
     BaseQuestion:
       type: object
       properties:
@@ -301,10 +306,12 @@ components:
         showIf:
           type: object
           properties:
-            questionId:
-              type: string
-            optionIdEquals:
-              type: string
+            questionIndex:
+              type: integer
+              minimum: 0
+            choiceIndexEquals:
+              type: integer
+              minimum: 0
             exists:
               type: boolean
     ChoiceQuestion:
@@ -457,5 +464,5 @@ components:
           items:
             $ref: '#/components/schemas/AnyQuestion'
         publishedAt:
-          type: string
-          format: date-time
+          type: integer
+          format: int64

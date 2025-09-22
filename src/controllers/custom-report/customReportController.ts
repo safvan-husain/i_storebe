@@ -8,24 +8,20 @@ import { Types } from 'mongoose';
 import User from '../../models/User';
 
 function materializeQuestions(input: AnyQuestionInput[]): AnyQuestion[] {
-  // Generate stable ids for questionId and option ids
-  return input.map((q) => {
-    const base = {
+  // First pass: create questions with generated ids and option ids (with option index)
+  const materialized = input.map((q) => {
+    const base: any = {
       questionId: new Types.ObjectId(),
       index: q.index,
       query: q.query,
       kind: q.kind,
       helpText: q.helpText,
       required: q.required ?? false,
-      showIf: q.showIf ? {
-        questionId: new Types.ObjectId(q.showIf.questionId),
-        optionIdEquals: q.showIf.optionIdEquals ? new Types.ObjectId(q.showIf.optionIdEquals) : undefined,
-        exists: q.showIf.exists,
-      } : undefined,
-    } as any;
+      // showIf will be resolved in second pass using indices
+    };
 
     if (q.kind === 'choice' || q.kind === 'choiceMultiSelect') {
-      base.options = q.options.map((o: any) => ({ _id: new Types.ObjectId(), label: o.label, value: o.value, description: o.description }));
+      base.options = q.options.map((o: any, idx: number) => ({ _id: new Types.ObjectId(), label: o.label, value: o.value, description: o.description, index: idx }));
       base.allowOther = q.allowOther;
       base.otherAnswerType = q.otherAnswerType;
     }
@@ -46,8 +42,45 @@ function materializeQuestions(input: AnyQuestionInput[]): AnyQuestion[] {
       base.max = q.max;
     }
 
-    return base as AnyQuestion;
+    // Keep the original showIf indices for second pass
+    if (q.showIf) base._showIfIndices = q.showIf;
+
+    return base as AnyQuestion & { _showIfIndices?: { questionIndex: number; choiceIndexEquals?: number; exists?: boolean } };
   });
+
+  // Build maps
+  const questionIndexToId = new Map<number, Types.ObjectId>();
+  for (const q of materialized as any[]) {
+    questionIndexToId.set(q.index, q.questionId);
+  }
+
+  const optionIndexToId = new Map<string, Types.ObjectId>(); // key: `${qIndex}:${choiceIndex}`
+  for (const q of materialized as any[]) {
+    if (q.kind === 'choice' || q.kind === 'choiceMultiSelect') {
+      (q.options ?? []).forEach((opt: any) => {
+        optionIndexToId.set(`${q.index}:${opt.index}`, opt._id);
+      });
+    }
+  }
+
+  // Second pass: resolve showIf indices to ids
+  for (const q of materialized as any[]) {
+    if (q._showIfIndices) {
+      const si = q._showIfIndices;
+      const qId = questionIndexToId.get(si.questionIndex);
+      if (qId) {
+        const resolved: any = { questionId: qId, exists: si.exists };
+        if (si.choiceIndexEquals !== undefined) {
+          const optId = optionIndexToId.get(`${si.questionIndex}:${si.choiceIndexEquals}`);
+          if (optId) resolved.optionIdEquals = optId;
+        }
+        q.showIf = resolved;
+      }
+      delete q._showIfIndices;
+    }
+  }
+
+  return materialized as AnyQuestion[];
 }
 
 export const createReport = async (req: Request, res: Response) => {
@@ -59,7 +92,7 @@ export const createReport = async (req: Request, res: Response) => {
       description: payload.description,
       prvilege: payload.prvilege,
       SecondPrivileage: payload.SecondPrivileage,
-      interval: payload.interval ? { type: payload.interval.type, times: payload.interval.times ?? [] } : undefined,
+      interval: payload.interval ? { type: payload.interval.type, times: (payload.interval.times ?? []).map((t) => new Date(t)) } : undefined,
       versions: [],
       status: 'draft',
     });
@@ -76,11 +109,20 @@ export const getReport = async (req: Request, res: Response) => {
     if (!Types.ObjectId.isValid(id)) {
       throw new AppError('Invalid report id', 400);
     }
-    const rep = await CustomReportModel.findById(id).lean();
+    const rep: any = await CustomReportModel.findById(id).lean();
     if (!rep) {
       throw new AppError('Report not found', 404);
     }
-    res.status(200).json(rep);
+    // convert Date fields to millis
+    const interval = rep.interval ? {
+      type: rep.interval.type,
+      times: (rep.interval.times ?? []).map((d: Date) => new Date(d).getTime()),
+    } : undefined;
+    const versions = (rep.versions ?? []).map((v: any) => ({
+      ...v,
+      publishedAt: v.publishedAt ? new Date(v.publishedAt).getTime() : undefined,
+    }));
+    res.status(200).json({ ...rep, interval, versions });
   } catch (e) {
     onCatchError(e, res);
   }
@@ -250,8 +292,8 @@ export const listResponses = async (req: Request, res: Response) => {
     if (filters.respondentId) query.respondentId = new Types.ObjectId(filters.respondentId);
     if (filters.startDate || filters.endDate) {
       query.submittedAt = {} as any;
-      if (filters.startDate) (query.submittedAt as any).$gte = filters.startDate;
-      if (filters.endDate) (query.submittedAt as any).$lte = filters.endDate;
+      if (filters.startDate) (query.submittedAt as any).$gte = new Date(filters.startDate);
+      if (filters.endDate) (query.submittedAt as any).$lte = new Date(filters.endDate);
     }
 
     const docs = await ReportResponseModel.find(query)
@@ -270,7 +312,7 @@ export const listResponses = async (req: Request, res: Response) => {
       version: d.version,
       respondentId: String(d.respondentId),
       respondentName: nameMap.get(String(d.respondentId)) ?? null,
-      submittedAt: d.submittedAt,
+      submittedAt: d.submittedAt ? new Date(d.submittedAt).getTime() : undefined,
       answersCount: d.answers?.length ?? 0,
     }));
 
@@ -287,7 +329,7 @@ export const viewResponse = async (req: Request, res: Response) => {
     if (!Types.ObjectId.isValid(reportId) || !Types.ObjectId.isValid(responseId)) {
       throw new AppError('Invalid id', 400);
     }
-    const response = await ReportResponseModel.findOne({ _id: responseId, reportId }).lean();
+    const response: any = await ReportResponseModel.findOne({ _id: responseId, reportId }).lean();
     if (!response) throw new AppError('Response not found', 404);
 
     const report = await CustomReportModel.findById(reportId).lean();
@@ -327,7 +369,7 @@ export const viewResponse = async (req: Request, res: Response) => {
       version: response.version,
       respondentId: String(response.respondentId),
       respondentName: user?.username ?? null,
-      submittedAt: response.submittedAt,
+      submittedAt: response.submittedAt ? new Date(response.submittedAt).getTime() : undefined,
       items,
     });
   } catch (e) {
@@ -356,11 +398,11 @@ export const listLatestReportsForUser = async (req: Request, res: Response) => {
         description: d.description,
         prvilege: d.prvilege,
         SecondPrivileage: d.SecondPrivileage,
-        interval: d.interval ?? null,
+        interval: d.interval ? { type: d.interval.type, times: (d.interval.times ?? []).map((dt: Date) => new Date(dt).getTime()) } : null,
         status: d.status,
         version: latest.version,
         questions: latest.questions,
-        publishedAt: latest.publishedAt,
+        publishedAt: latest.publishedAt ? new Date(latest.publishedAt).getTime() : undefined,
       };
     }).filter(Boolean);
 

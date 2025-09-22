@@ -5,6 +5,7 @@ export interface ChoiceOption {
   label: string;
   value: string;
   description?: string;
+  index?: number;
 }
 
 export type QuestionKind = 'choice' | 'choiceMultiSelect' | 'textField' | 'numberField';
@@ -56,6 +57,7 @@ const ChoiceOptionSchema = new Schema<ChoiceOption>({
   label: { type: String, required: true },
   value: { type: String, required: true },
   description: { type: String },
+  index: { type: Number },
 }, { _id: false });
 
 const QuestionSchema = new Schema<any>({

@@ -9,8 +9,8 @@ const baseQuestion = z.object({
   helpText: z.string().optional(),
   required: z.boolean().optional().default(false),
   showIf: z.object({
-    questionId: ObjectIdSchema,
-    optionIdEquals: ObjectIdSchema.optional(),
+    questionIndex: z.number().int().min(0),
+    choiceIndexEquals: z.number().int().min(0).optional(),
     exists: z.boolean().optional(),
   }).optional(),
 });
@@ -79,7 +79,7 @@ export const createReportSchema = z.object({
   SecondPrivileage: z.string().optional(),
   interval: z.object({
     type: ReportIntervalSchema,
-    times: z.array(z.coerce.date()).optional(),
+    times: z.array(z.number()).optional(),
   }).optional(),
   questions: z.array(anyQuestionSchema).optional(),
 });
@@ -107,4 +107,6 @@ export type SubmitResponseInput = z.infer<typeof submitResponseSchema>;
 
 export const listResponsesSchema = z.object({
   respondentId: ObjectIdSchema.optional(),
-}).merge(optionalDateQueryFiltersSchema).merge(paginationSchema);
+  startDate: z.number().optional(),
+  endDate: z.number().optional(),
+}).merge(paginationSchema);
