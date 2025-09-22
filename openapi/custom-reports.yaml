@@ -106,7 +106,7 @@ components:
             $ref: '#/components/schemas/ErrorResponse'
 
   schemas:
-    // Generic
+    # Generic
     ErrorResponse:
       type: object
       properties:
@@ -129,7 +129,7 @@ components:
                   message:
                     type: string
 
-    // Enums
+    # Enums
     ReportInterval:
       type: string
       enum: [daily, weekly, monthly, yearly]
@@ -140,7 +140,7 @@ components:
       type: string
       enum: [draft, published, archived]
 
-    // Interval config
+    # Interval config
     IntervalConfig:
       type: object
       properties:
@@ -152,7 +152,7 @@ components:
             type: string
             format: date-time
 
-    // Question input (client → server)
+    # Question input (client → server)
     ChoiceOptionInput:
       type: object
       required: [label, value]
@@ -271,7 +271,7 @@ components:
           textField: '#/components/schemas/TextQuestionInput'
           numberField: '#/components/schemas/NumberQuestionInput'
 
-    // Question (server → client) latest report response
+    # Question (server → client) latest report response
     ChoiceOption:
       type: object
       properties:
@@ -385,7 +385,7 @@ components:
           textField: '#/components/schemas/TextQuestion'
           numberField: '#/components/schemas/NumberQuestion'
 
-    // Create report
+    # Create report
     CreateReportRequest:
       type: object
       required: [title, prvilege]
@@ -415,7 +415,7 @@ components:
         id:
           type: string
 
-    // Publish version
+    # Publish version
     PublishVersionRequest:
       type: object
       required: [questions]
@@ -432,7 +432,7 @@ components:
         version:
           type: integer
 
-    // Latest report response item
+    # Latest report response item
     LatestReport:
       type: object
       properties:
@@ -459,4 +459,3 @@ components:
         publishedAt:
           type: string
           format: date-time
-
