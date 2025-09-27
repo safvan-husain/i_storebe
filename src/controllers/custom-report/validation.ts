@@ -90,7 +90,7 @@ export const publishVersionSchema = z.object({
 
 // Response submission
 export const submitResponseSchema = z.object({
-  version: z.number().int().min(0),
+  version: z.number().int().min(1),
   answers: z.array(z.object({
     questionId: ObjectIdSchema,
     textValue: z.string().optional(),

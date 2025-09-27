@@ -109,7 +109,7 @@ export const createReport = async (
       prvilege: payload.prvilege,
       SecondPrivileage: payload.SecondPrivileage,
       interval: payload.interval ? { type: payload.interval.type, times: (payload.interval.times ?? []).map((t) => new Date(t)) } : undefined,
-      versions: [{ version: 0, questions: payload.questions, publishedAt: new Date(), locked: true }],
+      versions: [{ version: 1, questions: payload.questions, publishedAt: new Date(), locked: true }],
       status: 'published',
     });
 
