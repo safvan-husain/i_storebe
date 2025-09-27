@@ -6,6 +6,7 @@ import { onCatchError, AppError } from '../../middleware/error';
 import { createReportSchema, publishVersionSchema, submitResponseSchema, AnyQuestionInput, listResponsesSchema } from './validation';
 import { Types } from 'mongoose';
 import User from '../../models/User';
+import { TypedResponse } from '../../common/interface';
 
 function materializeQuestions(input: AnyQuestionInput[]): AnyQuestion[] {
   // First pass: create questions with generated ids and option ids (with option index)
@@ -83,7 +84,7 @@ function materializeQuestions(input: AnyQuestionInput[]): AnyQuestion[] {
   return materialized as AnyQuestion[];
 }
 
-export const createReport = async (req: Request, res: Response) => {
+export const createReport = async (req: Request, res: TypedResponse<any>) => {
   try {
     const payload = createReportSchema.parse(req.body);
 
@@ -103,7 +104,7 @@ export const createReport = async (req: Request, res: Response) => {
   }
 };
 
-export const getReport = async (req: Request, res: Response) => {
+export const getReport = async (req: Request, res: TypedResponse<any>) => {
   try {
     const id = req.params.id;
     if (!Types.ObjectId.isValid(id)) {
@@ -128,7 +129,7 @@ export const getReport = async (req: Request, res: Response) => {
   }
 };
 
-export const publishVersion = async (req: Request, res: Response) => {
+export const publishVersion = async (req: Request, res: TypedResponse<any>) => {
   try {
     const id = req.params.id;
     if (!Types.ObjectId.isValid(id)) {
@@ -282,7 +283,7 @@ export const submitResponse = async (req: Request, res: Response) => {
   }
 };
 
-export const listResponses = async (req: Request, res: Response) => {
+export const listResponses = async (req: Request, res: TypedResponse<any>) => {
   try {
     const reportId = req.params.id;
     if (!Types.ObjectId.isValid(reportId)) throw new AppError('Invalid report id', 400);
@@ -322,7 +323,7 @@ export const listResponses = async (req: Request, res: Response) => {
   }
 };
 
-export const viewResponse = async (req: Request, res: Response) => {
+export const viewResponse = async (req: Request, res: TypedResponse<any>) => {
   try {
     const reportId = req.params.id;
     const responseId = req.params.responseId;
@@ -377,7 +378,7 @@ export const viewResponse = async (req: Request, res: Response) => {
   }
 };
 
-export const listLatestReportsForUser = async (req: Request, res: Response) => {
+export const listLatestReportsForUser = async (req: Request, res: TypedResponse<any>) => {
   try {
     const isAdmin = req.privilege === 'admin';
     const query: any = { status: 'published', 'versions.0': { $exists: true } };
