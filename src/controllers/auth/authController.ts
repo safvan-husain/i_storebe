@@ -50,8 +50,8 @@ export const loginUser = asyncHandler(async (req: Request, res: Response) => {
         delete userObject.password;
         delete userObject.__v;
         res.status(200).json({
+            ...userObject,
             token: generateToken(user),
-            ...userObject
         });
     } catch (error) {
         onCatchError(error, res);

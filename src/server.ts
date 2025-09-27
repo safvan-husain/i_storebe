@@ -26,7 +26,9 @@ import {wishBirthDayToCustomers} from "./services/wish-birth-day";
 import {startTaskScheduler} from "./services/task-scheduler";
 import { sendPushNotification } from "./services/notification-services";
 import fs from 'fs';
-import path from 'path'
+import path from 'path';
+import swaggerUi from 'swagger-ui-express';
+import { getOpenApiDocument } from './openapi/document';
 
 require("dotenv").config();
 const PORT = process.env.PORT || 3000;
@@ -86,46 +88,13 @@ app.use('/api/data', customerRouter);
 app.use('/api/admin', adminRoutes);
 app.use('/api/custom-reports', customReportRoutes);
 
-// Serve OpenAPI docs (Swagger UI via CDN)
-app.get('/api/docs', async (_req, res) => {
-    const html = `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <title>API Docs</title>
-  <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css" />
-  <style>body { margin: 0; } #swagger-ui { box-sizing: border-box; }</style>
-  </head>
-  <body>
-    <div id="swagger-ui"></div>
-    <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
-    <script>
-      window.ui = SwaggerUIBundle({
-        url: '/api/docs/openapi.yaml',
-        dom_id: '#swagger-ui',
-        presets: [SwaggerUIBundle.presets.apis],
-        layout: 'BaseLayout'
-      });
-    </script>
-  </body>
-  </html>`;
-    res.setHeader('Content-Type', 'text/html');
-    res.send(html);
+const openApiDocument = getOpenApiDocument();
+
+app.get('/api/docs/openapi.json', (_req, res) => {
+    res.json(openApiDocument);
 });
 
-app.get('/api/docs/openapi.yaml', async (_req, res) => {
-    try {
-        const specPath = path.resolve(__dirname, '../openapi/custom-reports.yaml');
-        if (!fs.existsSync(specPath)) {
-            return res.status(404).send('OpenAPI spec not found');
-        }
-        res.setHeader('Content-Type', 'text/yaml');
-        res.send(fs.readFileSync(specPath, 'utf8'));
-    } catch (e) {
-        console.error('Error serving OpenAPI spec', e);
-        res.status(500).send('Failed to load OpenAPI spec');
-    }
-});
+app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(openApiDocument));
 
 const random10DigitNumber = (): number => {
     return Math.floor(1000000000 + Math.random() * 9000000000);
