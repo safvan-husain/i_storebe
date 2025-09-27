@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { QuestionKindSchema, ReportIntervalSchema, ReportStatusSchema } from '../common/types';
+import { createReportSchema, publishVersionSchema } from '../controllers/custom-report/validation';
 
 export const reportIntervalResponseSchema = z.object({
   type: ReportIntervalSchema,
@@ -81,8 +82,25 @@ export const latestReportResponseSchema = z.object({
 
 export const listCustomReportsResponseSchema = z.array(latestReportResponseSchema);
 
+export const createCustomReportRequestSchema = createReportSchema;
+
+export const createCustomReportResponseSchema = z.object({
+  id: z.string(),
+});
+
+export const publishCustomReportVersionRequestSchema = publishVersionSchema;
+
+export const publishCustomReportVersionResponseSchema = z.object({
+  id: z.string(),
+  version: z.number().int(),
+});
+
 export type QuestionShowIfResponse = z.infer<typeof questionShowIfSchema>;
 export type ChoiceOptionResponse = z.infer<typeof choiceOptionResponseSchema>;
 export type CustomReportQuestionResponse = z.infer<typeof questionResponseSchema>;
 export type LatestCustomReportResponse = z.infer<typeof latestReportResponseSchema>;
 export type ListCustomReportsResponse = z.infer<typeof listCustomReportsResponseSchema>;
+export type CreateCustomReportRequest = z.infer<typeof createCustomReportRequestSchema>;
+export type CreateCustomReportResponse = z.infer<typeof createCustomReportResponseSchema>;
+export type PublishCustomReportVersionRequest = z.infer<typeof publishCustomReportVersionRequestSchema>;
+export type PublishCustomReportVersionResponse = z.infer<typeof publishCustomReportVersionResponseSchema>;

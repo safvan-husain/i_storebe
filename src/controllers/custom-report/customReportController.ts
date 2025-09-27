@@ -14,6 +14,8 @@ import {
   ListCustomReportsResponse,
   QuestionShowIfResponse,
   listCustomReportsResponseSchema,
+  CreateCustomReportResponse,
+  PublishCustomReportVersionResponse,
 } from '../../routes/customReport.schemas';
 
 function materializeQuestions(input: AnyQuestionInput[]): AnyQuestion[] {
@@ -92,7 +94,10 @@ function materializeQuestions(input: AnyQuestionInput[]): AnyQuestion[] {
   return materialized as AnyQuestion[];
 }
 
-export const createReport = async (req: Request, res: TypedResponse<any>) => {
+export const createReport = async (
+  req: Request,
+  res: TypedResponse<CreateCustomReportResponse>,
+) => {
   try {
     const payload = createReportSchema.parse(req.body);
 
@@ -137,7 +142,10 @@ export const getReport = async (req: Request, res: TypedResponse<any>) => {
   }
 };
 
-export const publishVersion = async (req: Request, res: TypedResponse<any>) => {
+export const publishVersion = async (
+  req: Request,
+  res: TypedResponse<PublishCustomReportVersionResponse>,
+) => {
   try {
     const id = req.params.id;
     if (!Types.ObjectId.isValid(id)) {
