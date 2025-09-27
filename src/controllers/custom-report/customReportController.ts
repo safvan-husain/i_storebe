@@ -7,6 +7,14 @@ import { createReportSchema, publishVersionSchema, submitResponseSchema, AnyQues
 import { Types } from 'mongoose';
 import User from '../../models/User';
 import { TypedResponse } from '../../common/interface';
+import {
+  ChoiceOptionResponse,
+  CustomReportQuestionResponse,
+  LatestCustomReportResponse,
+  ListCustomReportsResponse,
+  QuestionShowIfResponse,
+  listCustomReportsResponseSchema,
+} from '../../routes/customReport.schemas';
 
 function materializeQuestions(input: AnyQuestionInput[]): AnyQuestion[] {
   // First pass: create questions with generated ids and option ids (with option index)
@@ -378,7 +386,107 @@ export const viewResponse = async (req: Request, res: TypedResponse<any>) => {
   }
 };
 
-export const listLatestReportsForUser = async (req: Request, res: TypedResponse<any>) => {
+function serializeShowIf(showIf: any | undefined): QuestionShowIfResponse | undefined {
+  if (!showIf) return undefined;
+  const result: QuestionShowIfResponse = {
+    questionId: String(showIf.questionId),
+  };
+  if (showIf.optionIdEquals !== undefined && showIf.optionIdEquals !== null) {
+    result.optionIdEquals = String(showIf.optionIdEquals);
+  }
+  if (showIf.exists !== undefined) {
+    result.exists = Boolean(showIf.exists);
+  }
+  return result;
+}
+
+function serializeChoiceOption(option: any): ChoiceOptionResponse {
+  return {
+    _id: String(option._id),
+    label: option.label,
+    value: option.value,
+    description: option.description ?? undefined,
+    index: typeof option.index === 'number' ? option.index : undefined,
+  };
+}
+
+function serializeQuestion(question: any): CustomReportQuestionResponse {
+  const base = {
+    questionId: String(question.questionId),
+    index: question.index,
+    query: question.query,
+    helpText: question.helpText ?? undefined,
+    required: typeof question.required === 'boolean' ? question.required : undefined,
+    showIf: serializeShowIf(question.showIf),
+  };
+
+  switch (question.kind) {
+    case 'choice':
+      return {
+        ...base,
+        kind: 'choice',
+        options: (question.options ?? []).map(serializeChoiceOption),
+        allowOther: typeof question.allowOther === 'boolean' ? question.allowOther : undefined,
+        otherAnswerType: question.otherAnswerType ?? undefined,
+      };
+    case 'choiceMultiSelect':
+      return {
+        ...base,
+        kind: 'choiceMultiSelect',
+        options: (question.options ?? []).map(serializeChoiceOption),
+        allowOther: typeof question.allowOther === 'boolean' ? question.allowOther : undefined,
+        otherAnswerType: question.otherAnswerType ?? undefined,
+        minSelect: typeof question.minSelect === 'number' ? question.minSelect : undefined,
+        maxSelect: typeof question.maxSelect === 'number' ? question.maxSelect : undefined,
+      };
+    case 'textField':
+      return {
+        ...base,
+        kind: 'textField',
+        placeholder: question.placeholder ?? undefined,
+        minLength: typeof question.minLength === 'number' ? question.minLength : undefined,
+        maxLength: typeof question.maxLength === 'number' ? question.maxLength : undefined,
+      };
+    case 'numberField':
+      return {
+        ...base,
+        kind: 'numberField',
+        min: typeof question.min === 'number' ? question.min : undefined,
+        max: typeof question.max === 'number' ? question.max : undefined,
+      };
+    default:
+      throw new AppError(`Unsupported question kind: ${question.kind}`, 500);
+  }
+}
+
+function serializeLatestReport(doc: any): LatestCustomReportResponse | null {
+  const versions = doc.versions ?? [];
+  if (versions.length === 0) return null;
+  const latest = versions.reduce((acc: any, v: any) => (v.version > acc.version ? v : acc), versions[0]);
+
+  return {
+    id: String(doc._id),
+    title: doc.title,
+    description: doc.description ?? null,
+    prvilege: doc.prvilege,
+    SecondPrivileage: doc.SecondPrivileage ?? null,
+    interval: doc.interval
+      ? {
+        type: doc.interval.type,
+        times: (doc.interval.times ?? []).map((dt: Date) => new Date(dt).getTime()),
+      }
+      : null,
+    status: doc.status,
+    version: latest.version,
+    questions: (latest.questions ?? []).map(serializeQuestion),
+    publishedAt: latest.publishedAt ? new Date(latest.publishedAt).getTime() : undefined,
+  };
+}
+
+export const listLatestReportsForUser = async (
+  req: Request,
+  res: TypedResponse<ListCustomReportsResponse>,
+) => {
   try {
     const isAdmin = req.privilege === 'admin';
     const query: any = { status: 'published', 'versions.0': { $exists: true } };
@@ -389,25 +497,13 @@ export const listLatestReportsForUser = async (req: Request, res: TypedResponse<
     }
 
     const docs = await CustomReportModel.find(query).lean();
-    const items = docs.map((d: any) => {
-      const versions = d.versions ?? [];
-      if (versions.length === 0) return null;
-      const latest = versions.reduce((acc: any, v: any) => (v.version > acc.version ? v : acc), versions[0]);
-      return {
-        id: String(d._id),
-        title: d.title,
-        description: d.description,
-        prvilege: d.prvilege,
-        SecondPrivileage: d.SecondPrivileage,
-        interval: d.interval ? { type: d.interval.type, times: (d.interval.times ?? []).map((dt: Date) => new Date(dt).getTime()) } : null,
-        status: d.status,
-        version: latest.version,
-        questions: latest.questions,
-        publishedAt: latest.publishedAt ? new Date(latest.publishedAt).getTime() : undefined,
-      };
-    }).filter(Boolean);
+    const items = docs
+      .map((doc: any) => serializeLatestReport(doc))
+      .filter((item): item is LatestCustomReportResponse => item !== null);
 
-    res.status(200).json(items);
+    const payload = listCustomReportsResponseSchema.parse(items);
+
+    res.status(200).json(payload);
   } catch (e) {
     onCatchError(e, res);
   }
