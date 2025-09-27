@@ -14,6 +14,9 @@ import {
   questionResponseSchema,
   questionShowIfSchema,
   reportIntervalResponseSchema,
+  submitCustomReportResponseRequestSchema,
+  submitCustomReportResponseResponseSchema,
+  viewCustomReportResponseResponseSchema,
 } from './customReport.schemas';
 
 const router = express.Router();
@@ -33,6 +36,18 @@ const publishRequestComponent = registry.register(
 const publishResponseComponent = registry.register(
   'CustomReportPublishResponse',
   publishCustomReportVersionResponseSchema,
+);
+const submitResponseRequestComponent = registry.register(
+  'CustomReportSubmitResponseRequest',
+  submitCustomReportResponseRequestSchema,
+);
+const submitResponseResponseComponent = registry.register(
+  'CustomReportSubmitResponseResponse',
+  submitCustomReportResponseResponseSchema,
+);
+const viewResponseComponent = registry.register(
+  'CustomReportViewResponse',
+  viewCustomReportResponseResponseSchema,
 );
 
 registry.registerPath({
@@ -110,6 +125,62 @@ registry.registerPath({
       content: {
         'application/json': {
           schema: publishResponseComponent,
+        },
+      },
+    },
+  },
+});
+
+registry.registerPath({
+  method: 'post',
+  path: '/custom-reports/{id}/responses',
+  summary: 'Submit a response for a custom report version',
+  tags: ['Custom Reports'],
+  security: [{ bearerAuth: [] }],
+  request: {
+    params: z.object({
+      id: z.string().describe('Custom report identifier'),
+    }),
+    body: {
+      description: 'Answers for a specific custom report version.',
+      required: true,
+      content: {
+        'application/json': {
+          schema: submitResponseRequestComponent,
+        },
+      },
+    },
+  },
+  responses: {
+    201: {
+      description: 'Response submitted',
+      content: {
+        'application/json': {
+          schema: submitResponseResponseComponent,
+        },
+      },
+    },
+  },
+});
+
+registry.registerPath({
+  method: 'get',
+  path: '/custom-reports/{id}/responses/{responseId}',
+  summary: 'Retrieve a submitted response with resolved answers',
+  tags: ['Custom Reports'],
+  security: [{ bearerAuth: [] }],
+  request: {
+    params: z.object({
+      id: z.string().describe('Custom report identifier'),
+      responseId: z.string().describe('Response identifier'),
+    }),
+  },
+  responses: {
+    200: {
+      description: 'Response details',
+      content: {
+        'application/json': {
+          schema: viewResponseComponent,
         },
       },
     },

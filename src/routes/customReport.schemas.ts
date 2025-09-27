@@ -1,6 +1,10 @@
 import { z } from 'zod';
 import { QuestionKindSchema, ReportIntervalSchema, ReportStatusSchema } from '../common/types';
-import { createReportSchema, publishVersionSchema } from '../controllers/custom-report/validation';
+import {
+  createReportSchema,
+  publishVersionSchema,
+  submitResponseSchema,
+} from '../controllers/custom-report/validation';
 
 export const reportIntervalResponseSchema = z.object({
   type: ReportIntervalSchema,
@@ -95,6 +99,67 @@ export const publishCustomReportVersionResponseSchema = z.object({
   version: z.number().int(),
 });
 
+const responseAnswerOptionSchema = z.object({
+  optionId: z.string(),
+  label: z.string(),
+  value: z.string(),
+});
+
+const baseResponseItemSchema = z.object({
+  questionId: z.string(),
+  query: z.string(),
+  required: z.boolean().optional(),
+});
+
+const textResponseItemSchema = baseResponseItemSchema.extend({
+  kind: z.literal('textField'),
+  answer: z.string(),
+});
+
+const numberResponseItemSchema = baseResponseItemSchema.extend({
+  kind: z.literal('numberField'),
+  answer: z.number(),
+});
+
+const choiceAnswerSchema = z.object({
+  options: z.array(responseAnswerOptionSchema),
+  otherText: z.string().optional(),
+  otherNumber: z.number().optional(),
+});
+
+const choiceResponseItemSchema = baseResponseItemSchema.extend({
+  kind: z.literal('choice'),
+  answer: choiceAnswerSchema,
+});
+
+const choiceMultiResponseItemSchema = baseResponseItemSchema.extend({
+  kind: z.literal('choiceMultiSelect'),
+  answer: choiceAnswerSchema,
+});
+
+export const submitCustomReportResponseRequestSchema = submitResponseSchema;
+
+export const submitCustomReportResponseResponseSchema = z.object({
+  id: z.string(),
+});
+
+export const viewCustomReportResponseResponseSchema = z.object({
+  id: z.string(),
+  reportId: z.string(),
+  version: z.number().int(),
+  respondentId: z.string(),
+  respondentName: z.string().nullable(),
+  submittedAt: z.number().int().optional(),
+  items: z.array(
+    z.discriminatedUnion('kind', [
+      textResponseItemSchema,
+      numberResponseItemSchema,
+      choiceResponseItemSchema,
+      choiceMultiResponseItemSchema,
+    ]),
+  ),
+});
+
 export type QuestionShowIfResponse = z.infer<typeof questionShowIfSchema>;
 export type ChoiceOptionResponse = z.infer<typeof choiceOptionResponseSchema>;
 export type CustomReportQuestionResponse = z.infer<typeof questionResponseSchema>;
@@ -104,3 +169,6 @@ export type CreateCustomReportRequest = z.infer<typeof createCustomReportRequest
 export type CreateCustomReportResponse = z.infer<typeof createCustomReportResponseSchema>;
 export type PublishCustomReportVersionRequest = z.infer<typeof publishCustomReportVersionRequestSchema>;
 export type PublishCustomReportVersionResponse = z.infer<typeof publishCustomReportVersionResponseSchema>;
+export type SubmitCustomReportResponseRequest = z.infer<typeof submitCustomReportResponseRequestSchema>;
+export type SubmitCustomReportResponseResponse = z.infer<typeof submitCustomReportResponseResponseSchema>;
+export type ViewCustomReportResponseResponse = z.infer<typeof viewCustomReportResponseResponseSchema>;
