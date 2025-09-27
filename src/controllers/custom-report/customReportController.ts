@@ -1,4 +1,4 @@
-import { Request, Response } from 'express';
+import { Request } from 'express';
 import { z } from 'zod';
 import CustomReportModel, { AnyQuestion } from '../../models/CustomReport';
 import ReportResponseModel from '../../models/ReportResponse';
@@ -16,6 +16,8 @@ import {
   listCustomReportsResponseSchema,
   CreateCustomReportResponse,
   PublishCustomReportVersionResponse,
+  SubmitCustomReportResponseResponse,
+  ViewCustomReportResponseResponse,
 } from '../../routes/customReport.schemas';
 
 function materializeQuestions(input: AnyQuestionInput[]): AnyQuestion[] {
@@ -107,7 +109,7 @@ export const createReport = async (
       prvilege: payload.prvilege,
       SecondPrivileage: payload.SecondPrivileage,
       interval: payload.interval ? { type: payload.interval.type, times: (payload.interval.times ?? []).map((t) => new Date(t)) } : undefined,
-      versions: [{ version: 0, questions: payload.questions, publishedAt: new Date(), locked: true }],
+      versions: [{ version: 1, questions: payload.questions, publishedAt: new Date(), locked: true }],
       status: 'published',
     });
 
@@ -179,7 +181,10 @@ function findVersionOrThrow(report: any, version: number) {
   return v;
 }
 
-export const submitResponse = async (req: Request, res: Response) => {
+export const submitResponse = async (
+  req: Request,
+  res: TypedResponse<SubmitCustomReportResponseResponse>,
+) => {
   try {
     const reportId = req.params.id;
     if (!Types.ObjectId.isValid(reportId)) {
@@ -339,7 +344,10 @@ export const listResponses = async (req: Request, res: TypedResponse<any>) => {
   }
 };
 
-export const viewResponse = async (req: Request, res: TypedResponse<any>) => {
+export const viewResponse = async (
+  req: Request,
+  res: TypedResponse<ViewCustomReportResponseResponse>,
+) => {
   try {
     const reportId = req.params.id;
     const responseId = req.params.responseId;
