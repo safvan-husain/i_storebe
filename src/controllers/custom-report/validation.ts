@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { ObjectIdSchema, ReportIntervalSchema, QuestionKindSchema, optionalDateQueryFiltersSchema, paginationSchema } from '../../common/types';
+import { ObjectIdSchema, ReportIntervalSchema, QuestionKindSchema, optionalDateQueryFiltersSchema, paginationSchema, UserPrivilegeSchema, secondUserPrivilegeSchema } from '../../common/types';
 
 // Base question schema
 const baseQuestion = z.object({
@@ -75,13 +75,13 @@ export type AnyQuestionInput = z.infer<typeof anyQuestionSchema>;
 export const createReportSchema = z.object({
   title: z.string().min(1),
   description: z.string().optional(),
-  prvilege: z.string().min(1),
-  SecondPrivileage: z.string().optional(),
+  prvilege: UserPrivilegeSchema,
+  SecondPrivileage: secondUserPrivilegeSchema,
   interval: z.object({
     type: ReportIntervalSchema,
     times: z.array(z.number()).optional(),
   }).optional(),
-  questions: z.array(anyQuestionSchema).optional(),
+  questions: z.array(anyQuestionSchema),
 });
 
 export const publishVersionSchema = z.object({
