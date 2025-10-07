@@ -9,6 +9,7 @@
     "build": "tsc",
     "start": "node dist/server.js",
     "seed": "ts-node src/scripts/seedAdmin.ts",
+    "seed:custom-reports": "ts-node src/scripts/seedCustomReports.ts",
     "change-password": "ts-node src/scripts/changePassword.ts"
   },
   "keywords": [],

@@ -414,7 +414,7 @@
         "title": "Accountant Report",
         "description": null,
         "prvilege": "staff",
-        "SecondPrivileage": "regular",
+        "SecondPrivileage": "accountant",
         "interval": {
             "type": "daily",
             "times": []
@@ -1050,7 +1050,7 @@
         "title": "Call Centre Report",
         "description": null,
         "prvilege": "staff",
-        "SecondPrivileage": "regular",
+        "SecondPrivileage": "call-center",
         "interval": {
             "type": "daily",
             "times": []
