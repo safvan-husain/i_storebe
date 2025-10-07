@@ -160,6 +160,51 @@ export const viewCustomReportResponseResponseSchema = z.object({
   ),
 });
 
+export const listCustomReportResponsesRequestSchema = z.object({
+  respondentId: z
+    .string()
+    .describe('Filter to responses created by this user id')
+    .optional(),
+  startDate: z
+    .number()
+    .int()
+    .describe('Filter responses submitted on or after this millisecond timestamp')
+    .optional(),
+  endDate: z
+    .number()
+    .int()
+    .describe('Filter responses submitted on or before this millisecond timestamp')
+    .optional(),
+  skip: z
+    .string()
+    .regex(/^\d+$/, 'Must be a non-negative integer string')
+    .describe('Number of matching responses to skip before returning results (stringified integer)')
+    .optional(),
+  limit: z
+    .string()
+    .regex(/^\d+$/, 'Must be a positive integer string')
+    .describe('Maximum number of responses to return (stringified integer)')
+    .optional(),
+});
+
+export const listCustomReportResponsesResponseSchema = z.object({
+  total: z.number().int(),
+  items: z.array(
+    z.object({
+      id: z.string(),
+      version: z.number().int(),
+      respondentId: z.string(),
+      respondentName: z.string().nullable(),
+      submittedAt: z
+        .number()
+        .int()
+        .describe('Submission time in milliseconds since epoch')
+        .optional(),
+      answersCount: z.number().int().describe('Number of answers stored for the response'),
+    }),
+  ),
+});
+
 export type QuestionShowIfResponse = z.infer<typeof questionShowIfSchema>;
 export type ChoiceOptionResponse = z.infer<typeof choiceOptionResponseSchema>;
 export type CustomReportQuestionResponse = z.infer<typeof questionResponseSchema>;
@@ -172,3 +217,5 @@ export type PublishCustomReportVersionResponse = z.infer<typeof publishCustomRep
 export type SubmitCustomReportResponseRequest = z.infer<typeof submitCustomReportResponseRequestSchema>;
 export type SubmitCustomReportResponseResponse = z.infer<typeof submitCustomReportResponseResponseSchema>;
 export type ViewCustomReportResponseResponse = z.infer<typeof viewCustomReportResponseResponseSchema>;
+export type ListCustomReportResponsesRequest = z.infer<typeof listCustomReportResponsesRequestSchema>;
+export type ListCustomReportResponsesResponse = z.infer<typeof listCustomReportResponsesResponseSchema>;

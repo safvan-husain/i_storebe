@@ -17,6 +17,8 @@ import {
   submitCustomReportResponseRequestSchema,
   submitCustomReportResponseResponseSchema,
   viewCustomReportResponseResponseSchema,
+  listCustomReportResponsesRequestSchema,
+  listCustomReportResponsesResponseSchema,
 } from './customReport.schemas';
 
 const router = express.Router();
@@ -48,6 +50,14 @@ const submitResponseResponseComponent = registry.register(
 const viewResponseComponent = registry.register(
   'CustomReportViewResponse',
   viewCustomReportResponseResponseSchema,
+);
+const listResponsesRequestComponent = registry.register(
+  'CustomReportListResponsesRequest',
+  listCustomReportResponsesRequestSchema,
+);
+const listResponsesResponseComponent = registry.register(
+  'CustomReportListResponsesResponse',
+  listCustomReportResponsesResponseSchema,
 );
 
 registry.registerPath({
@@ -157,6 +167,40 @@ registry.registerPath({
       content: {
         'application/json': {
           schema: submitResponseResponseComponent,
+        },
+      },
+    },
+  },
+});
+
+registry.registerPath({
+  method: 'post',
+  path: '/custom-reports/{id}/responses/query',
+  summary: 'Query responses for a custom report',
+  description:
+    'Returns paginated response summaries filtered by respondent and submission date range.',
+  tags: ['Custom Reports'],
+  security: [{ bearerAuth: [] }],
+  request: {
+    params: z.object({
+      id: z.string().describe('Custom report identifier'),
+    }),
+    body: {
+      description: 'Filtering options for report responses.',
+      required: false,
+      content: {
+        'application/json': {
+          schema: listResponsesRequestComponent,
+        },
+      },
+    },
+  },
+  responses: {
+    200: {
+      description: 'Matching responses',
+      content: {
+        'application/json': {
+          schema: listResponsesResponseComponent,
         },
       },
     },
