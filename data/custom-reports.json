@@ -1,0 +1,1127 @@
+[
+    {
+        "id": "68e0f15f9ecba8e65562430b",
+        "title": "Manager Daily Report",
+        "description": null,
+        "prvilege": "manager",
+        "SecondPrivileage": "regular",
+        "interval": {
+            "type": "daily",
+            "times": []
+        },
+        "status": "published",
+        "version": 1,
+        "questions": [
+            {
+                "questionId": "68e0f15f9ecba8e65562430f",
+                "index": 0,
+                "query": "Daily Meeting",
+                "kind": "choice",
+                "required": false,
+                "options": [
+                    {
+                        "_id": "68e0f15f9ecba8e65562430c",
+                        "label": "Yes",
+                        "value": "yes"
+                    },
+                    {
+                        "_id": "68e0f15f9ecba8e65562430d",
+                        "label": "No",
+                        "value": "no"
+                    },
+                    {
+                        "_id": "68e0f15f9ecba8e65562430e",
+                        "label": "Other",
+                        "value": "other"
+                    }
+                ],
+                "allowOther": true,
+                "otherAnswerType": "textField"
+            },
+            {
+                "questionId": "68e0f15f9ecba8e655624313",
+                "index": 1,
+                "query": "Shop Cleaning",
+                "kind": "choice",
+                "required": false,
+                "options": [
+                    {
+                        "_id": "68e0f15f9ecba8e655624310",
+                        "label": "Yes",
+                        "value": "yes"
+                    },
+                    {
+                        "_id": "68e0f15f9ecba8e655624311",
+                        "label": "No",
+                        "value": "no"
+                    },
+                    {
+                        "_id": "68e0f15f9ecba8e655624312",
+                        "label": "Other",
+                        "value": "other"
+                    }
+                ],
+                "allowOther": true,
+                "otherAnswerType": "textField"
+            },
+            {
+                "questionId": "68e0f15f9ecba8e655624314",
+                "index": 2,
+                "query": "ഇന്ന് സ്റ്റോറിൽ വന്ന കസ്റ്റമേഴ്സിൻറെ എണ്ണം..?",
+                "kind": "numberField",
+                "required": false
+            },
+            {
+                "questionId": "68e0f15f9ecba8e655624315",
+                "index": 3,
+                "query": "ഇന്ന് പർച്ചസ് ചെയ്ത കസ്റ്റമേഴ്സിൻറെ എണ്ണം..?",
+                "kind": "numberField",
+                "required": false
+            },
+            {
+                "questionId": "68e0f15f9ecba8e655624319",
+                "index": 4,
+                "query": "എന്ത് കാരണം കൊണ്ടാണ് ഇന്ന് വന്ന കസ്റ്റമേഴ്സ് പർച്ചസ് ചെയ്യാതിരുന്നത്?",
+                "kind": "choice",
+                "required": false,
+                "options": [
+                    {
+                        "_id": "68e0f15f9ecba8e655624316",
+                        "label": "Yes",
+                        "value": "yes"
+                    },
+                    {
+                        "_id": "68e0f15f9ecba8e655624317",
+                        "label": "No",
+                        "value": "no"
+                    },
+                    {
+                        "_id": "68e0f15f9ecba8e655624318",
+                        "label": "Other",
+                        "value": "other"
+                    }
+                ],
+                "allowOther": true,
+                "otherAnswerType": "textField"
+            },
+            {
+                "questionId": "68e0f15f9ecba8e65562431a",
+                "index": 5,
+                "query": "ഇന്നത്തെ ടാർഗെറ്റ് ഏത്ര.?",
+                "kind": "numberField",
+                "required": false
+            },
+            {
+                "questionId": "68e0f15f9ecba8e65562431b",
+                "index": 6,
+                "query": "എത്ര ടാർഗെറ്റ് achieve ചെയ്തു.?",
+                "kind": "numberField",
+                "required": false
+            },
+            {
+                "questionId": "68e0f15f9ecba8e65562431c",
+                "index": 7,
+                "query": "എത്ര എണ്ണം ബാക്കിയുണ്ട്?",
+                "kind": "numberField",
+                "required": false
+            },
+            {
+                "questionId": "68e0f15f9ecba8e655624320",
+                "index": 8,
+                "query": "ഇന്ന് വന്ന EXCHANGE PURCHASE ഡീലുകളിൽ ഗ്രൂപ്പിൽ സെറ്റ് ചെയ്തിട്ടുണ്ടോ.?",
+                "kind": "choice",
+                "required": false,
+                "options": [
+                    {
+                        "_id": "68e0f15f9ecba8e65562431d",
+                        "label": "Yes",
+                        "value": "yes"
+                    },
+                    {
+                        "_id": "68e0f15f9ecba8e65562431e",
+                        "label": "No",
+                        "value": "no"
+                    },
+                    {
+                        "_id": "68e0f15f9ecba8e65562431f",
+                        "label": "Other",
+                        "value": "other"
+                    }
+                ],
+                "allowOther": true,
+                "otherAnswerType": "textField"
+            },
+            {
+                "questionId": "68e0f15f9ecba8e655624324",
+                "index": 9,
+                "query": "ഇന്ന് വന്ന Q-PURCHASE ഡീലുകളിൽ ഗ്രൂപ്പിൽ സെറ്റ് ചെയ്തിട്ടുണ്ടോ.?",
+                "kind": "choice",
+                "required": false,
+                "options": [
+                    {
+                        "_id": "68e0f15f9ecba8e655624321",
+                        "label": "Yes",
+                        "value": "yes"
+                    },
+                    {
+                        "_id": "68e0f15f9ecba8e655624322",
+                        "label": "No",
+                        "value": "no"
+                    },
+                    {
+                        "_id": "68e0f15f9ecba8e655624323",
+                        "label": "Other",
+                        "value": "other"
+                    }
+                ],
+                "allowOther": true,
+                "otherAnswerType": "textField"
+            },
+            {
+                "questionId": "68e0f15f9ecba8e655624328",
+                "index": 10,
+                "query": "ഇന്നത്തെ കാഷ് വരവും പോകവും ആയുള്ള കാഷ് variance ഉണ്ടോ.?",
+                "kind": "choice",
+                "required": false,
+                "options": [
+                    {
+                        "_id": "68e0f15f9ecba8e655624325",
+                        "label": "Yes",
+                        "value": "yes"
+                    },
+                    {
+                        "_id": "68e0f15f9ecba8e655624326",
+                        "label": "No",
+                        "value": "no"
+                    },
+                    {
+                        "_id": "68e0f15f9ecba8e655624327",
+                        "label": "Other",
+                        "value": "other"
+                    }
+                ],
+                "allowOther": true,
+                "otherAnswerType": "textField"
+            },
+            {
+                "questionId": "68e0f15f9ecba8e655624329",
+                "index": 11,
+                "query": "ഇന്ന് സർവീസ് സെന്ററിൽ നിന്ന് എത്ര സർവീസ് ചെയ്തു ?",
+                "kind": "numberField",
+                "required": false
+            },
+            {
+                "questionId": "68e0f15f9ecba8e65562432d",
+                "index": 12,
+                "query": "വാക്കിൻസ് കൗൺസിലിംഗ് ദിവസവും ഡ്യൂവൽസ് ഷോറൂം ലീഡ്സ് എൻട്രികൾ ഉണ്ടോ?",
+                "kind": "choice",
+                "required": false,
+                "options": [
+                    {
+                        "_id": "68e0f15f9ecba8e65562432a",
+                        "label": "Yes",
+                        "value": "yes"
+                    },
+                    {
+                        "_id": "68e0f15f9ecba8e65562432b",
+                        "label": "No",
+                        "value": "no"
+                    },
+                    {
+                        "_id": "68e0f15f9ecba8e65562432c",
+                        "label": "Other",
+                        "value": "other"
+                    }
+                ],
+                "allowOther": true,
+                "otherAnswerType": "textField"
+            },
+            {
+                "questionId": "68e0f15f9ecba8e65562432e",
+                "index": 13,
+                "query": "Instant Exchange Closing Count",
+                "kind": "numberField",
+                "required": false
+            },
+            {
+                "questionId": "68e0f15f9ecba8e655624332",
+                "index": 14,
+                "query": "Leads Follow-up Closing Report",
+                "kind": "choice",
+                "required": false,
+                "options": [
+                    {
+                        "_id": "68e0f15f9ecba8e65562432f",
+                        "label": "Yes",
+                        "value": "yes"
+                    },
+                    {
+                        "_id": "68e0f15f9ecba8e655624330",
+                        "label": "No",
+                        "value": "no"
+                    },
+                    {
+                        "_id": "68e0f15f9ecba8e655624331",
+                        "label": "Other",
+                        "value": "other"
+                    }
+                ],
+                "allowOther": true,
+                "otherAnswerType": "textField"
+            },
+            {
+                "questionId": "68e0f15f9ecba8e655624336",
+                "index": 15,
+                "query": "ഇന്ന് എവർക്കെല്ലാം Credit കൊടുത്തിട്ടുണ്ടോ.?",
+                "kind": "choice",
+                "required": false,
+                "options": [
+                    {
+                        "_id": "68e0f15f9ecba8e655624333",
+                        "label": "Yes",
+                        "value": "yes"
+                    },
+                    {
+                        "_id": "68e0f15f9ecba8e655624334",
+                        "label": "No",
+                        "value": "no"
+                    },
+                    {
+                        "_id": "68e0f15f9ecba8e655624335",
+                        "label": "Other",
+                        "value": "other"
+                    }
+                ],
+                "allowOther": true,
+                "otherAnswerType": "textField"
+            },
+            {
+                "questionId": "68e0f15f9ecba8e65562433a",
+                "index": 16,
+                "query": "സ്റ്റോർ Close ചെയ്തതിന് ബിൽസ് ക്ലോസ് ചെയ്ത് ഗ്രൂപ്പിൽ update ചെയ്തിട്ടുണ്ടോ.?",
+                "kind": "choice",
+                "required": false,
+                "options": [
+                    {
+                        "_id": "68e0f15f9ecba8e655624337",
+                        "label": "Yes",
+                        "value": "yes"
+                    },
+                    {
+                        "_id": "68e0f15f9ecba8e655624338",
+                        "label": "No",
+                        "value": "no"
+                    },
+                    {
+                        "_id": "68e0f15f9ecba8e655624339",
+                        "label": "Other",
+                        "value": "other"
+                    }
+                ],
+                "allowOther": true,
+                "otherAnswerType": "textField"
+            },
+            {
+                "questionId": "68e0f15f9ecba8e65562433e",
+                "index": 17,
+                "query": "ഇന്ന് വരുന്ന കസ്റ്റമേഴ്സിനെ മാനേജർ ഡിസ്പ്ലേയിൽ/സിസ്റ്റത്തിൽ അസിസ്റ്റ് ചെയ്തിട്ടുണ്ടോ.?",
+                "kind": "choice",
+                "required": false,
+                "options": [
+                    {
+                        "_id": "68e0f15f9ecba8e65562433b",
+                        "label": "Yes",
+                        "value": "yes"
+                    },
+                    {
+                        "_id": "68e0f15f9ecba8e65562433c",
+                        "label": "No",
+                        "value": "no"
+                    },
+                    {
+                        "_id": "68e0f15f9ecba8e65562433d",
+                        "label": "Other",
+                        "value": "other"
+                    }
+                ],
+                "allowOther": true,
+                "otherAnswerType": "textField"
+            },
+            {
+                "questionId": "68e0f15f9ecba8e65562433f",
+                "index": 18,
+                "query": "ഡെലിവറികളിൽ ഇന്ന് വന്ന കസ്റ്റമേഴ്സിൻ്റെ എണ്ണം ?",
+                "kind": "numberField",
+                "required": false
+            },
+            {
+                "questionId": "68e0f15f9ecba8e655624343",
+                "index": 19,
+                "query": "വിൽപ്പനയിൽ വിവാദങ്ങൾ ഉള്ളവർക്കു വിറ്റാൽ വിറ്റശേഷം Fine നൽകേണ്ടവർ ഉണ്ടായോ?",
+                "kind": "choice",
+                "required": false,
+                "options": [
+                    {
+                        "_id": "68e0f15f9ecba8e655624340",
+                        "label": "Yes",
+                        "value": "yes"
+                    },
+                    {
+                        "_id": "68e0f15f9ecba8e655624341",
+                        "label": "No",
+                        "value": "no"
+                    },
+                    {
+                        "_id": "68e0f15f9ecba8e655624342",
+                        "label": "Other",
+                        "value": "other"
+                    }
+                ],
+                "allowOther": true,
+                "otherAnswerType": "textField"
+            },
+            {
+                "questionId": "68e0f15f9ecba8e655624347",
+                "index": 20,
+                "query": "hi hi hi",
+                "kind": "choice",
+                "required": false,
+                "options": [
+                    {
+                        "_id": "68e0f15f9ecba8e655624344",
+                        "label": "Yes",
+                        "value": "yes"
+                    },
+                    {
+                        "_id": "68e0f15f9ecba8e655624345",
+                        "label": "No",
+                        "value": "no"
+                    },
+                    {
+                        "_id": "68e0f15f9ecba8e655624346",
+                        "label": "Other",
+                        "value": "other"
+                    }
+                ],
+                "allowOther": true,
+                "otherAnswerType": "textField"
+            }
+        ],
+        "publishedAt": 1759572319064
+    },
+    {
+        "id": "68e2182d9ecba8e655625c82",
+        "title": "Accountant Report",
+        "description": null,
+        "prvilege": "staff",
+        "SecondPrivileage": "regular",
+        "interval": {
+            "type": "daily",
+            "times": []
+        },
+        "status": "published",
+        "version": 1,
+        "questions": [
+            {
+                "questionId": "68e2182d9ecba8e655625c86",
+                "index": 0,
+                "query": "Receipts",
+                "kind": "choice",
+                "required": false,
+                "options": [
+                    {
+                        "_id": "68e2182d9ecba8e655625c83",
+                        "label": "Done",
+                        "value": "done"
+                    },
+                    {
+                        "_id": "68e2182d9ecba8e655625c84",
+                        "label": "Clear",
+                        "value": "clear"
+                    },
+                    {
+                        "_id": "68e2182d9ecba8e655625c85",
+                        "label": "Not Clear",
+                        "value": "not_clear"
+                    }
+                ]
+            },
+            {
+                "questionId": "68e2182d9ecba8e655625c87",
+                "index": 1,
+                "query": "Reason for not clear - Receipts",
+                "kind": "textField",
+                "required": false
+            },
+            {
+                "questionId": "68e2182d9ecba8e655625c8b",
+                "index": 2,
+                "query": "Cash in Hand",
+                "kind": "choice",
+                "required": false,
+                "options": [
+                    {
+                        "_id": "68e2182d9ecba8e655625c88",
+                        "label": "Done",
+                        "value": "done"
+                    },
+                    {
+                        "_id": "68e2182d9ecba8e655625c89",
+                        "label": "Clear",
+                        "value": "clear"
+                    },
+                    {
+                        "_id": "68e2182d9ecba8e655625c8a",
+                        "label": "Not Clear",
+                        "value": "not_clear"
+                    }
+                ]
+            },
+            {
+                "questionId": "68e2182d9ecba8e655625c8c",
+                "index": 3,
+                "query": "Reason for not clear - Cash in Hand",
+                "kind": "textField",
+                "required": false
+            },
+            {
+                "questionId": "68e2182d9ecba8e655625c90",
+                "index": 4,
+                "query": "Exchange Purchase",
+                "kind": "choice",
+                "required": false,
+                "options": [
+                    {
+                        "_id": "68e2182d9ecba8e655625c8d",
+                        "label": "Done",
+                        "value": "done"
+                    },
+                    {
+                        "_id": "68e2182d9ecba8e655625c8e",
+                        "label": "Clear",
+                        "value": "clear"
+                    },
+                    {
+                        "_id": "68e2182d9ecba8e655625c8f",
+                        "label": "Not Clear",
+                        "value": "not_clear"
+                    }
+                ]
+            },
+            {
+                "questionId": "68e2182d9ecba8e655625c91",
+                "index": 5,
+                "query": "Reason for not clear - Exchange Purchase",
+                "kind": "textField",
+                "required": false
+            },
+            {
+                "questionId": "68e2182d9ecba8e655625c95",
+                "index": 6,
+                "query": "Credit Purchase",
+                "kind": "choice",
+                "required": false,
+                "options": [
+                    {
+                        "_id": "68e2182d9ecba8e655625c92",
+                        "label": "Done",
+                        "value": "done"
+                    },
+                    {
+                        "_id": "68e2182d9ecba8e655625c93",
+                        "label": "Clear",
+                        "value": "clear"
+                    },
+                    {
+                        "_id": "68e2182d9ecba8e655625c94",
+                        "label": "Not Clear",
+                        "value": "not_clear"
+                    }
+                ]
+            },
+            {
+                "questionId": "68e2182d9ecba8e655625c96",
+                "index": 7,
+                "query": "Reason for not clear - Credit Purchase",
+                "kind": "textField",
+                "required": false
+            },
+            {
+                "questionId": "68e2182d9ecba8e655625c9a",
+                "index": 8,
+                "query": "Bank 2599 Tally",
+                "kind": "choice",
+                "required": false,
+                "options": [
+                    {
+                        "_id": "68e2182d9ecba8e655625c97",
+                        "label": "Done",
+                        "value": "done"
+                    },
+                    {
+                        "_id": "68e2182d9ecba8e655625c98",
+                        "label": "Clear",
+                        "value": "clear"
+                    },
+                    {
+                        "_id": "68e2182d9ecba8e655625c99",
+                        "label": "Not Clear",
+                        "value": "not_clear"
+                    }
+                ]
+            },
+            {
+                "questionId": "68e2182d9ecba8e655625c9b",
+                "index": 9,
+                "query": "Reason for not clear - Bank 2599 Tally",
+                "kind": "textField",
+                "required": false
+            },
+            {
+                "questionId": "68e2182d9ecba8e655625c9f",
+                "index": 10,
+                "query": "Bank 1774 Tally",
+                "kind": "choice",
+                "required": false,
+                "options": [
+                    {
+                        "_id": "68e2182d9ecba8e655625c9c",
+                        "label": "Done",
+                        "value": "done"
+                    },
+                    {
+                        "_id": "68e2182d9ecba8e655625c9d",
+                        "label": "Clear",
+                        "value": "clear"
+                    },
+                    {
+                        "_id": "68e2182d9ecba8e655625c9e",
+                        "label": "Not Clear",
+                        "value": "not_clear"
+                    }
+                ]
+            },
+            {
+                "questionId": "68e2182d9ecba8e655625ca0",
+                "index": 11,
+                "query": "Reason for not clear - Bank 1774 Tally",
+                "kind": "textField",
+                "required": false
+            },
+            {
+                "questionId": "68e2182d9ecba8e655625ca4",
+                "index": 12,
+                "query": "Bank 5751 Tally",
+                "kind": "choice",
+                "required": false,
+                "options": [
+                    {
+                        "_id": "68e2182d9ecba8e655625ca1",
+                        "label": "Done",
+                        "value": "done"
+                    },
+                    {
+                        "_id": "68e2182d9ecba8e655625ca2",
+                        "label": "Clear",
+                        "value": "clear"
+                    },
+                    {
+                        "_id": "68e2182d9ecba8e655625ca3",
+                        "label": "Not Clear",
+                        "value": "not_clear"
+                    }
+                ]
+            },
+            {
+                "questionId": "68e2182d9ecba8e655625ca5",
+                "index": 13,
+                "query": "Reason for not clear - Bank 5751 Tally",
+                "kind": "textField",
+                "required": false
+            },
+            {
+                "questionId": "68e2182d9ecba8e655625ca9",
+                "index": 14,
+                "query": "Bajaj TA",
+                "kind": "choice",
+                "required": false,
+                "options": [
+                    {
+                        "_id": "68e2182d9ecba8e655625ca6",
+                        "label": "Done",
+                        "value": "done"
+                    },
+                    {
+                        "_id": "68e2182d9ecba8e655625ca7",
+                        "label": "Clear",
+                        "value": "clear"
+                    },
+                    {
+                        "_id": "68e2182d9ecba8e655625ca8",
+                        "label": "Not Clear",
+                        "value": "not_clear"
+                    }
+                ]
+            },
+            {
+                "questionId": "68e2182d9ecba8e655625caa",
+                "index": 15,
+                "query": "Reason for not clear - Bajaj TA",
+                "kind": "textField",
+                "required": false
+            },
+            {
+                "questionId": "68e2182d9ecba8e655625cae",
+                "index": 16,
+                "query": "HDFC TA",
+                "kind": "choice",
+                "required": false,
+                "options": [
+                    {
+                        "_id": "68e2182d9ecba8e655625cab",
+                        "label": "Done",
+                        "value": "done"
+                    },
+                    {
+                        "_id": "68e2182d9ecba8e655625cac",
+                        "label": "Clear",
+                        "value": "clear"
+                    },
+                    {
+                        "_id": "68e2182d9ecba8e655625cad",
+                        "label": "Not Clear",
+                        "value": "not_clear"
+                    }
+                ]
+            },
+            {
+                "questionId": "68e2182d9ecba8e655625caf",
+                "index": 17,
+                "query": "Reason for not clear - HDFC TA",
+                "kind": "textField",
+                "required": false
+            },
+            {
+                "questionId": "68e2182d9ecba8e655625cb3",
+                "index": 18,
+                "query": "Finance (HDB amount pending)",
+                "kind": "choice",
+                "required": false,
+                "options": [
+                    {
+                        "_id": "68e2182d9ecba8e655625cb0",
+                        "label": "Done",
+                        "value": "done"
+                    },
+                    {
+                        "_id": "68e2182d9ecba8e655625cb1",
+                        "label": "Clear",
+                        "value": "clear"
+                    },
+                    {
+                        "_id": "68e2182d9ecba8e655625cb2",
+                        "label": "Not Clear",
+                        "value": "not_clear"
+                    }
+                ]
+            },
+            {
+                "questionId": "68e2182d9ecba8e655625cb4",
+                "index": 19,
+                "query": "Reason for not clear - Finance (HDB amount pending)",
+                "kind": "textField",
+                "required": false
+            },
+            {
+                "questionId": "68e2182d9ecba8e655625cb8",
+                "index": 20,
+                "query": "Pine Labs (PYR)",
+                "kind": "choice",
+                "required": false,
+                "options": [
+                    {
+                        "_id": "68e2182d9ecba8e655625cb5",
+                        "label": "Done",
+                        "value": "done"
+                    },
+                    {
+                        "_id": "68e2182d9ecba8e655625cb6",
+                        "label": "Clear",
+                        "value": "clear"
+                    },
+                    {
+                        "_id": "68e2182d9ecba8e655625cb7",
+                        "label": "Not Clear",
+                        "value": "not_clear"
+                    }
+                ]
+            },
+            {
+                "questionId": "68e2182d9ecba8e655625cb9",
+                "index": 21,
+                "query": "Reason for not clear - Pine Labs (PYR)",
+                "kind": "textField",
+                "required": false
+            },
+            {
+                "questionId": "68e2182d9ecba8e655625cbd",
+                "index": 22,
+                "query": "Stock – All Store",
+                "kind": "choice",
+                "required": false,
+                "options": [
+                    {
+                        "_id": "68e2182d9ecba8e655625cba",
+                        "label": "Done",
+                        "value": "done"
+                    },
+                    {
+                        "_id": "68e2182d9ecba8e655625cbb",
+                        "label": "Clear",
+                        "value": "clear"
+                    },
+                    {
+                        "_id": "68e2182d9ecba8e655625cbc",
+                        "label": "Not Clear",
+                        "value": "not_clear"
+                    }
+                ]
+            },
+            {
+                "questionId": "68e2182d9ecba8e655625cbe",
+                "index": 23,
+                "query": "Reason for not clear - Stock – All Store",
+                "kind": "textField",
+                "required": false
+            },
+            {
+                "questionId": "68e2182d9ecba8e655625cc2",
+                "index": 24,
+                "query": "Sales Entries (19th & IRT, PYR)",
+                "kind": "choice",
+                "required": false,
+                "options": [
+                    {
+                        "_id": "68e2182d9ecba8e655625cbf",
+                        "label": "Done",
+                        "value": "done"
+                    },
+                    {
+                        "_id": "68e2182d9ecba8e655625cc0",
+                        "label": "Clear",
+                        "value": "clear"
+                    },
+                    {
+                        "_id": "68e2182d9ecba8e655625cc1",
+                        "label": "Not Clear",
+                        "value": "not_clear"
+                    }
+                ]
+            },
+            {
+                "questionId": "68e2182d9ecba8e655625cc3",
+                "index": 25,
+                "query": "Reason for not clear - Sales Entries (19th & IRT, PYR)",
+                "kind": "textField",
+                "required": false
+            },
+            {
+                "questionId": "68e2182d9ecba8e655625cc7",
+                "index": 26,
+                "query": "Debtors",
+                "kind": "choice",
+                "required": false,
+                "options": [
+                    {
+                        "_id": "68e2182d9ecba8e655625cc4",
+                        "label": "Done",
+                        "value": "done"
+                    },
+                    {
+                        "_id": "68e2182d9ecba8e655625cc5",
+                        "label": "Clear",
+                        "value": "clear"
+                    },
+                    {
+                        "_id": "68e2182d9ecba8e655625cc6",
+                        "label": "Not Clear",
+                        "value": "not_clear"
+                    }
+                ]
+            },
+            {
+                "questionId": "68e2182d9ecba8e655625cc8",
+                "index": 27,
+                "query": "Reason for not clear - Debtors",
+                "kind": "textField",
+                "required": false
+            },
+            {
+                "questionId": "68e2182d9ecba8e655625ccc",
+                "index": 28,
+                "query": "Creditors (Wholesale India, Easy Tool, OPPO, …)",
+                "kind": "choice",
+                "required": false,
+                "options": [
+                    {
+                        "_id": "68e2182d9ecba8e655625cc9",
+                        "label": "Done",
+                        "value": "done"
+                    },
+                    {
+                        "_id": "68e2182d9ecba8e655625cca",
+                        "label": "Clear",
+                        "value": "clear"
+                    },
+                    {
+                        "_id": "68e2182d9ecba8e655625ccb",
+                        "label": "Not Clear",
+                        "value": "not_clear"
+                    }
+                ]
+            },
+            {
+                "questionId": "68e2182d9ecba8e655625ccd",
+                "index": 29,
+                "query": "Reason for not clear - Creditors (Wholesale India, Easy Tool, OPPO, …)",
+                "kind": "textField",
+                "required": false
+            },
+            {
+                "questionId": "68e2182d9ecba8e655625cd1",
+                "index": 30,
+                "query": "Care Purchase",
+                "kind": "choice",
+                "required": false,
+                "options": [
+                    {
+                        "_id": "68e2182d9ecba8e655625cce",
+                        "label": "Done",
+                        "value": "done"
+                    },
+                    {
+                        "_id": "68e2182d9ecba8e655625ccf",
+                        "label": "Clear",
+                        "value": "clear"
+                    },
+                    {
+                        "_id": "68e2182d9ecba8e655625cd0",
+                        "label": "Not Clear",
+                        "value": "not_clear"
+                    }
+                ]
+            },
+            {
+                "questionId": "68e2182d9ecba8e655625cd2",
+                "index": 31,
+                "query": "Reason for not clear - Care Purchase",
+                "kind": "textField",
+                "required": false
+            },
+            {
+                "questionId": "68e2182d9ecba8e655625cd6",
+                "index": 32,
+                "query": "Premium Dubai Cash",
+                "kind": "choice",
+                "required": false,
+                "options": [
+                    {
+                        "_id": "68e2182d9ecba8e655625cd3",
+                        "label": "Done",
+                        "value": "done"
+                    },
+                    {
+                        "_id": "68e2182d9ecba8e655625cd4",
+                        "label": "Clear",
+                        "value": "clear"
+                    },
+                    {
+                        "_id": "68e2182d9ecba8e655625cd5",
+                        "label": "Not Clear",
+                        "value": "not_clear"
+                    }
+                ]
+            },
+            {
+                "questionId": "68e2182d9ecba8e655625cd7",
+                "index": 33,
+                "query": "Reason for not clear - Premium Dubai Cash",
+                "kind": "textField",
+                "required": false
+            },
+            {
+                "questionId": "68e2182d9ecba8e655625cdb",
+                "index": 34,
+                "query": "Dubai Bank",
+                "kind": "choice",
+                "required": false,
+                "options": [
+                    {
+                        "_id": "68e2182d9ecba8e655625cd8",
+                        "label": "Done",
+                        "value": "done"
+                    },
+                    {
+                        "_id": "68e2182d9ecba8e655625cd9",
+                        "label": "Clear",
+                        "value": "clear"
+                    },
+                    {
+                        "_id": "68e2182d9ecba8e655625cda",
+                        "label": "Not Clear",
+                        "value": "not_clear"
+                    }
+                ]
+            },
+            {
+                "questionId": "68e2182d9ecba8e655625cdc",
+                "index": 35,
+                "query": "Reason for not clear - Dubai Bank",
+                "kind": "textField",
+                "required": false
+            },
+            {
+                "questionId": "68e2182d9ecba8e655625ce0",
+                "index": 36,
+                "query": "Stock Dubai",
+                "kind": "choice",
+                "required": false,
+                "options": [
+                    {
+                        "_id": "68e2182d9ecba8e655625cdd",
+                        "label": "Done",
+                        "value": "done"
+                    },
+                    {
+                        "_id": "68e2182d9ecba8e655625cde",
+                        "label": "Clear",
+                        "value": "clear"
+                    },
+                    {
+                        "_id": "68e2182d9ecba8e655625cdf",
+                        "label": "Not Clear",
+                        "value": "not_clear"
+                    }
+                ]
+            },
+            {
+                "questionId": "68e2182d9ecba8e655625ce1",
+                "index": 37,
+                "query": "Reason for not clear - Stock Dubai",
+                "kind": "textField",
+                "required": false
+            },
+            {
+                "questionId": "68e2182d9ecba8e655625ce5",
+                "index": 38,
+                "query": "hello hai",
+                "kind": "choice",
+                "required": false,
+                "options": [
+                    {
+                        "_id": "68e2182d9ecba8e655625ce2",
+                        "label": "Done",
+                        "value": "done"
+                    },
+                    {
+                        "_id": "68e2182d9ecba8e655625ce3",
+                        "label": "Clear",
+                        "value": "clear"
+                    },
+                    {
+                        "_id": "68e2182d9ecba8e655625ce4",
+                        "label": "Not Clear",
+                        "value": "not_clear"
+                    }
+                ]
+            },
+            {
+                "questionId": "68e2182d9ecba8e655625ce6",
+                "index": 39,
+                "query": "Reason for not clear - hello hai",
+                "kind": "textField",
+                "required": false
+            }
+        ],
+        "publishedAt": 1759647789339
+    },
+    {
+        "id": "68e3c5da9ecba8e655629f9c",
+        "title": "Call Centre Report",
+        "description": null,
+        "prvilege": "staff",
+        "SecondPrivileage": "regular",
+        "interval": {
+            "type": "daily",
+            "times": []
+        },
+        "status": "published",
+        "version": 1,
+        "questions": [
+            {
+                "questionId": "68e3c5da9ecba8e655629f9d",
+                "index": 0,
+                "query": "New Leads",
+                "kind": "textField",
+                "required": false
+            },
+            {
+                "questionId": "68e3c5da9ecba8e655629f9e",
+                "index": 1,
+                "query": "Old Leads",
+                "kind": "textField",
+                "required": false
+            },
+            {
+                "questionId": "68e3c5da9ecba8e655629f9f",
+                "index": 2,
+                "query": "Sale",
+                "kind": "textField",
+                "required": false
+            },
+            {
+                "questionId": "68e3c5da9ecba8e655629fa0",
+                "index": 3,
+                "query": "Customers visited today",
+                "kind": "textField",
+                "required": false
+            },
+            {
+                "questionId": "68e3c5da9ecba8e655629fa1",
+                "index": 4,
+                "query": "Customers purchased today",
+                "kind": "textField",
+                "required": false
+            },
+            {
+                "questionId": "68e3c5da9ecba8e655629fa2",
+                "index": 5,
+                "query": "Reason customers did not purchase",
+                "kind": "textField",
+                "required": false
+            },
+            {
+                "questionId": "68e3c5da9ecba8e655629fa3",
+                "index": 6,
+                "query": "Who is coming tomorrow?",
+                "kind": "textField",
+                "required": false
+            },
+            {
+                "questionId": "68e3c5da9ecba8e655629fa4",
+                "index": 7,
+                "query": "Who will come later?",
+                "kind": "textField",
+                "required": false
+            },
+            {
+                "questionId": "68e3c5da9ecba8e655629fa5",
+                "index": 8,
+                "query": "Any product issues reported?",
+                "kind": "textField",
+                "required": false
+            }
+        ],
+        "publishedAt": 1759757786034
+    }
+]
