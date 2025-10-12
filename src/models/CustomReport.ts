@@ -8,7 +8,7 @@ export interface ChoiceOption {
   index?: number;
 }
 
-export type QuestionKind = 'choice' | 'choiceMultiSelect' | 'textField' | 'numberField';
+export type QuestionKind = 'choice' | 'choiceMultiSelect' | 'textField' | 'numberField'; //TODO: also addd "perStaff"
 
 export interface BaseQuestion {
   questionId: Types.ObjectId;

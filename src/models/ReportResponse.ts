@@ -6,11 +6,20 @@ export interface ChoiceAnswerValue {
   otherNumber?: number;
 }
 
+// export interface PerStaffAnswer {
+//   userId: string;
+//   userName: string;
+//   textValue?: string;
+//   numberValue?: number;
+//   choiceValue?: ChoiceAnswerValue;
+// }
+
 export interface AnswerItem {
   questionId: Types.ObjectId;
   textValue?: string;
   numberValue?: number;
   choiceValue?: ChoiceAnswerValue;
+  // perStaffAnswers?: PerStaffAnswer[];
 }
 
 export interface ReportResponse extends Document {
