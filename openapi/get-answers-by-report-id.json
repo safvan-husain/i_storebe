@@ -1,0 +1,150 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "i-Store API",
+    "version": "1.0.0",
+    "description": "Extracted POST /custom-reports/{id}/responses/query and referenced components"
+  },
+  "paths": {
+    "/custom-reports/{id}/responses/query": {
+      "post": {
+        "summary": "Query responses for a custom report",
+        "description": "Returns paginated response summaries filtered by respondent and submission date range.",
+        "tags": [
+          "Custom Reports"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Custom report identifier"
+            },
+            "required": true,
+            "description": "Custom report identifier",
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "description": "Filtering options for report responses.",
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CustomReportListResponsesRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Matching responses",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomReportListResponsesResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "servers": [
+    {
+      "url": "/api"
+    }
+  ],
+  "components": {
+    "schemas": {
+      "CustomReportListResponsesResponse": {
+        "type": "object",
+        "properties": {
+          "total": {
+            "type": "integer"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "version": {
+                  "type": "integer"
+                },
+                "respondentId": {
+                  "type": "string"
+                },
+                "respondentName": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "submittedAt": {
+                  "type": "integer",
+                  "description": "Submission time in milliseconds since epoch"
+                },
+                "answersCount": {
+                  "type": "integer",
+                  "description": "Number of answers stored for the response"
+                }
+              },
+              "required": [
+                "id",
+                "version",
+                "respondentId",
+                "respondentName",
+                "answersCount"
+              ]
+            }
+          }
+        },
+        "required": [
+          "total",
+          "items"
+        ]
+      },
+      "CustomReportListResponsesRequest": {
+        "type": "object",
+        "properties": {
+          "respondentId": {
+            "type": "string",
+            "description": "Filter to responses created by this user id"
+          },
+          "startDate": {
+            "type": "integer",
+            "description": "Filter responses submitted on or after this millisecond timestamp"
+          },
+          "endDate": {
+            "type": "integer",
+            "description": "Filter responses submitted on or before this millisecond timestamp"
+          },
+          "skip": {
+            "type": "string",
+            "pattern": "^\\d+$",
+            "description": "Number of matching responses to skip before returning results (stringified integer)"
+          },
+          "limit": {
+            "type": "string",
+            "pattern": "^\\d+$",
+            "description": "Maximum number of responses to return (stringified integer)"
+          }
+        }
+      }
+    },
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT"
+      }
+    }
+  }
+}

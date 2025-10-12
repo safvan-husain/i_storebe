@@ -1,0 +1,436 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "i-Store API",
+    "version": "1.0.0",
+    "description": "Extracted POST /custom-reports and referenced components"
+  },
+  "paths": {
+    "/custom-reports": {
+      "post": {
+        "summary": "Create a new custom report (draft)",
+        "tags": [
+          "Custom Reports"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "description": "Draft report metadata. Questions may be supplied but are optional until publishing.",
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CustomReportCreateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Report created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomReportCreateResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "servers": [
+    {
+      "url": "/api"
+    }
+  ],
+  "components": {
+    "schemas": {
+      "CustomReportCreateRequest": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": {
+            "type": "string"
+          },
+          "prvilege": {
+            "type": "string",
+            "enum": [
+              "admin",
+              "manager",
+              "staff"
+            ]
+          },
+          "SecondPrivileage": {
+            "type": "string",
+            "enum": [
+              "super",
+              "call-center",
+              "regular",
+              "accountant",
+              "technician",
+              "hr",
+              "inventory",
+              "marketing-executive"
+            ]
+          },
+          "interval": {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "daily",
+                  "weekly",
+                  "monthly",
+                  "yearly"
+                ]
+              },
+              "times": {
+                "type": "array",
+                "items": {
+                  "type": "number"
+                }
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "questions": {
+            "type": "array",
+            "items": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "index": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "query": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "choice"
+                      ]
+                    },
+                    "helpText": {
+                      "type": "string"
+                    },
+                    "required": {
+                      "type": "boolean",
+                      "default": false
+                    },
+                    "showIf": {
+                      "type": "object",
+                      "properties": {
+                        "questionIndex": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "choiceIndexEquals": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "exists": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "questionIndex"
+                      ]
+                    },
+                    "options": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "label": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "value": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "description": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "label",
+                          "value"
+                        ]
+                      },
+                      "minItems": 1
+                    },
+                    "allowOther": {
+                      "type": "boolean"
+                    },
+                    "otherAnswerType": {
+                      "type": "string",
+                      "enum": [
+                        "textField",
+                        "numberField"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "index",
+                    "query",
+                    "kind",
+                    "options"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "index": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "query": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "choiceMultiSelect"
+                      ]
+                    },
+                    "helpText": {
+                      "type": "string"
+                    },
+                    "required": {
+                      "type": "boolean",
+                      "default": false
+                    },
+                    "showIf": {
+                      "type": "object",
+                      "properties": {
+                        "questionIndex": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "choiceIndexEquals": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "exists": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "questionIndex"
+                      ]
+                    },
+                    "options": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "label": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "value": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "description": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "label",
+                          "value"
+                        ]
+                      },
+                      "minItems": 1
+                    },
+                    "allowOther": {
+                      "type": "boolean"
+                    },
+                    "otherAnswerType": {
+                      "type": "string",
+                      "enum": [
+                        "textField",
+                        "numberField"
+                      ]
+                    },
+                    "minSelect": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "maxSelect": {
+                      "type": "integer",
+                      "minimum": 1
+                    }
+                  },
+                  "required": [
+                    "index",
+                    "query",
+                    "kind",
+                    "options"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "index": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "query": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "textField"
+                      ]
+                    },
+                    "helpText": {
+                      "type": "string"
+                    },
+                    "required": {
+                      "type": "boolean",
+                      "default": false
+                    },
+                    "showIf": {
+                      "type": "object",
+                      "properties": {
+                        "questionIndex": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "choiceIndexEquals": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "exists": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "questionIndex"
+                      ]
+                    },
+                    "placeholder": {
+                      "type": "string"
+                    },
+                    "minLength": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "maxLength": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  },
+                  "required": [
+                    "index",
+                    "query",
+                    "kind"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "index": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "query": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "numberField"
+                      ]
+                    },
+                    "helpText": {
+                      "type": "string"
+                    },
+                    "required": {
+                      "type": "boolean",
+                      "default": false
+                    },
+                    "showIf": {
+                      "type": "object",
+                      "properties": {
+                        "questionIndex": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "choiceIndexEquals": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "exists": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "questionIndex"
+                      ]
+                    },
+                    "min": {
+                      "type": "number"
+                    },
+                    "max": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "index",
+                    "query",
+                    "kind"
+                  ]
+                }
+              ]
+            }
+          }
+        },
+        "required": [
+          "title",
+          "prvilege",
+          "SecondPrivileage"
+        ]
+      },
+      "CustomReportCreateResponse": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      }
+    },
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT"
+      }
+    }
+  }
+}
