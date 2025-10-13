@@ -100,6 +100,11 @@ export const publishCustomReportVersionResponseSchema = z.object({
   version: z.number().int(),
 });
 
+export const archiveCustomReportResponseSchema = z.object({
+  id: z.string(),
+  status: z.literal('archived'),
+});
+
 const responseAnswerOptionSchema = z.object({
   optionId: z.string(),
   label: z.string(),
@@ -225,6 +230,7 @@ export type CreateCustomReportRequest = z.infer<typeof createCustomReportRequest
 export type CreateCustomReportResponse = z.infer<typeof createCustomReportResponseSchema>;
 export type PublishCustomReportVersionRequest = z.infer<typeof publishCustomReportVersionRequestSchema>;
 export type PublishCustomReportVersionResponse = z.infer<typeof publishCustomReportVersionResponseSchema>;
+export type ArchiveCustomReportResponse = z.infer<typeof archiveCustomReportResponseSchema>;
 export type SubmitCustomReportResponseRequest = z.infer<typeof submitCustomReportResponseRequestSchema>;
 export type SubmitCustomReportResponseResponse = z.infer<typeof submitCustomReportResponseResponseSchema>;
 export type ViewCustomReportResponseResponse = z.infer<typeof viewCustomReportResponseResponseSchema>;

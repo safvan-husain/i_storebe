@@ -1,7 +1,7 @@
 import express from 'express';
 import { z } from 'zod';
 import { protect } from '../middleware/auth';
-import { createReport, getReport, publishVersion, submitResponse, listResponses, viewResponse, listLatestReportsForUser } from '../controllers/custom-report/customReportController';
+import { createReport, getReport, publishVersion, submitResponse, listResponses, viewResponse, listLatestReportsForUser, archiveReport } from '../controllers/custom-report/customReportController';
 import { registry } from '../openapi/registry';
 import {
   choiceOptionResponseSchema,
@@ -11,6 +11,7 @@ import {
   latestReportResponseSchema,
   publishCustomReportVersionRequestSchema,
   publishCustomReportVersionResponseSchema,
+  archiveCustomReportResponseSchema,
   questionResponseSchema,
   questionShowIfSchema,
   reportIntervalResponseSchema,
@@ -58,6 +59,10 @@ const listResponsesRequestComponent = registry.register(
 const listResponsesResponseComponent = registry.register(
   'CustomReportListResponsesResponse',
   listCustomReportResponsesResponseSchema,
+);
+const archiveResponseComponent = registry.register(
+  'CustomReportArchiveResponse',
+  archiveCustomReportResponseSchema,
 );
 
 registry.registerPath({
@@ -137,6 +142,32 @@ registry.registerPath({
           schema: publishResponseComponent,
         },
       },
+    },
+  },
+});
+
+registry.registerPath({
+  method: 'post',
+  path: '/custom-reports/{id}/archive',
+  summary: 'Archive a custom report',
+  tags: ['Custom Reports'],
+  security: [{ bearerAuth: [] }],
+  request: {
+    params: z.object({
+      id: z.string().describe('Custom report identifier'),
+    }),
+  },
+  responses: {
+    200: {
+      description: 'Report archived',
+      content: {
+        'application/json': {
+          schema: archiveResponseComponent,
+        },
+      },
+    },
+    404: {
+      description: 'Report not found',
     },
   },
 });
@@ -242,6 +273,9 @@ router.get('/:id', protect, getReport);
 
 // Publish a new version with questions
 router.post('/:id/publish', protect, publishVersion);
+
+// Archive a report
+router.post('/:id/archive', protect, archiveReport);
 
 // Submit a response for a specific version
 router.post('/:id/responses', protect, submitResponse);

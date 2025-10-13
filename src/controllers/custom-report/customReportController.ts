@@ -18,6 +18,7 @@ import {
   PublishCustomReportVersionResponse,
   SubmitCustomReportResponseResponse,
   ViewCustomReportResponseResponse,
+  ArchiveCustomReportResponse,
 } from '../../routes/customReport.schemas';
 
 function materializeQuestions(input: AnyQuestionInput[]): AnyQuestion[] {
@@ -169,6 +170,35 @@ export const publishVersion = async (
     await report.save();
 
     res.status(201).json({ id, version: nextVersion });
+  } catch (e) {
+    onCatchError(e, res);
+  }
+};
+
+export const archiveReport = async (
+  req: Request,
+  res: TypedResponse<ArchiveCustomReportResponse>,
+) => {
+  try {
+    const id = req.params.id;
+    if (!Types.ObjectId.isValid(id)) {
+      throw new AppError('Invalid report id', 400);
+    }
+
+    const report = await CustomReportModel.findById(id);
+    if (!report) {
+      throw new AppError('Report not found', 404);
+    }
+
+    if (report.status === 'archived') {
+      res.status(200).json({ id: String(report._id), status: 'archived' });
+      return;
+    }
+
+    report.status = 'archived';
+    await report.save();
+
+    res.status(200).json({ id: String(report._id), status: 'archived' });
   } catch (e) {
     onCatchError(e, res);
   }
