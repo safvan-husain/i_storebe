@@ -85,3 +85,27 @@ export const getManagers = asyncHandler(async (req: Request, res: Response) => {
         onCatchError(e, res);
     }
 });
+
+export const getActiveStaffsForManager = asyncHandler(async (req: Request, res: Response) => {
+    try {
+        if (req.privilege !== 'manager') {
+            res.status(403).json({message: "Only managers can access active staff list"});
+            return;
+        }
+        if (!req.userId) {
+            res.status(400).json({message: "Manager id missing"});
+            return;
+        }
+
+        const staffs = await User.find({
+            privilege: 'staff',
+            manager: req.userId,
+            isActive: true,
+            isAccountDeleted: { $ne: true },
+        }).lean();
+
+        res.status(200).json(staffs);
+    } catch (e) {
+        onCatchError(e, res);
+    }
+});

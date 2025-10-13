@@ -8,6 +8,7 @@ const baseQuestion = z.object({
   kind: QuestionKindSchema,
   helpText: z.string().optional(),
   required: z.boolean().optional().default(false),
+  answerPerStaff: z.boolean().optional().default(false),
   showIf: z.object({
     questionIndex: z.number().int().min(0),
     choiceIndexEquals: z.number().int().min(0).optional(),
@@ -89,18 +90,30 @@ export const publishVersionSchema = z.object({
 });
 
 // Response submission
+const choiceAnswerValueSchema = z.object({
+  optionIds: z.array(ObjectIdSchema).min(1),
+  otherText: z.string().optional(),
+  otherNumber: z.number().optional(),
+});
+
+const perStaffAnswerSchema = z.object({
+  staffId: ObjectIdSchema,
+  textValue: z.string().optional(),
+  numberValue: z.number().optional(),
+  choiceValue: choiceAnswerValueSchema.optional(),
+});
+
+const answerItemSchema = z.object({
+  questionId: ObjectIdSchema,
+  textValue: z.string().optional(),
+  numberValue: z.number().optional(),
+  choiceValue: choiceAnswerValueSchema.optional(),
+  perStaffAnswers: z.array(perStaffAnswerSchema).optional(),
+});
+
 export const submitResponseSchema = z.object({
   version: z.number().int().min(1),
-  answers: z.array(z.object({
-    questionId: ObjectIdSchema,
-    textValue: z.string().optional(),
-    numberValue: z.number().optional(),
-    choiceValue: z.object({
-      optionIds: z.array(ObjectIdSchema).min(1),
-      otherText: z.string().optional(),
-      otherNumber: z.number().optional(),
-    }).optional(),
-  })).min(1),
+  answers: z.array(answerItemSchema).min(1),
 });
 
 export type SubmitResponseInput = z.infer<typeof submitResponseSchema>;

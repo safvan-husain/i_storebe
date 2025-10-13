@@ -30,6 +30,7 @@ function materializeQuestions(input: AnyQuestionInput[]): AnyQuestion[] {
       kind: q.kind,
       helpText: q.helpText,
       required: q.required ?? false,
+      answerPerStaff: q.answerPerStaff ?? false,
       // showIf will be resolved in second pass using indices
     };
 
@@ -209,12 +210,83 @@ export const submitResponse = async (
       qMap.set(String(q.questionId), q);
     }
 
+    const validateChoiceAnswer = (choiceValue: any, question: any, label?: string) => {
+      const prefix = label ? `${label}: ` : '';
+      if (!choiceValue) {
+        throw new AppError(`${prefix}choiceValue required for choice question`, 400);
+      }
+      const optionIds = new Set((question.options ?? []).map((o: any) => String(o._id)));
+      for (const oid of choiceValue.optionIds) {
+        if (!optionIds.has(String(oid))) {
+          throw new AppError(`${prefix}Invalid option selected`, 400);
+        }
+      }
+      if (question.kind === 'choice' && choiceValue.optionIds.length !== 1) {
+        throw new AppError(`${prefix}Exactly one option must be selected for choice`, 400);
+      }
+      if (question.kind === 'choiceMultiSelect') {
+        const count = choiceValue.optionIds.length;
+        if (question.minSelect !== undefined && count < question.minSelect) {
+          throw new AppError(`${prefix}Select at least ${question.minSelect} options`, 400);
+        }
+        if (question.maxSelect !== undefined && count > question.maxSelect) {
+          throw new AppError(`${prefix}Select at most ${question.maxSelect} options`, 400);
+        }
+      }
+      if (choiceValue.otherText !== undefined || choiceValue.otherNumber !== undefined) {
+        if (!question.allowOther) {
+          throw new AppError(`${prefix}Other answer not allowed for this question`, 400);
+        }
+        if (question.otherAnswerType === 'textField' && choiceValue.otherText === undefined) {
+          throw new AppError(`${prefix}otherText required for otherAnswerType=textField`, 400);
+        }
+        if (question.otherAnswerType === 'numberField' && choiceValue.otherNumber === undefined) {
+          throw new AppError(`${prefix}otherNumber required for otherAnswerType=numberField`, 400);
+        }
+      }
+    };
+
+    const validateAnswerForQuestion = (answer: any, question: any, label?: string) => {
+      const prefix = label ? `${label}: ` : '';
+      if (question.kind === 'textField') {
+        if (answer.textValue === undefined || answer.textValue === null) {
+          throw new AppError(`${prefix}textValue required for textField question`, 400);
+        }
+        const len = answer.textValue.length;
+        if (question.minLength !== undefined && len < question.minLength) {
+          throw new AppError(`${prefix}textValue must be at least ${question.minLength} chars`, 400);
+        }
+        if (question.maxLength !== undefined && len > question.maxLength) {
+          throw new AppError(`${prefix}textValue must be at most ${question.maxLength} chars`, 400);
+        }
+      } else if (question.kind === 'numberField') {
+        if (typeof answer.numberValue !== 'number') {
+          throw new AppError(`${prefix}numberValue required for numberField question`, 400);
+        }
+        if (question.min !== undefined && answer.numberValue < question.min) {
+          throw new AppError(`${prefix}numberValue must be >= ${question.min}`, 400);
+        }
+        if (question.max !== undefined && answer.numberValue > question.max) {
+          throw new AppError(`${prefix}numberValue must be <= ${question.max}`, 400);
+        }
+      } else if (question.kind === 'choice' || question.kind === 'choiceMultiSelect') {
+        validateChoiceAnswer(answer.choiceValue, question, label);
+      } else {
+        throw new AppError('Unsupported question kind', 400);
+      }
+    };
+
     // Required questions check
     const requiredQs = (version.questions as any[]).filter(q => q.required);
     for (const rq of requiredQs) {
       const answered = payload.answers.find(a => a.questionId === String(rq.questionId));
       if (!answered) {
         throw new AppError(`Missing answer for required question: ${rq.query}`, 400);
+      }
+      if (rq.answerPerStaff) {
+        if (!answered.perStaffAnswers || answered.perStaffAnswers.length === 0) {
+          throw new AppError(`Missing per-staff answers for required question: ${rq.query}`, 400);
+        }
       }
     }
 
@@ -223,62 +295,22 @@ export const submitResponse = async (
       const q = qMap.get(a.questionId);
       if (!q) throw new AppError('Answer references unknown questionId', 400);
 
-      if (q.kind === 'textField') {
-        if (a.textValue === undefined || a.textValue === null) {
-          throw new AppError('textValue required for textField question', 400);
+      if (q.answerPerStaff) {
+        if (!Array.isArray(a.perStaffAnswers) || a.perStaffAnswers.length === 0) {
+          throw new AppError('perStaffAnswers required for this question', 400);
         }
-        const len = a.textValue.length;
-        if (q.minLength !== undefined && len < q.minLength) {
-          throw new AppError(`textValue must be at least ${q.minLength} chars`, 400);
+        if (a.textValue !== undefined || a.numberValue !== undefined || a.choiceValue !== undefined) {
+          throw new AppError('Provide answers inside perStaffAnswers for per-staff questions', 400);
         }
-        if (q.maxLength !== undefined && len > q.maxLength) {
-          throw new AppError(`textValue must be at most ${q.maxLength} chars`, 400);
-        }
-      } else if (q.kind === 'numberField') {
-        if (typeof a.numberValue !== 'number') {
-          throw new AppError('numberValue required for numberField question', 400);
-        }
-        if (q.min !== undefined && a.numberValue < q.min) {
-          throw new AppError(`numberValue must be >= ${q.min}`, 400);
-        }
-        if (q.max !== undefined && a.numberValue > q.max) {
-          throw new AppError(`numberValue must be <= ${q.max}`, 400);
-        }
-      } else if (q.kind === 'choice' || q.kind === 'choiceMultiSelect') {
-        if (!a.choiceValue) {
-          throw new AppError('choiceValue required for choice question', 400);
-        }
-        const optionIds = new Set((q.options ?? []).map((o: any) => String(o._id)));
-        for (const oid of a.choiceValue.optionIds) {
-          if (!optionIds.has(String(oid))) {
-            throw new AppError('Invalid option selected', 400);
-          }
-        }
-        if (q.kind === 'choice' && a.choiceValue.optionIds.length !== 1) {
-          throw new AppError('Exactly one option must be selected for choice', 400);
-        }
-        if (q.kind === 'choiceMultiSelect') {
-          const c = a.choiceValue.optionIds.length;
-          if (q.minSelect !== undefined && c < q.minSelect) {
-            throw new AppError(`Select at least ${q.minSelect} options`, 400);
-          }
-          if (q.maxSelect !== undefined && c > q.maxSelect) {
-            throw new AppError(`Select at most ${q.maxSelect} options`, 400);
-          }
-        }
-        if (a.choiceValue.otherText !== undefined || a.choiceValue.otherNumber !== undefined) {
-          if (!q.allowOther) {
-            throw new AppError('Other answer not allowed for this question', 400);
-          }
-          if (q.otherAnswerType === 'textField' && a.choiceValue.otherText === undefined) {
-            throw new AppError('otherText required for otherAnswerType=textField', 400);
-          }
-          if (q.otherAnswerType === 'numberField' && a.choiceValue.otherNumber === undefined) {
-            throw new AppError('otherNumber required for otherAnswerType=numberField', 400);
-          }
+        for (const per of a.perStaffAnswers) {
+          const label = `Per-staff answer for staff ${per.staffId}`;
+          validateAnswerForQuestion(per, q, label);
         }
       } else {
-        throw new AppError('Unsupported question kind', 400);
+        if (Array.isArray(a.perStaffAnswers) && a.perStaffAnswers.length > 0) {
+          throw new AppError('perStaffAnswers is only allowed when question is configured for per-staff responses', 400);
+        }
+        validateAnswerForQuestion(a, q);
       }
     }
 
@@ -295,6 +327,20 @@ export const submitResponse = async (
           otherText: a.choiceValue.otherText,
           otherNumber: a.choiceValue.otherNumber,
         } : undefined,
+        perStaffAnswers: a.perStaffAnswers
+          ? a.perStaffAnswers.map(per => ({
+            staffId: new Types.ObjectId(per.staffId),
+            textValue: per.textValue,
+            numberValue: per.numberValue,
+            choiceValue: per.choiceValue
+              ? {
+                optionIds: per.choiceValue.optionIds.map((id: any) => new Types.ObjectId(id)),
+                otherText: per.choiceValue.otherText,
+                otherNumber: per.choiceValue.otherNumber,
+              }
+              : undefined,
+          }))
+          : undefined,
       })),
     });
 
@@ -367,23 +413,80 @@ export const viewResponse = async (
 
     const user = await User.findById(response.respondentId, { username: 1 }).lean();
 
+    const staffIdSet = new Set<string>();
+    for (const ans of response.answers ?? []) {
+      for (const per of ans.perStaffAnswers ?? []) {
+        if (per?.staffId) {
+          staffIdSet.add(String(per.staffId));
+        }
+      }
+    }
+
+    const staffNameMap = new Map<string, string>();
+    if (staffIdSet.size > 0) {
+      const staffUsers = await User.find(
+        { _id: { $in: Array.from(staffIdSet).map(id => new Types.ObjectId(id)) } },
+        { _id: 1, username: 1 },
+      ).lean();
+      for (const staff of staffUsers) {
+        staffNameMap.set(String(staff._id), staff.username ?? null);
+      }
+    }
+
+    const formatChoiceAnswer = (choiceValue: any, question: any) => {
+      const selected = new Set((choiceValue?.optionIds ?? []).map((id: any) => String(id)));
+      const options = (question.options ?? [])
+        .filter((opt: any) => selected.has(String(opt._id)))
+        .map((opt: any) => ({ optionId: String(opt._id), label: opt.label, value: opt.value }));
+      const other: any = {};
+      if (choiceValue?.otherText !== undefined) other.otherText = choiceValue.otherText;
+      if (choiceValue?.otherNumber !== undefined) other.otherNumber = choiceValue.otherNumber;
+      return { options, ...other };
+    };
+
     const items = (response.answers ?? []).map((a: any) => {
       const q = qMap.get(String(a.questionId));
       if (!q) return null;
+      const base = {
+        questionId: String(q.questionId),
+        kind: q.kind,
+        query: q.query,
+        required: q.required,
+        answerPerStaff: Boolean(q.answerPerStaff),
+      };
+
       if (q.kind === 'textField') {
-        return { questionId: String(q.questionId), kind: q.kind, query: q.query, required: q.required, answer: a.textValue };
+        if (q.answerPerStaff) {
+          const perStaffAnswers = (a.perStaffAnswers ?? []).map((per: any) => ({
+            staffId: String(per.staffId),
+            staffName: staffNameMap.get(String(per.staffId)) ?? null,
+            answer: per.textValue,
+          }));
+          return { ...base, perStaffAnswers };
+        }
+        return { ...base, answer: a.textValue };
       }
       if (q.kind === 'numberField') {
-        return { questionId: String(q.questionId), kind: q.kind, query: q.query, required: q.required, answer: a.numberValue };
+        if (q.answerPerStaff) {
+          const perStaffAnswers = (a.perStaffAnswers ?? []).map((per: any) => ({
+            staffId: String(per.staffId),
+            staffName: staffNameMap.get(String(per.staffId)) ?? null,
+            answer: per.numberValue,
+          }));
+          return { ...base, perStaffAnswers };
+        }
+        return { ...base, answer: a.numberValue };
       }
       if (q.kind === 'choice' || q.kind === 'choiceMultiSelect') {
-        const selected = new Set((a.choiceValue?.optionIds ?? []).map((id: any) => String(id)));
-        const options = (q.options ?? []).filter((opt: any) => selected.has(String(opt._id)))
-          .map((opt: any) => ({ optionId: String(opt._id), label: opt.label, value: opt.value }));
-        const other: any = {};
-        if (a.choiceValue?.otherText !== undefined) other.otherText = a.choiceValue.otherText;
-        if (a.choiceValue?.otherNumber !== undefined) other.otherNumber = a.choiceValue.otherNumber;
-        return { questionId: String(q.questionId), kind: q.kind, query: q.query, required: q.required, answer: { options, ...other } };
+        if (q.answerPerStaff) {
+          const perStaffAnswers = (a.perStaffAnswers ?? []).map((per: any) => ({
+            staffId: String(per.staffId),
+            staffName: staffNameMap.get(String(per.staffId)) ?? null,
+            answer: formatChoiceAnswer(per.choiceValue, q),
+          }));
+          return { ...base, perStaffAnswers };
+        }
+        return { ...base, answer: formatChoiceAnswer(a.choiceValue, q) };
       }
       return null;
     }).filter(Boolean);
@@ -433,6 +536,7 @@ function serializeQuestion(question: any): CustomReportQuestionResponse {
     query: question.query,
     helpText: question.helpText ?? undefined,
     required: typeof question.required === 'boolean' ? question.required : undefined,
+    answerPerStaff: typeof question.answerPerStaff === 'boolean' ? question.answerPerStaff : undefined,
     showIf: serializeShowIf(question.showIf),
   };
 

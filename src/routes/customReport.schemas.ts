@@ -32,6 +32,7 @@ const baseQuestionResponseSchema = z.object({
   kind: QuestionKindSchema,
   helpText: z.string().optional(),
   required: z.boolean().optional(),
+  answerPerStaff: z.boolean().optional(),
   showIf: questionShowIfSchema.optional(),
 });
 
@@ -109,16 +110,24 @@ const baseResponseItemSchema = z.object({
   questionId: z.string(),
   query: z.string(),
   required: z.boolean().optional(),
+  answerPerStaff: z.boolean().optional(),
+});
+
+const perStaffBaseResponseSchema = z.object({
+  staffId: z.string(),
+  staffName: z.string().nullable(),
 });
 
 const textResponseItemSchema = baseResponseItemSchema.extend({
   kind: z.literal('textField'),
-  answer: z.string(),
+  answer: z.string().optional(),
+  perStaffAnswers: z.array(perStaffBaseResponseSchema.extend({ answer: z.string() })).optional(),
 });
 
 const numberResponseItemSchema = baseResponseItemSchema.extend({
   kind: z.literal('numberField'),
-  answer: z.number(),
+  answer: z.number().optional(),
+  perStaffAnswers: z.array(perStaffBaseResponseSchema.extend({ answer: z.number() })).optional(),
 });
 
 const choiceAnswerSchema = z.object({
@@ -129,12 +138,14 @@ const choiceAnswerSchema = z.object({
 
 const choiceResponseItemSchema = baseResponseItemSchema.extend({
   kind: z.literal('choice'),
-  answer: choiceAnswerSchema,
+  answer: choiceAnswerSchema.optional(),
+  perStaffAnswers: z.array(perStaffBaseResponseSchema.extend({ answer: choiceAnswerSchema })).optional(),
 });
 
 const choiceMultiResponseItemSchema = baseResponseItemSchema.extend({
   kind: z.literal('choiceMultiSelect'),
-  answer: choiceAnswerSchema,
+  answer: choiceAnswerSchema.optional(),
+  perStaffAnswers: z.array(perStaffBaseResponseSchema.extend({ answer: choiceAnswerSchema })).optional(),
 });
 
 export const submitCustomReportResponseRequestSchema = submitResponseSchema;

@@ -8,7 +8,7 @@ export interface ChoiceOption {
   index?: number;
 }
 
-export type QuestionKind = 'choice' | 'choiceMultiSelect' | 'textField' | 'numberField'; //TODO: also addd "perStaff"
+export type QuestionKind = 'choice' | 'choiceMultiSelect' | 'textField' | 'numberField';
 
 export interface BaseQuestion {
   questionId: Types.ObjectId;
@@ -17,6 +17,7 @@ export interface BaseQuestion {
   kind: QuestionKind;
   helpText?: string;
   required?: boolean;
+  answerPerStaff?: boolean;
   // simple conditional logic support
   showIf?: { questionId: Types.ObjectId; optionIdEquals?: Types.ObjectId; exists?: boolean };
 }
@@ -67,6 +68,7 @@ const QuestionSchema = new Schema<any>({
   kind: { type: String, required: true, enum: ['choice', 'choiceMultiSelect', 'textField', 'numberField'] },
   helpText: { type: String },
   required: { type: Boolean, default: false },
+  answerPerStaff: { type: Boolean, default: false },
   showIf: {
     questionId: { type: Schema.Types.ObjectId },
     optionIdEquals: { type: Schema.Types.ObjectId },

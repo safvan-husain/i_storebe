@@ -6,20 +6,19 @@ export interface ChoiceAnswerValue {
   otherNumber?: number;
 }
 
-// export interface PerStaffAnswer {
-//   userId: string;
-//   userName: string;
-//   textValue?: string;
-//   numberValue?: number;
-//   choiceValue?: ChoiceAnswerValue;
-// }
+export interface PerStaffAnswer {
+  staffId: Types.ObjectId;
+  textValue?: string;
+  numberValue?: number;
+  choiceValue?: ChoiceAnswerValue;
+}
 
 export interface AnswerItem {
   questionId: Types.ObjectId;
   textValue?: string;
   numberValue?: number;
   choiceValue?: ChoiceAnswerValue;
-  // perStaffAnswers?: PerStaffAnswer[];
+  perStaffAnswers?: PerStaffAnswer[];
 }
 
 export interface ReportResponse extends Document {
@@ -36,11 +35,19 @@ const ChoiceAnswerValueSchema = new Schema<ChoiceAnswerValue>({
   otherNumber: { type: Number },
 }, { _id: false });
 
+const PerStaffAnswerSchema = new Schema<PerStaffAnswer>({
+  staffId: { type: Schema.Types.ObjectId, required: true },
+  textValue: { type: String },
+  numberValue: { type: Number },
+  choiceValue: { type: ChoiceAnswerValueSchema },
+}, { _id: false });
+
 const AnswerItemSchema = new Schema<AnswerItem>({
   questionId: { type: Schema.Types.ObjectId, required: true },
   textValue: { type: String },
   numberValue: { type: Number },
   choiceValue: { type: ChoiceAnswerValueSchema },
+  perStaffAnswers: { type: [PerStaffAnswerSchema], default: undefined },
 }, { _id: false });
 
 const ReportResponseSchema = new Schema<ReportResponse>({
