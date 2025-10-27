@@ -148,6 +148,8 @@ export const getStaffReport = async (req: Request, res: TypedResponse<any>) => {
 
         const matchQuery: FilterQuery<IActivity> = {};
         let staffs: { $in?: Types.ObjectId[], $nin?: Types.ObjectId[] } = {};
+        //username will play a key role, since it is used to write to the pdf, 
+        //all the usernames will be in the report even if they do not have data.
         let usernames: string[] = [];
 
         //if no manager or staff, specified, group them by manager.
@@ -168,38 +170,71 @@ export const getStaffReport = async (req: Request, res: TypedResponse<any>) => {
         }
 
         if (query.manager) {
-            const result = await User
-                .find({ manager: query.manager }, { _id: 1, username: 1 })
+            // First verify the manager is active
+            const manager = await User
+                .findOne({ _id: query.manager, isActive: true }, { username: true })
                 .lean();
 
-            const staffsIds = result.map(e => e._id);
-            const allEmployeeUnderTheBranch = [...staffsIds, Types.ObjectId.createFromHexString(query.manager)];
-            staffs = { $in: allEmployeeUnderTheBranch };
-            managerName = await User
-                .findById(query.manager, { username: true })
-                .lean().then(e => e?.username ?? "Unknown");
+            if (manager) {
+                const result = await User
+                    .find({ manager: query.manager, isActive: true }, { _id: 1, username: 1 })
+                    .lean();
+
+                const staffsIds = result.map(e => e._id);
+                const allEmployeeUnderTheBranch = [...staffsIds, Types.ObjectId.createFromHexString(query.manager)];
+                staffs = { $in: allEmployeeUnderTheBranch };
+                managerName = manager.username;
+            } else {
+                // If manager is not active, return empty result
+                staffs = { $in: [] };
+                managerName = "Inactive Manager";
+            }
         }
 
         if (query.staff) {
-            staffs = { $in: [Types.ObjectId.createFromHexString(query.staff)] }
+            // Verify the staff is active before including them
+            const staffUser = await User.findOne({
+                _id: query.staff,
+                isActive: true
+            }, { _id: 1 }).lean();
+
+            if (staffUser) {
+                staffs = { $in: [Types.ObjectId.createFromHexString(query.staff)] }
+            } else {
+                // If staff is not active, return empty result
+                staffs = { $in: [] }
+            }
         }
 
         if (shouldGroupByManager) {
             //exclude admin activities. since we don't specify whom activity.
             staffs = { $nin: adminIds }
 
+            // For shouldGroupByManager, get all active managers for usernames
+            usernames = await User.find({
+                privilege: 'manager',
+                isActive: true,
+                _id: { $nin: adminIds }
+            }, { username: true })
+                .lean().then(e => e.map(e => e.username));
         }
 
-        if (staffs) {
+        if (staffs && !shouldGroupByManager) {
             matchQuery.activator = staffs;
             //taking usernames to map at last, so user with no activity will still be shown
-            let query: FilterQuery<IUser> = {}
-            query._id = staffs;
-            if (shouldGroupByManager) {
-                query.privilege = 'manager';
-            }
-            usernames = await User.find(query, { username: true })
+            let userQuery: FilterQuery<IUser> = {}
+            userQuery._id = staffs;
+            userQuery.isActive = true;
+            usernames = await User.find(userQuery, { username: true })
                 .lean().then(e => e.map(e => e.username));
+        } else if (!shouldGroupByManager) {
+            // If staffs is set but we're not grouping by manager, set the match query
+            matchQuery.activator = staffs;
+        }
+
+        // Set activator filter for shouldGroupByManager case
+        if (shouldGroupByManager) {
+            matchQuery.activator = staffs;
         }
         if (createdAt) {
             matchQuery.createdAt = createdAt;
@@ -214,10 +249,18 @@ export const getStaffReport = async (req: Request, res: TypedResponse<any>) => {
                 foreignField: '_id',
                 pipeline: [
                     {
+                        $match: { isActive: true }
+                    },
+                    {
                         $lookup: {
                             from: 'users',
                             localField: 'manager',
                             foreignField: '_id',
+                            pipeline: [
+                                {
+                                    $match: { isActive: true }
+                                }
+                            ],
                             as: 'manager'
                         }
                     },
@@ -268,7 +311,6 @@ export const getStaffReport = async (req: Request, res: TypedResponse<any>) => {
 
         //if no specific manager or staff provided, show all managers, summed of their staff
         if (shouldGroupByManager) {
-            console.log("neither manager nor staff");
             pipeline.push({
                 $group: {
                     _id: "$manager",
@@ -501,10 +543,18 @@ async function getPendingTasksByUser(taskQuery = {}, isManagerBased?: boolean): 
                     foreignField: '_id',
                     pipeline: [
                         {
+                            $match: { isActive: true }
+                        },
+                        {
                             $lookup: {
                                 from: 'users',
                                 localField: 'manager',
                                 foreignField: '_id',
+                                pipeline: [
+                                    {
+                                        $match: { isActive: true }
+                                    }
+                                ],
                                 as: 'manager'
                             }
                         },
@@ -579,10 +629,18 @@ async function getWonFromTargetByHandler(targetQuery: FilterQuery<ITarget> = {},
                 foreignField: '_id',
                 pipeline: [
                     {
+                        $match: { isActive: true }
+                    },
+                    {
                         $lookup: {
                             from: 'users',
                             localField: 'manager',
                             foreignField: '_id',
+                            pipeline: [
+                                {
+                                    $match: { isActive: true }
+                                }
+                            ],
                             as: 'manager'
                         }
                     },
@@ -647,10 +705,18 @@ async function getLeadStatusByHandler(leadDbQuery: FilterQuery<ILead>, isManager
                 foreignField: '_id',
                 pipeline: [
                     {
+                        $match: { isActive: true }
+                    },
+                    {
                         $lookup: {
                             from: 'users',
                             localField: 'manager',
                             foreignField: '_id',
+                            pipeline: [
+                                {
+                                    $match: { isActive: true }
+                                }
+                            ],
                             as: 'manager'
                         }
                     },
