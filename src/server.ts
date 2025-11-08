@@ -134,21 +134,6 @@ app.get('/api/transform', async (_, res) => {
     }
 })
 
-app.get('/api/token', async (req, res) => {
-    try {
-        let users = await User.find({ token: { $exists: false }});
-        let s = await Promise.all(users.map(async (e) => {
-            e.token = generateToken(e);
-            return await e.save();
-        }));
-
-        let users2 = await User.find({}, { username: true, token: true, privilege: true, secondPrivilege: true }).lean();
-        res.status(200).json({ s, users2 });
-    } catch (e) {
-       onCatchError(e, res);
-    }
-})
-
 // Test push notification endpoint
 // Body: { username: string, type: 'lead' | 'task' | 'leave', title?: string, body?: string }
 app.post('/api/notifications/test', async (req, res) => {

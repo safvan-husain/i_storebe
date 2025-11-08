@@ -1,5 +1,6 @@
 import {Request, Response} from 'express';
 import User, {IUser} from '../../models/User';
+import LoginHistory from '../../models/LoginHistory';
 import {generateToken} from '../../utils/jwtUtils';
 import asyncHandler from 'express-async-handler';
 import {loginSchema, UserRequestSchema} from './validation';
@@ -43,6 +44,24 @@ export const loginUser = asyncHandler(async (req: Request, res: Response) => {
         user.isNewPassword = false;
         if (fcmToken) user.fcmToken = fcmToken;
         await user.save();
+
+        // Track login history
+        const loginHistoryData: any = {
+            userId: user._id,
+            username: user.username,
+            loginDate: new Date(),
+        };
+
+        // If user is staff, get manager info
+        if (user.manager) {
+            const manager = await User.findById(user.manager).select('username');
+            if (manager) {
+                loginHistoryData.managerId = user.manager;
+                loginHistoryData.managerName = manager.username;
+            }
+        }
+
+        await LoginHistory.create(loginHistoryData);
 
         let userObject: any = user.toObject();
         delete userObject.updatedAt;
@@ -317,3 +336,47 @@ export const deleteAccount = async (req: Request, res: Response ) => {
        onCatchError(e, res);
     }
 }
+
+const loginHistoryQuerySchema = z.object({
+    startDate: z.string().optional(),
+    endDate: z.string().optional(),
+    managerId: z.string().optional(),
+    staffId: z.string().optional(),
+});
+
+export const getLoginHistory = asyncHandler(async (req: Request, res: Response) => {
+    try {
+        const { startDate, endDate, managerId, staffId } = loginHistoryQuerySchema.parse(req.query);
+
+        const filter: FilterQuery<any> = {};
+
+        // Filter by date range
+        if (startDate || endDate) {
+            filter.loginDate = {};
+            if (startDate) {
+                filter.loginDate.$gte = new Date(startDate);
+            }
+            if (endDate) {
+                filter.loginDate.$lte = new Date(endDate);
+            }
+        }
+
+        // Filter by managerId
+        if (managerId) {
+            filter.managerId = Types.ObjectId.createFromHexString(managerId);
+        }
+
+        // Filter by staffId (userId)
+        if (staffId) {
+            filter.userId = Types.ObjectId.createFromHexString(staffId);
+        }
+
+        const loginHistory = await LoginHistory.find(filter)
+            .sort({ loginDate: -1 })
+            .lean();
+
+        res.status(200).json(loginHistory);
+    } catch (error) {
+        onCatchError(error, res);
+    }
+});
