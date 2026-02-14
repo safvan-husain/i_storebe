@@ -920,3 +920,231 @@ export interface ILeadResponse {
 }
 
 
+export const generateLeadExcelReport = asyncHandler(async (req: Request, res: Response) => {
+    try {
+        const ExcelJS = require('exceljs');
+        const { LeadExcelReportFilterSchema } = require('./validations');
+
+        const filter = LeadExcelReportFilterSchema.parse(req.body);
+
+        // Build the query based on filters
+        const matchStage: any = {};
+
+        // Date range filter
+        if (filter.startDate && filter.endDate) {
+            matchStage.createdAt = {
+                $gte: filter.startDate,
+                $lte: filter.endDate
+            };
+        } else if (filter.startDate) {
+            matchStage.createdAt = { $gte: filter.startDate };
+        } else if (filter.endDate) {
+            matchStage.createdAt = { $lte: filter.endDate };
+        }
+
+        // Include/Exclude lead status
+        if (filter.includeLeadStatus && filter.includeLeadStatus.length > 0) {
+            matchStage.enquireStatus = { $in: filter.includeLeadStatus };
+        }
+        if (filter.excludeStatus && filter.excludeStatus.length > 0) {
+            if (matchStage.enquireStatus) {
+                matchStage.enquireStatus.$nin = filter.excludeStatus;
+            } else {
+                matchStage.enquireStatus = { $nin: filter.excludeStatus };
+            }
+        }
+
+        // Nearest stores filter
+        if (filter.nearestStores && filter.nearestStores.length > 0) {
+            matchStage.nearestStore = { $in: filter.nearestStores };
+        }
+
+        // Managers filter
+        if (filter.managers && filter.managers.length > 0) {
+            matchStage.manager = { $in: filter.managers.map((id: string) => new Types.ObjectId(id)) };
+        }
+
+        // Created by filter
+        if (filter.createdBy && filter.createdBy.length > 0) {
+            matchStage.createdBy = { $in: filter.createdBy.map((id: string) => new Types.ObjectId(id)) };
+        }
+
+        // Managed by filter (handledBy)
+        if (filter.managedBy && filter.managedBy.length > 0) {
+            matchStage.handledBy = { $in: filter.managedBy.map((id: string) => new Types.ObjectId(id)) };
+        }
+
+        // Purposes filter
+        if (filter.purposes && filter.purposes.length > 0) {
+            matchStage.purpose = { $in: filter.purposes };
+        }
+
+        // Call status filter
+        if (filter.callStatus && filter.callStatus.length > 0) {
+            matchStage.callStatus = { $in: filter.callStatus };
+        }
+
+        // Source filter
+        if (filter.source && filter.source.length > 0) {
+            matchStage.source = { $in: filter.source };
+        }
+
+        // Build aggregation pipeline
+        const pipeline: any[] = [];
+
+        if (Object.keys(matchStage).length > 0) {
+            pipeline.push({ $match: matchStage });
+        }
+
+        pipeline.push(
+            { $sort: { createdAt: -1 } },
+            {
+                $lookup: {
+                    from: 'users',
+                    localField: 'handledBy',
+                    foreignField: '_id',
+                    as: 'handledBy'
+                }
+            },
+            {
+                $lookup: {
+                    from: 'users',
+                    localField: 'createdBy',
+                    foreignField: '_id',
+                    as: 'createdBy'
+                }
+            },
+            {
+                $lookup: {
+                    from: 'users',
+                    localField: 'manager',
+                    foreignField: '_id',
+                    as: 'manager'
+                }
+            },
+            {
+                $lookup: {
+                    from: 'customers',
+                    localField: 'customer',
+                    foreignField: '_id',
+                    as: 'customer'
+                }
+            },
+            {
+                $unwind: {
+                    path: '$handledBy',
+                    preserveNullAndEmptyArrays: true
+                }
+            },
+            {
+                $unwind: {
+                    path: '$createdBy',
+                    preserveNullAndEmptyArrays: true
+                }
+            },
+            {
+                $unwind: {
+                    path: '$manager',
+                    preserveNullAndEmptyArrays: true
+                }
+            },
+            {
+                $unwind: {
+                    path: '$customer',
+                    preserveNullAndEmptyArrays: true
+                }
+            }
+        );
+
+        // Execute the query
+        const leads = await Lead.aggregate(pipeline);
+
+        // Create Excel workbook
+        const workbook = new ExcelJS.Workbook();
+        const worksheet = workbook.addWorksheet('Lead Report');
+
+        // Define columns
+        worksheet.columns = [
+            { header: 'Lead ID', key: '_id', width: 25 },
+            { header: 'Source', key: 'source', width: 15 },
+            { header: 'Enquire Status', key: 'enquireStatus', width: 20 },
+            { header: 'Purpose', key: 'purpose', width: 15 },
+            { header: 'Call Status', key: 'callStatus', width: 20 },
+            { header: 'Type', key: 'type', width: 10 },
+            { header: 'Product', key: 'product', width: 20 },
+            { header: 'Nearest Store', key: 'nearestStore', width: 20 },
+            { header: 'Customer Name', key: 'customerName', width: 25 },
+            { header: 'Customer Phone', key: 'customerPhone', width: 15 },
+            { header: 'Customer Email', key: 'customerEmail', width: 30 },
+            { header: 'Customer Address', key: 'customerAddress', width: 40 },
+            { header: 'Customer DOB', key: 'customerDob', width: 15 },
+            { header: 'Handled By', key: 'handledBy', width: 20 },
+            { header: 'Created By', key: 'createdBy', width: 20 },
+            { header: 'Manager', key: 'manager', width: 20 },
+            { header: 'Created Date (IST)', key: 'createdAtIST', width: 25 },
+            { header: 'Created Date (UTC)', key: 'createdAtUTC', width: 25 },
+            { header: 'Last Modified (IST)', key: 'updatedAtIST', width: 25 },
+            { header: 'Last Modified (UTC)', key: 'updatedAtUTC', width: 25 },
+        ];
+
+        // Style the header row
+        worksheet.getRow(1).font = { bold: true };
+        worksheet.getRow(1).fill = {
+            type: 'pattern',
+            pattern: 'solid',
+            fgColor: { argb: 'FFD3D3D3' }
+        };
+
+        // Helper function to format dates
+        const formatDateIST = (date: Date) => {
+            const istDate = new Date(date.getTime() + (5.5 * 60 * 60 * 1000));
+            return istDate.toISOString().replace('T', ' ').substring(0, 19);
+        };
+
+        const formatDateUTC = (date: Date) => {
+            return date.toISOString().replace('T', ' ').substring(0, 19);
+        };
+
+        // Add data rows
+        leads.forEach((lead: any) => {
+            worksheet.addRow({
+                _id: lead._id.toString(),
+                source: lead.source || '',
+                enquireStatus: lead.enquireStatus || '',
+                purpose: lead.purpose || '',
+                callStatus: lead.callStatus || '',
+                type: lead.type || '',
+                product: lead.product || '',
+                nearestStore: lead.nearestStore || '',
+                customerName: lead.customer?.name || '',
+                customerPhone: lead.customer?.phone || '',
+                customerEmail: lead.customer?.email || '',
+                customerAddress: lead.customer?.address || '',
+                customerDob: lead.customer?.dob ? new Date(lead.customer.dob).toISOString().split('T')[0] : '',
+                handledBy: lead.handledBy?.username || '',
+                createdBy: lead.createdBy?.username || '',
+                manager: lead.manager?.username || '',
+                createdAtIST: formatDateIST(lead.createdAt),
+                createdAtUTC: formatDateUTC(lead.createdAt),
+                updatedAtIST: lead.updatedAt ? formatDateIST(lead.updatedAt) : '',
+                updatedAtUTC: lead.updatedAt ? formatDateUTC(lead.updatedAt) : '',
+            });
+        });
+
+        // Set response headers
+        res.setHeader(
+            'Content-Type',
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        );
+        res.setHeader(
+            'Content-Disposition',
+            `attachment; filename=lead-report-${new Date().getTime()}.xlsx`
+        );
+
+        // Write to response stream
+        await workbook.xlsx.write(res);
+        res.end();
+    } catch (error) {
+        onCatchError(error, res);
+    }
+});
