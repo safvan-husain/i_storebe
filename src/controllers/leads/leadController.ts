@@ -187,11 +187,11 @@ export const updateLeadStatus = asyncHandler(async (req: Request, res: TypedResp
         }
 
         if (requestedUser.privilege !== 'admin' && !requestedUser._id.equals(lead.handledBy._id)) {
-            if(updateData.enquireStatus && updateData.enquireStatus !== lead.enquireStatus) {
-            //the status can only changed by the handler or admin.
-            res.status(403).json({ message: "You can't change status since you are not handling this lead" });
-            return;
-            } 
+            if (updateData.enquireStatus && updateData.enquireStatus !== lead.enquireStatus) {
+                //the status can only changed by the handler or admin.
+                res.status(403).json({ message: "You can't change status since you are not handling this lead" });
+                return;
+            }
         }
 
         let result = await internalLeadStatusUpdate({
@@ -926,6 +926,10 @@ export const generateLeadExcelReport = asyncHandler(async (req: Request, res: Re
 
         const filter = LeadExcelReportFilterSchema.parse(req.body);
 
+        // Debug logs for date filters
+        console.log('[Excel Report] Raw body:', { startDate: req.body.startDate, endDate: req.body.endDate });
+        console.log('[Excel Report] Parsed dates:', { startDate: filter.startDate, endDate: filter.endDate });
+
         // Build the query based on filters
         const matchStage: any = {};
 
@@ -940,6 +944,8 @@ export const generateLeadExcelReport = asyncHandler(async (req: Request, res: Re
         } else if (filter.endDate) {
             matchStage.createdAt = { $lte: filter.endDate };
         }
+
+        console.log('[Excel Report] Match stage:', JSON.stringify(matchStage, null, 2));
 
         // Include/Exclude lead status
         if (filter.includeLeadStatus && filter.includeLeadStatus.length > 0) {
