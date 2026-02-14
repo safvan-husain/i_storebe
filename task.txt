@@ -1,3 +1,27 @@
-attendance mark by photo, calculate salary.
-some form on google docs. manager form. it should be done before checkout.
-report staff.
+. Keep our current Express + Zod, then generate OpenAPI from your Zod schemas, 
+
+* **@asteasolutions/zod-to-openapi**: annotate Zod, register routes, generate a doc, serve with Swagger UI:
+
+  ```ts
+  import { z } from 'zod';
+  import swaggerUi from 'swagger-ui-express';
+  import { OpenAPIRegistry, OpenApiGeneratorV3, extendZodWithOpenApi } from '@asteasolutions/zod-to-openapi';
+  extendZodWithOpenApi(z);
+
+  const registry = new OpenAPIRegistry();
+  const User = registry.register('User', z.object({ id: z.string(), name: z.string() }));
+  registry.registerPath({
+    method: 'get',
+    path: '/users/{id}',
+    request: { params: z.object({ id: z.string() }) },
+    responses: { 200: { description: 'OK', content: { 'application/json': { schema: User }}}}
+  });
+
+  const spec = new OpenApiGeneratorV3(registry.definitions).generateDocument({
+    openapi: '3.0.0', info: { title: 'API', version: '1.0.0' }
+  });
+  app.use('/docs', swaggerUi.serve, swaggerUi.setup(spec));
+  ```
+
+  Note: if you’re on Zod v3, pin `@asteasolutions/zod-to-openapi@7.3.4`; newer versions target Zod v4. ([GitHub][2])
+

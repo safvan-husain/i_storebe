@@ -16,6 +16,7 @@ module.exports = {
       // error_file: 'logs/err.log',
       // out_file: 'logs/out.log',
       time: true,
+      env_file: '.env'
     },
   ],
 };

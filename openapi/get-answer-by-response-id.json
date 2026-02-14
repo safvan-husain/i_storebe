@@ -1,0 +1,294 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "i-Store API",
+    "version": "1.0.0",
+    "description": "Extracted GET /custom-reports/{id}/responses/{responseId} and referenced components"
+  },
+  "paths": {
+    "/custom-reports/{id}/responses/{responseId}": {
+      "get": {
+        "summary": "Retrieve a submitted response with resolved answers",
+        "tags": [
+          "Custom Reports"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Custom report identifier"
+            },
+            "required": true,
+            "description": "Custom report identifier",
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Response identifier"
+            },
+            "required": true,
+            "description": "Response identifier",
+            "name": "responseId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Response details",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomReportViewResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "servers": [
+    {
+      "url": "/api"
+    }
+  ],
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT"
+      }
+    },
+    "schemas": {
+      "CustomReportViewResponse": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "reportId": {
+            "type": "string"
+          },
+          "version": {
+            "type": "integer"
+          },
+          "respondentId": {
+            "type": "string"
+          },
+          "respondentName": {
+            "type": "string",
+            "nullable": true
+          },
+          "submittedAt": {
+            "type": "integer"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "questionId": {
+                      "type": "string"
+                    },
+                    "query": {
+                      "type": "string"
+                    },
+                    "required": {
+                      "type": "boolean"
+                    },
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "textField"
+                      ]
+                    },
+                    "answer": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "questionId",
+                    "query",
+                    "kind",
+                    "answer"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "questionId": {
+                      "type": "string"
+                    },
+                    "query": {
+                      "type": "string"
+                    },
+                    "required": {
+                      "type": "boolean"
+                    },
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "numberField"
+                      ]
+                    },
+                    "answer": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "questionId",
+                    "query",
+                    "kind",
+                    "answer"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "questionId": {
+                      "type": "string"
+                    },
+                    "query": {
+                      "type": "string"
+                    },
+                    "required": {
+                      "type": "boolean"
+                    },
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "choice"
+                      ]
+                    },
+                    "answer": {
+                      "type": "object",
+                      "properties": {
+                        "options": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "optionId": {
+                                "type": "string"
+                              },
+                              "label": {
+                                "type": "string"
+                              },
+                              "value": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "optionId",
+                              "label",
+                              "value"
+                            ]
+                          }
+                        },
+                        "otherText": {
+                          "type": "string"
+                        },
+                        "otherNumber": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "options"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "questionId",
+                    "query",
+                    "kind",
+                    "answer"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "questionId": {
+                      "type": "string"
+                    },
+                    "query": {
+                      "type": "string"
+                    },
+                    "required": {
+                      "type": "boolean"
+                    },
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "choiceMultiSelect"
+                      ]
+                    },
+                    "answer": {
+                      "type": "object",
+                      "properties": {
+                        "options": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "optionId": {
+                                "type": "string"
+                              },
+                              "label": {
+                                "type": "string"
+                              },
+                              "value": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "optionId",
+                              "label",
+                              "value"
+                            ]
+                          }
+                        },
+                        "otherText": {
+                          "type": "string"
+                        },
+                        "otherNumber": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "options"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "questionId",
+                    "query",
+                    "kind",
+                    "answer"
+                  ]
+                }
+              ]
+            }
+          }
+        },
+        "required": [
+          "id",
+          "reportId",
+          "version",
+          "respondentId",
+          "respondentName",
+          "items"
+        ]
+      }
+    }
+  }
+}

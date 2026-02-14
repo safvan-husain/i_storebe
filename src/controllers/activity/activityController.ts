@@ -1,17 +1,18 @@
-import {Request, Response} from 'express';
+import { Request, Response } from 'express';
 import asyncHandler from 'express-async-handler';
-import {onCatchError} from "../../middleware/error";
-import {activityFilterSchema, createNoteSchema, statsSchema} from "./validation";
-import Activity, {IActivity} from '../../models/Activity';
-import {FilterQuery, PipelineStage, Types} from "mongoose";
-import User, {IUser} from "../../models/User";
-import {z} from "zod";
-import {dateFiltersSchema, ObjectIdSchema} from "../../common/types";
-import {TypedResponse} from "../../common/interface";
+import { onCatchError } from "../../middleware/error";
+import { activityFilterSchema, createNoteSchema, statsSchema } from "./validation";
+import Activity, { IActivity } from '../../models/Activity';
+import { FilterQuery, PipelineStage, Types } from "mongoose";
+import User, { IUser } from "../../models/User";
+import { z } from "zod";
+import { dateFiltersSchema, ObjectIdSchema } from "../../common/types";
+import { TypedResponse } from "../../common/interface";
 import puppeteer from 'puppeteer';
-import Task, {ITask} from "../../models/Task";
-import Lead, {ILead} from "../../models/Lead";
-import {runtimeValidation} from "../../utils/validation";
+import Task, { ITask } from "../../models/Task";
+import Lead, { ILead } from "../../models/Lead";
+import Target, { ITarget } from "../../models/Target";
+import { runtimeValidation } from "../../utils/validation";
 
 export const getActivity = asyncHandler(
     async (req: Request, res: Response) => {
@@ -21,24 +22,24 @@ export const getActivity = asyncHandler(
 
             //if lead is provided, ignore other filters.
             if (reqFilter.lead) {
-                query = {lead: reqFilter.lead};
+                query = { lead: reqFilter.lead };
             } else {
-                if (reqFilter.manager?.length ?? 0) query.activator = {$in: reqFilter.manager};
-                if (reqFilter.staff?.length ?? 0) query.activator = {$in: reqFilter.staff};
+                if (reqFilter.manager?.length ?? 0) query.activator = { $in: reqFilter.manager };
+                if (reqFilter.staff?.length ?? 0) query.activator = { $in: reqFilter.staff };
                 if (reqFilter.startDate && reqFilter.endDate) {
                     query.createdAt = {
                         $gte: reqFilter.startDate,
                         $lte: reqFilter.endDate
                     };
                 } else if (reqFilter.startDate) {
-                    query.createdAt = {$gte: query.startDate};
+                    query.createdAt = { $gte: query.startDate };
                 } else if (reqFilter.endDate) {
-                    query.createdAt = {$lte: query.endDate};
+                    query.createdAt = { $lte: query.endDate };
                 }
 
                 if (req.privilege === 'manager' && (query.staff?.length ?? 0) < 1) {
-                    const staffs = await User.find({manager: req.userId}, {_id: true}).lean();
-                    query.activator = {$in: [...staffs.map(e => e._id), req.userId]};
+                    const staffs = await User.find({ manager: req.userId }, { _id: true }).lean();
+                    query.activator = { $in: [...staffs.map(e => e._id), req.userId] };
                 }
 
                 //when requested by staff only provide his activities.
@@ -46,11 +47,11 @@ export const getActivity = asyncHandler(
                     query.activator = req.userId;
                 }
             }
-            if (reqFilter.activityType?.length ?? 0) query.type =  { $in: reqFilter.activityType };
+            if (reqFilter.activityType?.length ?? 0) query.type = { $in: reqFilter.activityType };
             console.log("query acit", query)
             const activities = await Activity
-                .find(query, {updatedAt: false, __v: false})
-                .sort({createdAt: -1})
+                .find(query, { updatedAt: false, __v: false })
+                .sort({ createdAt: -1 })
                 .skip(reqFilter.skip)
                 .limit(reqFilter.limit)
                 .populate<{
@@ -84,20 +85,20 @@ export const getActivity = asyncHandler(
                 ])
                 .lean();
             res.status(200).json(activities.map(e => {
-                        return ({
-                                ...e,
-                                createdAt: e.createdAt.getTime(),
-                                activator: e.activator?.username ?? "unknown",
-                                task: e.task ? {
-                                    ...e.task,
-                                    due: e.task.due.getTime(),
-                                    createdAt: e.task.createdAt?.getTime() ?? 0,
-                                    assigned: e.task.assigned?.username ?? "Unknown",
-                                } : undefined
-                            }
-                        );
-                    }
-                    ,),
+                return ({
+                    ...e,
+                    createdAt: e.createdAt.getTime(),
+                    activator: e.activator?.username ?? "unknown",
+                    task: e.task ? {
+                        ...e.task,
+                        due: e.task.due.getTime(),
+                        createdAt: e.task.createdAt?.getTime() ?? 0,
+                        assigned: e.task.assigned?.username ?? "Unknown",
+                    } : undefined
+                }
+                );
+            }
+                ,),
             );
         } catch (e) {
             console.log(e);
@@ -115,7 +116,7 @@ export const createNote = asyncHandler(
                 lead: new Types.ObjectId(data.leadId),
                 type: 'note_added',
                 optionalMessage: data.note,
-            })).populate<{ activator?: { username: string }}>('activator', 'username');
+            })).populate<{ activator?: { username: string } }>('activator', 'username');
             activity = activity.toObject();
             res.status(200).json({
                 ...activity,
@@ -133,20 +134,22 @@ const requestSchema = z.object({
     staff: ObjectIdSchema.optional()
 }).merge(dateFiltersSchema.partial()).refine(e => {
     return !(e.manager && e.staff);
-}, { message: "Should not pass both manager and staff"})
+}, { message: "Should not pass both manager and staff" })
 
 export const getStaffReport = async (req: Request, res: TypedResponse<any>) => {
     try {
         const query = requestSchema.parse(req.query);
 
         const adminIds = await User
-            .find({ privilege: 'admin' }, { _id: true})
+            .find({ privilege: 'admin' }, { _id: true })
             .lean().then(e => e.map(e => e._id));
 
         let pipeline: PipelineStage[] = [];
 
         const matchQuery: FilterQuery<IActivity> = {};
-        let staffs: {$in?: Types.ObjectId[], $nin?:  Types.ObjectId[]} = {};
+        let staffs: { $in?: Types.ObjectId[], $nin?: Types.ObjectId[] } = {};
+        //username will play a key role, since it is used to write to the pdf, 
+        //all the usernames will be in the report even if they do not have data.
         let usernames: string[] = [];
 
         //if no manager or staff, specified, group them by manager.
@@ -167,81 +170,122 @@ export const getStaffReport = async (req: Request, res: TypedResponse<any>) => {
         }
 
         if (query.manager) {
-            const result = await User
-                .find({ manager: query.manager }, { _id: 1, username: 1 })
+            // First verify the manager is active
+            const manager = await User
+                .findOne({ _id: query.manager, isActive: true }, { username: true })
                 .lean();
 
-            const staffsIds = result.map(e => e._id);
-            const allEmployeeUnderTheBranch = [...staffsIds, Types.ObjectId.createFromHexString(query.manager)];
-            staffs = {$in: allEmployeeUnderTheBranch};
-            managerName = await User
-                .findById(query.manager, {username: true})
-                .lean().then(e => e?.username ?? "Unknown");
+            if (manager) {
+                const result = await User
+                    .find({ manager: query.manager, isActive: true }, { _id: 1, username: 1 })
+                    .lean();
+
+                const staffsIds = result.map(e => e._id);
+                const allEmployeeUnderTheBranch = [...staffsIds, Types.ObjectId.createFromHexString(query.manager)];
+                staffs = { $in: allEmployeeUnderTheBranch };
+                managerName = manager.username;
+            } else {
+                // If manager is not active, return empty result
+                staffs = { $in: [] };
+                managerName = "Inactive Manager";
+            }
         }
 
         if (query.staff) {
-            staffs = {$in: [Types.ObjectId.createFromHexString(query.staff)]}
+            // Verify the staff is active before including them
+            const staffUser = await User.findOne({
+                _id: query.staff,
+                isActive: true
+            }, { _id: 1 }).lean();
+
+            if (staffUser) {
+                staffs = { $in: [Types.ObjectId.createFromHexString(query.staff)] }
+            } else {
+                // If staff is not active, return empty result
+                staffs = { $in: [] }
+            }
         }
 
         if (shouldGroupByManager) {
             //exclude admin activities. since we don't specify whom activity.
-            staffs = {$nin: adminIds}
+            staffs = { $nin: adminIds }
 
-        }
-
-        if(staffs) {
-            matchQuery.activator = staffs;
-            //taking usernames to map at last, so user with no activity will still be shown
-            let query: FilterQuery<IUser> = {}
-            query._id = staffs;
-            if(shouldGroupByManager) {
-                query.privilege = 'manager';
-            }
-            usernames = await User.find(query, { username: true })
+            // For shouldGroupByManager, get all active managers for usernames
+            usernames = await User.find({
+                privilege: 'manager',
+                isActive: true,
+                _id: { $nin: adminIds }
+            }, { username: true })
                 .lean().then(e => e.map(e => e.username));
         }
-        if(createdAt) {
+
+        if (staffs && !shouldGroupByManager) {
+            matchQuery.activator = staffs;
+            //taking usernames to map at last, so user with no activity will still be shown
+            let userQuery: FilterQuery<IUser> = {}
+            userQuery._id = staffs;
+            userQuery.isActive = true;
+            usernames = await User.find(userQuery, { username: true })
+                .lean().then(e => e.map(e => e.username));
+        } else if (!shouldGroupByManager) {
+            // If staffs is set but we're not grouping by manager, set the match query
+            matchQuery.activator = staffs;
+        }
+
+        // Set activator filter for shouldGroupByManager case
+        if (shouldGroupByManager) {
+            matchQuery.activator = staffs;
+        }
+        if (createdAt) {
             matchQuery.createdAt = createdAt;
         }
 
-        pipeline.push({ $match: matchQuery});
+        pipeline.push({ $match: matchQuery });
 
         pipeline.push({
-                $lookup: {
-                    from: 'users',
-                    localField: 'activator',
-                    foreignField: '_id',
-                    pipeline: [
-                        {
-                            $lookup: {
-                                from: 'users',
-                                localField: 'manager',
-                                foreignField: '_id',
-                                as: 'manager'
-                            }
-                        },
-                        {
-                            $unwind: {
-                                path: "$manager",
-                                preserveNullAndEmptyArrays: true
-                            }
-                        },
-                        {
-                            $project: {
-                                _id: 0,
-                                manager: {$ifNull: ["$manager.username", "$username"]},
-                                username: 1
-                            }
+            $lookup: {
+                from: 'users',
+                localField: 'activator',
+                foreignField: '_id',
+                pipeline: [
+                    {
+                        $match: { isActive: true }
+                    },
+                    {
+                        $lookup: {
+                            from: 'users',
+                            localField: 'manager',
+                            foreignField: '_id',
+                            pipeline: [
+                                {
+                                    $match: { isActive: true }
+                                }
+                            ],
+                            as: 'manager'
                         }
-                    ],
-                    as: 'activator'
-                }
-            }, {
-                $unwind: "$activator"
-            },
+                    },
+                    {
+                        $unwind: {
+                            path: "$manager",
+                            preserveNullAndEmptyArrays: true
+                        }
+                    },
+                    {
+                        $project: {
+                            _id: 0,
+                            manager: { $ifNull: ["$manager.username", "$username"] },
+                            username: 1
+                        }
+                    }
+                ],
+                as: 'activator'
+            }
+        }, {
+            $unwind: "$activator"
+        },
             {
                 $match: {
-                    "activator.username": {$exists: true}
+                    "activator.username": { $exists: true }
                 }
             },
         );
@@ -256,6 +300,8 @@ export const getStaffReport = async (req: Request, res: TypedResponse<any>) => {
                 lead_added: { $sum: { $cond: [{ $eq: ["$type", "lead_added"] }, 1, 0] } },
                 note_added: { $sum: { $cond: [{ $eq: ["$type", "note_added"] }, 1, 0] } },
                 followup_added: { $sum: { $cond: [{ $eq: ["$type", "followup_added"] }, 1, 0] } },
+                made_won: { $sum: { $cond: [{ $eq: ["$type", "made_won"] }, 1, 0] } },
+                removed_won: { $sum: { $cond: [{ $eq: ["$type", "removed_won"] }, 1, 0] } },
                 status_updated: { $sum: { $cond: [{ $eq: ["$type", "status_updated"] }, 1, 0] } },
                 completed: { $sum: { $cond: [{ $eq: ["$type", "completed"] }, 1, 0] } },
                 call_status_updated: { $sum: { $cond: [{ $eq: ["$type", "call_status_updated"] }, 1, 0] } },
@@ -265,13 +311,14 @@ export const getStaffReport = async (req: Request, res: TypedResponse<any>) => {
 
         //if no specific manager or staff provided, show all managers, summed of their staff
         if (shouldGroupByManager) {
-            console.log("neither manager nor staff");
             pipeline.push({
                 $group: {
                     _id: "$manager",
                     task_added: { $sum: "$task_added" },
                     lead_added: { $sum: "$lead_added" },
                     followup_added: { $sum: "$followup_added" },
+                    made_won: { $sum: "$made_won" },
+                    removed_won: { $sum: "$removed_won" },
                     status_updated: { $sum: "$status_updated" },
                     call_status_updated: { $sum: "$call_status_updated" },
                 }
@@ -280,31 +327,32 @@ export const getStaffReport = async (req: Request, res: TypedResponse<any>) => {
 
         const leadDbQuery: FilterQuery<ILead> = {};
 
-        if(createdAt) {
+        if (createdAt) {
             leadDbQuery.createdAt = createdAt;
         }
 
-        if(staffs) {
+        if (staffs) {
             leadDbQuery.createdBy = staffs;
         }
 
-        const leadStatus: {
+        let leadStatus: {
             _id: string;
             manager: string;
             total_leads: number;
             is_won: number
             is_visited: number;
         }[] = await getLeadStatusByHandler(leadDbQuery, shouldGroupByManager);
+        // Note: Do not override won from Target/Lead; will compute from Activity
 
         let taskDbQuery: FilterQuery<ITask> = {
             isCompleted: false
         };
 
-        if(createdAt) {
+        if (createdAt) {
             taskDbQuery.createdAt = createdAt;
         }
 
-        if(staffs) {
+        if (staffs) {
             taskDbQuery.assigned = staffs;
         }
 
@@ -312,6 +360,7 @@ export const getStaffReport = async (req: Request, res: TypedResponse<any>) => {
             _id: string;
             manager: string;
             pending_tasks: number;
+            overdue_tasks: number;
         }[] = await getPendingTasksByUser(taskDbQuery, shouldGroupByManager);
 
         const data = await Activity.aggregate(pipeline);
@@ -337,7 +386,9 @@ export const getStaffReport = async (req: Request, res: TypedResponse<any>) => {
 
         const validData = runtimeValidation(statsSchema, newd.map(e => ({
             ...e,
-            task_added: (e.task_added ?? 0) + (e.followup_added ?? 0)
+            task_added: (e.task_added ?? 0) + (e.followup_added ?? 0),
+            // Compute won from activity: made_won - removed_won
+            is_won: (e.made_won ?? 0) - (e.removed_won ?? 0)
         })));
 
         const pdfBuffer = await createPdf(generateTableHtml(validData, query.startDate ?? new Date(0), query.endDate ?? new Date(), managerName));
@@ -356,7 +407,7 @@ export const getStaffReport = async (req: Request, res: TypedResponse<any>) => {
 const createPdf = async (html: string) => {
     const browser = await puppeteer.launch();
     const page = await browser.newPage();
-    await page.setContent('<html><body>' + html + '</body></html>', {waitUntil: 'load'});
+    await page.setContent('<html><body>' + html + '</body></html>', { waitUntil: 'load' });
     const bdfBuffer = await page.pdf({
         // path: 'output.pdf',
         format: 'A4',
@@ -367,19 +418,19 @@ const createPdf = async (html: string) => {
 
 const generateTableHtml = (items: any, start: Date, end: Date, manager?: string) => {
     const headers = [
-        "Username", "Tasks Added", "Leads Added",
+        "Username", "Tasks Added", "Leads Added", "Overdue Task",
         "Status Updates", "Won", "Visit", "Pending Task"
     ];
 
     const keys = [
-        "_id", "task_added", "lead_added",
+        "_id", "task_added", "lead_added", "overdue_tasks",
         "status_updated",
         "is_won", 'is_visited', 'pending_tasks'
     ];
 
     const rows = items.map((item: any) => {
-            return `<tr>${keys.map(k => `<td>${item[k]}</td>`).join('')}</tr>`;
-        }
+        return `<tr>${keys.map(k => `<td>${item[k]}</td>`).join('')}</tr>`;
+    }
     ).join('');
 
     const formattedStart = start.toLocaleDateString();
@@ -492,10 +543,18 @@ async function getPendingTasksByUser(taskQuery = {}, isManagerBased?: boolean): 
                     foreignField: '_id',
                     pipeline: [
                         {
+                            $match: { isActive: true }
+                        },
+                        {
                             $lookup: {
                                 from: 'users',
                                 localField: 'manager',
                                 foreignField: '_id',
+                                pipeline: [
+                                    {
+                                        $match: { isActive: true }
+                                    }
+                                ],
                                 as: 'manager'
                             }
                         },
@@ -508,7 +567,7 @@ async function getPendingTasksByUser(taskQuery = {}, isManagerBased?: boolean): 
                         {
                             $project: {
                                 _id: 0,
-                                manager: {$ifNull: ["$manager.username", "$username"]},
+                                manager: { $ifNull: ["$manager.username", "$username"] },
                                 username: 1
                             }
                         }
@@ -522,18 +581,28 @@ async function getPendingTasksByUser(taskQuery = {}, isManagerBased?: boolean): 
             {
                 $group: {
                     _id: "$assigned.username",
-                    manager: {$first: "$assigned.manager"},
-                    pending_tasks: {$sum: 1}
+                    manager: { $first: "$assigned.manager" },
+                    pending_tasks: { $sum: 1 },
+                    overdue_tasks: {
+                        $sum: {
+                            $cond: [
+                                { $lt: ["$due", new Date()] },
+                                1,
+                                0
+                            ]
+                        }
+                    }
                 }
             }
-    ];
+        ];
 
-    if(isManagerBased) {
+    if (isManagerBased) {
         pipeline.push({
             $group: {
                 _id: "$manager",
-                manager: {$first: "$manager"},
-                pending_tasks: {$sum: "$pending_tasks"}
+                manager: { $first: "$manager" },
+                pending_tasks: { $sum: "$pending_tasks" },
+                overdue_tasks: { $sum: "$overdue_tasks" }
             }
         })
     }
@@ -541,11 +610,85 @@ async function getPendingTasksByUser(taskQuery = {}, isManagerBased?: boolean): 
     return Task.aggregate(pipeline);
 }
 
+interface WonFromTargetResult {
+    _id: string;
+    manager: string;
+    is_won: number
+}
+
+async function getWonFromTargetByHandler(targetQuery: FilterQuery<ITarget> = {}, isManagerBased?: boolean): Promise<WonFromTargetResult[]> {
+
+    const pipeline: PipelineStage[] = [
+        {
+            $match: targetQuery
+        },
+        {
+            $lookup: {
+                from: 'users',
+                localField: 'assigned',
+                foreignField: '_id',
+                pipeline: [
+                    {
+                        $match: { isActive: true }
+                    },
+                    {
+                        $lookup: {
+                            from: 'users',
+                            localField: 'manager',
+                            foreignField: '_id',
+                            pipeline: [
+                                {
+                                    $match: { isActive: true }
+                                }
+                            ],
+                            as: 'manager'
+                        }
+                    },
+                    {
+                        $unwind: {
+                            path: "$manager",
+                            preserveNullAndEmptyArrays: true
+                        }
+                    },
+                    {
+                        $project: {
+                            _id: 0,
+                            manager: { $ifNull: ["$manager.username", "$username"] },
+                            username: 1
+                        }
+                    }
+                ],
+                as: 'assigned'
+            }
+        },
+        { $unwind: "$assigned" },
+        {
+            $group: {
+                _id: "$assigned.username",
+                manager: { $first: "$assigned.manager" },
+                is_won: { $sum: "$achieved" }
+            }
+        }
+    ];
+
+    if (isManagerBased) {
+        pipeline.push({
+            $group: {
+                _id: "$manager",
+                manager: { $first: "$manager" },
+                is_won: { $sum: "$is_won" }
+            }
+        })
+    }
+
+    return Target.aggregate(pipeline);
+}
+
 interface LeadStatusResult {
     _id: string;
     manager: string;
     total_leads: number;
-    is_won: number;
+    is_won: number
     is_visited: number;
 }
 
@@ -562,10 +705,18 @@ async function getLeadStatusByHandler(leadDbQuery: FilterQuery<ILead>, isManager
                 foreignField: '_id',
                 pipeline: [
                     {
+                        $match: { isActive: true }
+                    },
+                    {
                         $lookup: {
                             from: 'users',
                             localField: 'manager',
                             foreignField: '_id',
+                            pipeline: [
+                                {
+                                    $match: { isActive: true }
+                                }
+                            ],
                             as: 'manager'
                         }
                     },
@@ -578,7 +729,7 @@ async function getLeadStatusByHandler(leadDbQuery: FilterQuery<ILead>, isManager
                     {
                         $project: {
                             _id: 0,
-                            manager: {$ifNull: ["$manager.username", "$username"]},
+                            manager: { $ifNull: ["$manager.username", "$username"] },
                             username: 1
                         }
                     }
@@ -592,10 +743,10 @@ async function getLeadStatusByHandler(leadDbQuery: FilterQuery<ILead>, isManager
         {
             $group: {
                 _id: "$handledBy.username",
-                manager: {$first: "$handledBy.manager"},
-                total_leads: {$sum: 1},
-                is_won: {$sum: {$cond: [{$eq: ["$enquireStatus", "won"]}, 1, 0]}},
-                is_visited: {$sum: {$cond: [{$eq: ["$enquireStatus", "visited"]}, 1, 0]}}
+                manager: { $first: "$handledBy.manager" },
+                total_leads: { $sum: 1 },
+                is_won: { $sum: { $cond: [{ $eq: ["$enquireStatus", "won"] }, 1, 0] } },
+                is_visited: { $sum: { $cond: [{ $eq: ["$enquireStatus", "visit store"] }, 1, 0] } }
             }
         }
     ];
@@ -604,10 +755,10 @@ async function getLeadStatusByHandler(leadDbQuery: FilterQuery<ILead>, isManager
         pipeline.push({
             $group: {
                 _id: "$manager",
-                manager: {$first: "$manager"},
-                total_leads: {$sum: "$total_leads"},
-                is_won: {$sum: "$is_won"},
-                is_visited: {$sum: "$is_visited"}
+                manager: { $first: "$manager" },
+                total_leads: { $sum: "$total_leads" },
+                is_won: { $sum: "$is_won" },
+                is_visited: { $sum: "$is_visited" }
             }
         })
     }

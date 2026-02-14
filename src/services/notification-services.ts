@@ -1,13 +1,13 @@
-import {Request, Response} from "express";
-import {messaging} from 'firebase-admin';
+import { Request, Response } from "express";
+import { messaging } from 'firebase-admin';
 import asyncHandler from "express-async-handler";
-import {paginationSchema} from "../common/types";
-import {TypedResponse} from "../common/interface";
-import {Notification} from "../models/Notification";
-import User, {IUser} from "../models/User";
-import {ILead} from "../models/Lead";
-import {ILeadResponse} from "../controllers/leads/leadController";
-import {ICustomer} from "../models/Customer";
+import { paginationSchema } from "../common/types";
+import { TypedResponse } from "../common/interface";
+import { Notification } from "../models/Notification";
+import User, { IUser } from "../models/User";
+import { ILead } from "../models/Lead";
+import { ILeadResponse } from "../controllers/leads/leadController";
+import { ICustomer } from "../models/Customer";
 
 export const getNotifications = asyncHandler(
     async (req: Request, res: TypedResponse<{
@@ -17,11 +17,11 @@ export const getNotifications = asyncHandler(
         createdAt: number
     }[]>) => {
         try {
-            const {skip, limit} = paginationSchema.parse(req.query);
+            const { skip, limit } = paginationSchema.parse(req.query);
 
             const notifications = await Notification
-                .find({assigned: req.userId}, {title: 1, description: 1, lead: 1, createdAt: 1})
-                .sort({createdAt: -1})
+                .find({ assigned: req.userId }, { title: 1, description: 1, lead: 1, createdAt: 1 })
+                .sort({ createdAt: -1 })
                 .skip(skip).limit(limit)
                 .populate({
                     path: 'lead',
@@ -67,7 +67,7 @@ export const getNotifications = asyncHandler(
             }));
         } catch (error) {
             console.log("error ar getNotification", error);
-            res.status(500).json({message: "Internal server error"});
+            res.status(500).json({ message: "Internal server error" });
         }
     });
 
@@ -81,24 +81,30 @@ export const createNotificationForUsers =
             lead,
             assigned
         });
-        sendPushNotification({title: "You have new lead", body: title, userId: assigned}).catch(e => console.error(e));
+        // Include leadId in push so client can navigate appropriately
+        sendPushNotification({ title: "You have new lead", body: title, userId: assigned, leadId: lead }).catch(e => console.error(e));
     }
 
-export const sendPushNotification = async ({title, body, userId}: {
+export const sendPushNotification = async ({ title, body, userId, taskId, leadId, leaveId, }: {
     title: string,
     body: string,
-    userId: string
+    userId: string,
+    taskId?: string,
+    leadId?: string,
+    leaveId?: string
 }) => {
-    let token = await User.findById(userId, {fcmToken: true}).lean<{ fcmToken?: string }>().then(e => e?.fcmToken);
+    let token = await User.findById(userId, { fcmToken: true }).lean<{ fcmToken?: string }>().then(e => e?.fcmToken);
     if (token) {
+        const data: Record<string, string> = { title, body };
+        if (leadId) data.leadId = leadId;
+        if (taskId) data.taskId = taskId;
+        if (leaveId) data.leaveId = leaveId;
+
         messaging().send({
-            data: {
+            data,
+            notification: {
                 title,
                 body
-            },
-            notification: {
-              title,
-              body
             },
             token,
             apns: {

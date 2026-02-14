@@ -1,0 +1,140 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "i-Store API",
+    "version": "1.0.0",
+    "description": "Extracted POST /custom-reports/{id}/responses and referenced components"
+  },
+  "paths": {
+    "/custom-reports/{id}/responses": {
+      "post": {
+        "summary": "Submit a response for a custom report version",
+        "tags": [
+          "Custom Reports"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Custom report identifier"
+            },
+            "required": true,
+            "description": "Custom report identifier",
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "description": "Answers for a specific custom report version.",
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CustomReportSubmitResponseRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Response submitted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomReportSubmitResponseResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "servers": [
+    {
+      "url": "/api"
+    }
+  ],
+  "components": {
+    "schemas": {
+      "CustomReportSubmitResponseRequest": {
+        "type": "object",
+        "properties": {
+          "version": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "answers": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "questionId": {
+                  "type": "string"
+                },
+                "textValue": {
+                  "type": "string"
+                },
+                "numberValue": {
+                  "type": "number"
+                },
+                "choiceValue": {
+                  "type": "object",
+                  "properties": {
+                    "optionIds": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "minItems": 1
+                    },
+                    "otherText": {
+                      "type": "string"
+                    },
+                    "otherNumber": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "optionIds"
+                  ]
+                }
+              },
+              "required": [
+                "questionId"
+              ]
+            },
+            "minItems": 1
+          }
+        },
+        "required": [
+          "version",
+          "answers"
+        ]
+      },
+      "CustomReportSubmitResponseResponse": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      }
+    },
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT"
+      }
+    }
+  }
+}

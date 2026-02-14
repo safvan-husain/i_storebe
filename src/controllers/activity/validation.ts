@@ -5,7 +5,7 @@ export const activityTypeSchema = z.enum(
     [
         'task_added', 'task_updated', 'lead_added',
         'lead_updated', 'note_added', 'followup_added',
-        'status_updated', 'completed',
+        'status_updated', 'made_won', 'removed_won', 'completed',
         'purpose_updated', 'check_in', 'check_out',
         'lead_transfer', 'call_status_updated', 'dialed'
     ]);
@@ -43,9 +43,13 @@ export const statsSchema = z.object({
     task_added: z.number().default(0),
     lead_added: z.number().default(0),
     status_updated: z.number().default(0),
+    made_won: z.number().default(0),
+    removed_won: z.number().default(0),
     call_status_updated: z.number().default(0),
     total_leads: z.number().default(0),
     is_won: z.number().default(0),
     is_visited: z.number().default(0),
-    pending_tasks: z.number().default(0)
+    pending_tasks: z.number().default(0),
+    overdue_tasks: z.number().default(0)
 });
+

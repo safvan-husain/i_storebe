@@ -3,7 +3,7 @@ import express from 'express';
 import {
   createTask,
   getTasks,
-  // getTaskById,
+  getTaskById,
   // updateTask,
   completeTask, callReports, getTodayTaskStat, getTasksV2, callReports2,
 } from '../controllers/tasks/taskController';
@@ -35,6 +35,9 @@ router.route('/call-reports-v2')
 
 router.route('/today-stat')
     .get(getTodayTaskStat)
+
+router.route('/:id')
+    .get(getTaskById)
 
 // router.route('/:id')
 //   .get(getTaskById)

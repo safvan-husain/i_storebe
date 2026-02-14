@@ -313,6 +313,53 @@ export const getTasksV2 = asyncHandler(async (req: Request, res: TypedResponse<a
     }
 });
 
+// Get a single task by id (v2 shape)
+export const getTaskById = asyncHandler(async (req: Request, res: TypedResponse<any>) => {
+    try {
+        const params = z.object({ id: ObjectIdSchema }).parse(req.params);
+
+        const data = await Task.aggregate([
+            { $match: { _id: Types.ObjectId.createFromHexString(params.id) } },
+            {
+                $lookup: {
+                    from: 'users',
+                    localField: 'assigned',
+                    foreignField: '_id',
+                    as: 'assigned'
+                }
+            },
+            {
+                $unwind: {
+                    path: '$assigned',
+                    preserveNullAndEmptyArrays: true
+                }
+            },
+            {
+                $project: {
+                    _id: 1,
+                    lead: 1,
+                    assigned: { $ifNull: ["$assigned.username", "None"] },
+                    title: 1,
+                    description: 1,
+                    category: 1,
+                    due: { $toLong: "$due" },
+                    createdAt: { $toLong: "$createdAt" },
+                    isCompleted: 1,
+                }
+            }
+        ]);
+
+        if (!data || data.length === 0) {
+            res.status(404).json({ message: 'Task not found' });
+            return;
+        }
+
+        res.status(200).json(data[0]);
+    } catch (error) {
+        onCatchError(error, res);
+    }
+});
+
 export const completeTask = asyncHandler(async (req: Request, res: TypedResponse<{
     newTask?: TaskResponse,
     message: string

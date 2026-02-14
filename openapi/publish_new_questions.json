@@ -1,0 +1,400 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "i-Store API",
+    "version": "1.0.0",
+    "description": "Extracted POST /custom-reports/{id}/publish and referenced components"
+  },
+  "paths": {
+    "/custom-reports/{id}/publish": {
+      "post": {
+        "summary": "Publish a new version of an existing custom report",
+        "tags": [
+          "Custom Reports"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Custom report identifier"
+            },
+            "required": true,
+            "description": "Custom report identifier",
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "description": "Questions that compose the new version. Each publish creates a locked version.",
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CustomReportPublishRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Version published",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomReportPublishResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "servers": [
+    {
+      "url": "/api"
+    }
+  ],
+  "components": {
+    "schemas": {
+      "CustomReportPublishResponse": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "version": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "version"
+        ]
+      },
+      "CustomReportPublishRequest": {
+        "type": "object",
+        "properties": {
+          "questions": {
+            "type": "array",
+            "items": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "index": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "query": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "choice"
+                      ]
+                    },
+                    "helpText": {
+                      "type": "string"
+                    },
+                    "required": {
+                      "type": "boolean",
+                      "default": false
+                    },
+                    "showIf": {
+                      "type": "object",
+                      "properties": {
+                        "questionIndex": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "choiceIndexEquals": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "exists": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "questionIndex"
+                      ]
+                    },
+                    "options": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "label": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "value": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "description": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "label",
+                          "value"
+                        ]
+                      },
+                      "minItems": 1
+                    },
+                    "allowOther": {
+                      "type": "boolean"
+                    },
+                    "otherAnswerType": {
+                      "type": "string",
+                      "enum": [
+                        "textField",
+                        "numberField"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "index",
+                    "query",
+                    "kind",
+                    "options"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "index": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "query": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "choiceMultiSelect"
+                      ]
+                    },
+                    "helpText": {
+                      "type": "string"
+                    },
+                    "required": {
+                      "type": "boolean",
+                      "default": false
+                    },
+                    "showIf": {
+                      "type": "object",
+                      "properties": {
+                        "questionIndex": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "choiceIndexEquals": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "exists": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "questionIndex"
+                      ]
+                    },
+                    "options": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "label": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "value": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "description": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "label",
+                          "value"
+                        ]
+                      },
+                      "minItems": 1
+                    },
+                    "allowOther": {
+                      "type": "boolean"
+                    },
+                    "otherAnswerType": {
+                      "type": "string",
+                      "enum": [
+                        "textField",
+                        "numberField"
+                      ]
+                    },
+                    "minSelect": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "maxSelect": {
+                      "type": "integer",
+                      "minimum": 1
+                    }
+                  },
+                  "required": [
+                    "index",
+                    "query",
+                    "kind",
+                    "options"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "index": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "query": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "textField"
+                      ]
+                    },
+                    "helpText": {
+                      "type": "string"
+                    },
+                    "required": {
+                      "type": "boolean",
+                      "default": false
+                    },
+                    "showIf": {
+                      "type": "object",
+                      "properties": {
+                        "questionIndex": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "choiceIndexEquals": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "exists": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "questionIndex"
+                      ]
+                    },
+                    "placeholder": {
+                      "type": "string"
+                    },
+                    "minLength": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "maxLength": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  },
+                  "required": [
+                    "index",
+                    "query",
+                    "kind"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "index": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "query": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "numberField"
+                      ]
+                    },
+                    "helpText": {
+                      "type": "string"
+                    },
+                    "required": {
+                      "type": "boolean",
+                      "default": false
+                    },
+                    "showIf": {
+                      "type": "object",
+                      "properties": {
+                        "questionIndex": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "choiceIndexEquals": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "exists": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "questionIndex"
+                      ]
+                    },
+                    "min": {
+                      "type": "number"
+                    },
+                    "max": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "index",
+                    "query",
+                    "kind"
+                  ]
+                }
+              ]
+            },
+            "minItems": 1
+          }
+        },
+        "required": [
+          "questions"
+        ]
+      }
+    },
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT"
+      }
+    }
+  }
+}

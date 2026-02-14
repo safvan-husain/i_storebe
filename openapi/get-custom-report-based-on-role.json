@@ -1,0 +1,426 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "i-Store API",
+    "version": "1.0.0",
+    "description": "Extracted GET /custom-reports and referenced components"
+  },
+  "paths": {
+    "/custom-reports": {
+      "get": {
+        "summary": "List reports (latest version only)",
+        "description": "Returns reports available to the requester. Admins receive all published reports. Non-admins receive only reports where both prvilege and SecondPrivileage match the requester. Each item includes only the latest version's questions.",
+        "tags": [
+          "Custom Reports"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of reports",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomReportListResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "servers": [
+    {
+      "url": "/api"
+    }
+  ],
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT"
+      }
+    },
+    "schemas": {
+      "CustomReportListResponse": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            },
+            "description": {
+              "type": "string",
+              "nullable": true
+            },
+            "prvilege": {
+              "type": "string"
+            },
+            "SecondPrivileage": {
+              "type": "string",
+              "nullable": true
+            },
+            "interval": {
+              "type": "object",
+              "nullable": true,
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "daily",
+                    "weekly",
+                    "monthly",
+                    "yearly"
+                  ]
+                },
+                "times": {
+                  "type": "array",
+                  "items": {
+                    "type": "integer"
+                  }
+                }
+              },
+              "required": [
+                "type"
+              ]
+            },
+            "status": {
+              "type": "string",
+              "enum": [
+                "draft",
+                "published",
+                "archived"
+              ]
+            },
+            "version": {
+              "type": "integer"
+            },
+            "questions": {
+              "type": "array",
+              "items": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "questionId": {
+                        "type": "string"
+                      },
+                      "index": {
+                        "type": "integer"
+                      },
+                      "query": {
+                        "type": "string"
+                      },
+                      "kind": {
+                        "type": "string",
+                        "enum": [
+                          "choice"
+                        ]
+                      },
+                      "helpText": {
+                        "type": "string"
+                      },
+                      "required": {
+                        "type": "boolean"
+                      },
+                      "showIf": {
+                        "type": "object",
+                        "properties": {
+                          "questionId": {
+                            "type": "string"
+                          },
+                          "optionIdEquals": {
+                            "type": "string"
+                          },
+                          "exists": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": [
+                          "questionId"
+                        ]
+                      },
+                      "options": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "_id": {
+                              "type": "string"
+                            },
+                            "label": {
+                              "type": "string"
+                            },
+                            "value": {
+                              "type": "string"
+                            },
+                            "description": {
+                              "type": "string"
+                            },
+                            "index": {
+                              "type": "integer"
+                            }
+                          },
+                          "required": [
+                            "_id",
+                            "label",
+                            "value"
+                          ]
+                        }
+                      },
+                      "allowOther": {
+                        "type": "boolean"
+                      },
+                      "otherAnswerType": {
+                        "type": "string",
+                        "enum": [
+                          "textField",
+                          "numberField"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "questionId",
+                      "index",
+                      "query",
+                      "kind",
+                      "options"
+                    ]
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "questionId": {
+                        "type": "string"
+                      },
+                      "index": {
+                        "type": "integer"
+                      },
+                      "query": {
+                        "type": "string"
+                      },
+                      "kind": {
+                        "type": "string",
+                        "enum": [
+                          "choiceMultiSelect"
+                        ]
+                      },
+                      "helpText": {
+                        "type": "string"
+                      },
+                      "required": {
+                        "type": "boolean"
+                      },
+                      "showIf": {
+                        "type": "object",
+                        "properties": {
+                          "questionId": {
+                            "type": "string"
+                          },
+                          "optionIdEquals": {
+                            "type": "string"
+                          },
+                          "exists": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": [
+                          "questionId"
+                        ]
+                      },
+                      "options": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "_id": {
+                              "type": "string"
+                            },
+                            "label": {
+                              "type": "string"
+                            },
+                            "value": {
+                              "type": "string"
+                            },
+                            "description": {
+                              "type": "string"
+                            },
+                            "index": {
+                              "type": "integer"
+                            }
+                          },
+                          "required": [
+                            "_id",
+                            "label",
+                            "value"
+                          ]
+                        }
+                      },
+                      "allowOther": {
+                        "type": "boolean"
+                      },
+                      "otherAnswerType": {
+                        "type": "string",
+                        "enum": [
+                          "textField",
+                          "numberField"
+                        ]
+                      },
+                      "minSelect": {
+                        "type": "integer"
+                      },
+                      "maxSelect": {
+                        "type": "integer"
+                      }
+                    },
+                    "required": [
+                      "questionId",
+                      "index",
+                      "query",
+                      "kind",
+                      "options"
+                    ]
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "questionId": {
+                        "type": "string"
+                      },
+                      "index": {
+                        "type": "integer"
+                      },
+                      "query": {
+                        "type": "string"
+                      },
+                      "kind": {
+                        "type": "string",
+                        "enum": [
+                          "textField"
+                        ]
+                      },
+                      "helpText": {
+                        "type": "string"
+                      },
+                      "required": {
+                        "type": "boolean"
+                      },
+                      "showIf": {
+                        "type": "object",
+                        "properties": {
+                          "questionId": {
+                            "type": "string"
+                          },
+                          "optionIdEquals": {
+                            "type": "string"
+                          },
+                          "exists": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": [
+                          "questionId"
+                        ]
+                      },
+                      "placeholder": {
+                        "type": "string"
+                      },
+                      "minLength": {
+                        "type": "integer"
+                      },
+                      "maxLength": {
+                        "type": "integer"
+                      }
+                    },
+                    "required": [
+                      "questionId",
+                      "index",
+                      "query",
+                      "kind"
+                    ]
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "questionId": {
+                        "type": "string"
+                      },
+                      "index": {
+                        "type": "integer"
+                      },
+                      "query": {
+                        "type": "string"
+                      },
+                      "kind": {
+                        "type": "string",
+                        "enum": [
+                          "numberField"
+                        ]
+                      },
+                      "helpText": {
+                        "type": "string"
+                      },
+                      "required": {
+                        "type": "boolean"
+                      },
+                      "showIf": {
+                        "type": "object",
+                        "properties": {
+                          "questionId": {
+                            "type": "string"
+                          },
+                          "optionIdEquals": {
+                            "type": "string"
+                          },
+                          "exists": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": [
+                          "questionId"
+                        ]
+                      },
+                      "min": {
+                        "type": "number"
+                      },
+                      "max": {
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "questionId",
+                      "index",
+                      "query",
+                      "kind"
+                    ]
+                  }
+                ]
+              }
+            },
+            "publishedAt": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "id",
+            "title",
+            "prvilege",
+            "interval",
+            "status",
+            "version",
+            "questions"
+          ]
+        }
+      }
+    }
+  }
+}

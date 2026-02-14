@@ -153,7 +153,22 @@ export const dateFiltersSchema = z.object({
 // })
 
 export const UserPrivilegeSchema = z.enum(['admin', 'manager', 'staff']);
-export const secondUserPrivilegeSchema = z.enum(['super', 'call-center', 'regular'])
+export const secondUserPrivilegeSchema = z.enum(['super', 'call-center', 'regular', 'accountant', 'technician', 'hr', 'inventory', 'marketing-executive'])
 
 export type UserPrivilege = z.infer<typeof UserPrivilegeSchema>;
 export type SecondUserPrivilege = z.infer<typeof secondUserPrivilegeSchema>;
+
+// ---- Custom Report shared enums/types ----
+export const ReportIntervalSchema = z.enum(['daily', 'weekly', 'monthly', 'yearly']);
+export type ReportInterval = z.infer<typeof ReportIntervalSchema>;
+
+export const QuestionKindSchema = z.enum([
+    'choice',
+    'choiceMultiSelect',
+    'textField',
+    'numberField',
+]);
+export type QuestionKind = z.infer<typeof QuestionKindSchema>;
+
+export const ReportStatusSchema = z.enum(['draft', 'published', 'archived']);
+export type ReportStatus = z.infer<typeof ReportStatusSchema>;

@@ -1,0 +1,238 @@
+import { z } from 'zod';
+import { QuestionKindSchema, ReportIntervalSchema, ReportStatusSchema } from '../common/types';
+import {
+  createReportSchema,
+  publishVersionSchema,
+  submitResponseSchema,
+} from '../controllers/custom-report/validation';
+
+export const reportIntervalResponseSchema = z.object({
+  type: ReportIntervalSchema,
+  times: z.array(z.number().int()).optional(),
+});
+
+export const questionShowIfSchema = z.object({
+  questionId: z.string(),
+  optionIdEquals: z.string().optional(),
+  exists: z.boolean().optional(),
+});
+
+export const choiceOptionResponseSchema = z.object({
+  _id: z.string(),
+  label: z.string(),
+  value: z.string(),
+  description: z.string().optional(),
+  index: z.number().int().optional(),
+});
+
+const baseQuestionResponseSchema = z.object({
+  questionId: z.string(),
+  index: z.number().int(),
+  query: z.string(),
+  kind: QuestionKindSchema,
+  helpText: z.string().optional(),
+  required: z.boolean().optional(),
+  answerPerStaff: z.boolean().optional(),
+  showIf: questionShowIfSchema.optional(),
+});
+
+const choiceQuestionResponseSchema = baseQuestionResponseSchema.extend({
+  kind: z.literal('choice'),
+  options: z.array(choiceOptionResponseSchema),
+  allowOther: z.boolean().optional(),
+  otherAnswerType: z.enum(['textField', 'numberField']).optional(),
+});
+
+const choiceMultiQuestionResponseSchema = baseQuestionResponseSchema.extend({
+  kind: z.literal('choiceMultiSelect'),
+  options: z.array(choiceOptionResponseSchema),
+  allowOther: z.boolean().optional(),
+  otherAnswerType: z.enum(['textField', 'numberField']).optional(),
+  minSelect: z.number().int().optional(),
+  maxSelect: z.number().int().optional(),
+});
+
+const textQuestionResponseSchema = baseQuestionResponseSchema.extend({
+  kind: z.literal('textField'),
+  placeholder: z.string().optional(),
+  minLength: z.number().int().optional(),
+  maxLength: z.number().int().optional(),
+});
+
+const numberQuestionResponseSchema = baseQuestionResponseSchema.extend({
+  kind: z.literal('numberField'),
+  min: z.number().optional(),
+  max: z.number().optional(),
+});
+
+export const questionResponseSchema = z.discriminatedUnion('kind', [
+  choiceQuestionResponseSchema,
+  choiceMultiQuestionResponseSchema,
+  textQuestionResponseSchema,
+  numberQuestionResponseSchema,
+]);
+
+export const latestReportResponseSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  description: z.string().optional().nullable(),
+  prvilege: z.string(),
+  SecondPrivileage: z.string().optional().nullable(),
+  interval: reportIntervalResponseSchema.nullable(),
+  status: ReportStatusSchema,
+  version: z.number().int(),
+  questions: z.array(questionResponseSchema),
+  publishedAt: z.number().int().optional(),
+});
+
+export const listCustomReportsResponseSchema = z.array(latestReportResponseSchema);
+
+export const createCustomReportRequestSchema = createReportSchema;
+
+export const createCustomReportResponseSchema = z.object({
+  id: z.string(),
+});
+
+export const publishCustomReportVersionRequestSchema = publishVersionSchema;
+
+export const publishCustomReportVersionResponseSchema = z.object({
+  id: z.string(),
+  version: z.number().int(),
+});
+
+export const archiveCustomReportResponseSchema = z.object({
+  id: z.string(),
+  status: z.literal('archived'),
+});
+
+const responseAnswerOptionSchema = z.object({
+  optionId: z.string(),
+  label: z.string(),
+  value: z.string(),
+});
+
+const baseResponseItemSchema = z.object({
+  questionId: z.string(),
+  query: z.string(),
+  required: z.boolean().optional(),
+  answerPerStaff: z.boolean().optional(),
+});
+
+const perStaffBaseResponseSchema = z.object({
+  staffId: z.string(),
+  staffName: z.string().nullable(),
+});
+
+const textResponseItemSchema = baseResponseItemSchema.extend({
+  kind: z.literal('textField'),
+  answer: z.string().optional(),
+  perStaffAnswers: z.array(perStaffBaseResponseSchema.extend({ answer: z.string() })).optional(),
+});
+
+const numberResponseItemSchema = baseResponseItemSchema.extend({
+  kind: z.literal('numberField'),
+  answer: z.number().optional(),
+  perStaffAnswers: z.array(perStaffBaseResponseSchema.extend({ answer: z.number() })).optional(),
+});
+
+const choiceAnswerSchema = z.object({
+  options: z.array(responseAnswerOptionSchema),
+  otherText: z.string().optional(),
+  otherNumber: z.number().optional(),
+});
+
+const choiceResponseItemSchema = baseResponseItemSchema.extend({
+  kind: z.literal('choice'),
+  answer: choiceAnswerSchema.optional(),
+  perStaffAnswers: z.array(perStaffBaseResponseSchema.extend({ answer: choiceAnswerSchema })).optional(),
+});
+
+const choiceMultiResponseItemSchema = baseResponseItemSchema.extend({
+  kind: z.literal('choiceMultiSelect'),
+  answer: choiceAnswerSchema.optional(),
+  perStaffAnswers: z.array(perStaffBaseResponseSchema.extend({ answer: choiceAnswerSchema })).optional(),
+});
+
+export const submitCustomReportResponseRequestSchema = submitResponseSchema;
+
+export const submitCustomReportResponseResponseSchema = z.object({
+  id: z.string(),
+});
+
+export const viewCustomReportResponseResponseSchema = z.object({
+  id: z.string(),
+  reportId: z.string(),
+  version: z.number().int(),
+  respondentId: z.string(),
+  respondentName: z.string().nullable(),
+  submittedAt: z.number().int().optional(),
+  items: z.array(
+    z.discriminatedUnion('kind', [
+      textResponseItemSchema,
+      numberResponseItemSchema,
+      choiceResponseItemSchema,
+      choiceMultiResponseItemSchema,
+    ]),
+  ),
+});
+
+export const listCustomReportResponsesRequestSchema = z.object({
+  respondentId: z
+    .string()
+    .describe('Filter to responses created by this user id')
+    .optional(),
+  startDate: z
+    .number()
+    .int()
+    .describe('Filter responses submitted on or after this millisecond timestamp')
+    .optional(),
+  endDate: z
+    .number()
+    .int()
+    .describe('Filter responses submitted on or before this millisecond timestamp')
+    .optional(),
+  skip: z
+    .string()
+    .regex(/^\d+$/, 'Must be a non-negative integer string')
+    .describe('Number of matching responses to skip before returning results (stringified integer)')
+    .optional(),
+  limit: z
+    .string()
+    .regex(/^\d+$/, 'Must be a positive integer string')
+    .describe('Maximum number of responses to return (stringified integer)')
+    .optional(),
+});
+
+export const listCustomReportResponsesResponseSchema = z.object({
+  total: z.number().int(),
+  items: z.array(
+    z.object({
+      id: z.string(),
+      version: z.number().int(),
+      respondentId: z.string(),
+      respondentName: z.string().nullable(),
+      submittedAt: z
+        .number()
+        .int()
+        .describe('Submission time in milliseconds since epoch')
+        .optional(),
+      answersCount: z.number().int().describe('Number of answers stored for the response'),
+    }),
+  ),
+});
+
+export type QuestionShowIfResponse = z.infer<typeof questionShowIfSchema>;
+export type ChoiceOptionResponse = z.infer<typeof choiceOptionResponseSchema>;
+export type CustomReportQuestionResponse = z.infer<typeof questionResponseSchema>;
+export type LatestCustomReportResponse = z.infer<typeof latestReportResponseSchema>;
+export type ListCustomReportsResponse = z.infer<typeof listCustomReportsResponseSchema>;
+export type CreateCustomReportRequest = z.infer<typeof createCustomReportRequestSchema>;
+export type CreateCustomReportResponse = z.infer<typeof createCustomReportResponseSchema>;
+export type PublishCustomReportVersionRequest = z.infer<typeof publishCustomReportVersionRequestSchema>;
+export type PublishCustomReportVersionResponse = z.infer<typeof publishCustomReportVersionResponseSchema>;
+export type ArchiveCustomReportResponse = z.infer<typeof archiveCustomReportResponseSchema>;
+export type SubmitCustomReportResponseRequest = z.infer<typeof submitCustomReportResponseRequestSchema>;
+export type SubmitCustomReportResponseResponse = z.infer<typeof submitCustomReportResponseResponseSchema>;
+export type ViewCustomReportResponseResponse = z.infer<typeof viewCustomReportResponseResponseSchema>;
+export type ListCustomReportResponsesRequest = z.infer<typeof listCustomReportResponsesRequestSchema>;
+export type ListCustomReportResponsesResponse = z.infer<typeof listCustomReportResponsesResponseSchema>;

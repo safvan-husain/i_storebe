@@ -27,6 +27,7 @@ export const startTaskScheduler = () => {
             title: 'Task Reminder',
             body: `Your task "${task.title}" is due now.`,
             userId: user._id.toString(),
+            taskId: task._id.toString(),
           });
         }
       }
@@ -67,4 +68,3 @@ export const startTaskScheduler = () => {
     timezone: "Asia/Kolkata"
   });
 };
-
