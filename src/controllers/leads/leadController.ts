@@ -9,7 +9,7 @@ import {
     EnquireStatusType,
     LeadFilterSchema,
     PurposeType, updateLeadData, UpdateLeadStatus,
-    updateLeadStatusSchema
+    updateLeadStatusSchema, LeadExcelReportFilterSchema
 } from './validations';
 import { onCatchError } from '../../middleware/error';
 import Activity from "../../models/Activity";
@@ -923,7 +923,6 @@ export interface ILeadResponse {
 export const generateLeadExcelReport = asyncHandler(async (req: Request, res: Response) => {
     try {
         const ExcelJS = require('exceljs');
-        const { LeadExcelReportFilterSchema } = require('./validations');
 
         const filter = LeadExcelReportFilterSchema.parse(req.body);
 

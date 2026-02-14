@@ -100,8 +100,8 @@ export const managerWithStaffsSchema = z.object({
 export type ManagerWithStaffs = z.infer<typeof managerWithStaffsSchema>;
 
 export const LeadExcelReportFilterSchema = z.object({
-    startDate: z.string().optional().transform(val => val ? new Date(val) : undefined),
-    endDate: z.string().optional().transform(val => val ? new Date(val) : undefined),
+    startDate: z.number().optional().transform(val => val ? new Date(val) : undefined),
+    endDate: z.number().optional().transform(val => val ? new Date(val) : undefined),
     includeLeadStatus: z.array(EnquireStatus).optional(),
     excludeStatus: z.array(EnquireStatus).optional(),
     nearestStores: z.array(z.string()).optional(),
