@@ -1,11 +1,11 @@
-import {z} from 'zod';
-import {ObjectIdSchema, paginationSchema, optionalDateQueryFiltersSchema} from "../../common/types";
+import { z } from 'zod';
+import { ObjectIdSchema, paginationSchema, optionalDateQueryFiltersSchema } from "../../common/types";
 
 export const EnquireSource = z.enum(['call', 'facebook', 'instagram', 'previous customer', 'wabis', 'walkin', 'whatsapp', 'call center']);
 export const Purpose = z.enum(['inquiry', 'purchase', 'sales', 'service request']);
 export const EnquireStatus = z.enum(['empty', 'contacted', 'interested', 'lost', 'new', 'none', 'pending', 'quotation shared', 'visit store', 'won']);
 export const Type = z.enum(['fresh', 'used']);
-export const callStatusSchema = z.enum(['not-updated','not-connected', 'connected', 'busy', 'switched-off', 'call_back-requested', 'follow-up-scheduled', 'not-reachable', 'connected-on-whatsapp']);
+export const callStatusSchema = z.enum(['not-updated', 'not-connected', 'connected', 'busy', 'switched-off', 'call_back-requested', 'follow-up-scheduled', 'not-reachable', 'connected-on-whatsapp']);
 
 
 export type EnquireStatusType = z.infer<typeof EnquireStatus>;
@@ -24,10 +24,10 @@ const LeadStatus = z.object({
 });
 
 const LeadData = z.object({
-    phone: z.string().min(1, {message: 'Phone is required'}),
-    name: z.string().min(1, {message: 'Name is required'}),
-    email: z.string().email({message: 'Invalid email format'}).optional(),
-    product: z.string().min(1, {message: 'Purpose is required'}),
+    phone: z.string().min(1, { message: 'Phone is required' }),
+    name: z.string().min(1, { message: 'Name is required' }),
+    email: z.string().email({ message: 'Invalid email format' }).optional(),
+    product: z.string().min(1, { message: 'Purpose is required' }),
     address: z.string().optional().default(''),
     type: Type,
     manager: ObjectIdSchema.optional(),
@@ -77,7 +77,7 @@ export const inActivateUserRequestSchema = z.object({
 
 export const changeUserPasswordRequestSchema = z.object({
     id: ObjectIdSchema,
-    password: z.string().min(6, {message: 'Password must be at least 6 characters long'})
+    password: z.string().min(6, { message: 'Password must be at least 6 characters long' })
 })
 
 const staffSchema = z.object({
@@ -98,4 +98,20 @@ export const managerWithStaffsSchema = z.object({
 });
 
 export type ManagerWithStaffs = z.infer<typeof managerWithStaffsSchema>;
+
+export const LeadExcelReportFilterSchema = z.object({
+    startDate: z.string().optional().transform(val => val ? new Date(val) : undefined),
+    endDate: z.string().optional().transform(val => val ? new Date(val) : undefined),
+    includeLeadStatus: z.array(EnquireStatus).optional(),
+    excludeStatus: z.array(EnquireStatus).optional(),
+    nearestStores: z.array(z.string()).optional(),
+    managers: z.array(ObjectIdSchema).optional(),
+    createdBy: z.array(ObjectIdSchema).optional(),
+    managedBy: z.array(ObjectIdSchema).optional(),
+    purposes: z.array(Purpose).optional(),
+    callStatus: z.array(callStatusSchema).optional(),
+    source: z.array(EnquireSource).optional(),
+});
+
+export type LeadExcelReportFilter = z.infer<typeof LeadExcelReportFilterSchema>;
 
