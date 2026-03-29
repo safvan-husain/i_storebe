@@ -1,13 +1,254 @@
 import asyncHandler from "express-async-handler";
-import { Request, Response } from "express";
+import { Request } from "express";
 import { onCatchError } from "../../middleware/error";
 import { z } from "zod";
-import Leave, { LeaveDayType, LeaveStatus, leaveStatusSchema, leaveDayTypeSchema } from "../../models/Leave";
+import Leave, { LeaveDayType, LeaveStatus, leaveDayTypeSchema, leaveStatusSchema } from "../../models/Leave";
 import { TypedResponse } from "../../common/interface";
-import { optionalDateQueryFiltersSchema, ObjectIdSchema, paginationSchema } from "../../common/types";
-import { Schema, Types } from "mongoose";
-import { createNotificationForUsers, sendPushNotification } from "../../services/notification-services";
+import {
+    istUtcOffset,
+    IstToUtsOptionalFromStringSchema,
+    optionalDateQueryFiltersSchema,
+    ObjectIdSchema,
+    paginationSchema,
+} from "../../common/types";
+import { PipelineStage, Types } from "mongoose";
+import { sendPushNotification } from "../../services/notification-services";
 import User from "../../models/User";
+
+const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+
+interface ILeaveResponse {
+    date: number;
+    reason: string;
+    userId: string;
+    username: string;
+    status: LeaveStatus;
+    _id: string;
+    dates: { date: number; dayType: LeaveDayType }[];
+}
+
+interface ILeaveHistoryResponse {
+    items: ILeaveResponse[];
+    pagination: {
+        skip: number;
+        limit: number;
+        hasMore: boolean;
+    };
+}
+
+const leaveRequestQuerySchema = z.object({
+    userId: ObjectIdSchema.optional(),
+    view_self: z.string().default("false").transform((e) => e === "true"),
+    status: leaveStatusSchema.optional(),
+    leaveDate: IstToUtsOptionalFromStringSchema,
+}).merge(paginationSchema).merge(optionalDateQueryFiltersSchema);
+
+const historyPaginationSchema = z.object({
+    skip: z.string().optional().transform((val) => (val ? parseInt(val) : 0)).refine(
+        (val) => Number.isInteger(val) && val >= 0,
+        { message: "skip must be a non-negative integer" },
+    ),
+    limit: z.string().optional().transform((val) => (val ? parseInt(val) : 20)).refine(
+        (val) => Number.isInteger(val) && val > 0 && val <= 50,
+        { message: "limit must be between 1 and 50" },
+    ),
+});
+
+const historyQuerySchema = z.object({
+    status: leaveStatusSchema.optional(),
+}).merge(historyPaginationSchema);
+
+function getUtcStartOfIstDay(istDate: Date): Date {
+    const shifted = new Date(istDate.getTime() + istUtcOffset);
+    const year = shifted.getUTCFullYear();
+    const month = shifted.getUTCMonth();
+    const day = shifted.getUTCDate();
+    return new Date(Date.UTC(year, month, day, 0, 0, 0, 0) - istUtcOffset);
+}
+
+function getUtcEndOfIstDay(istDate: Date): Date {
+    const shifted = new Date(istDate.getTime() + istUtcOffset);
+    const year = shifted.getUTCFullYear();
+    const month = shifted.getUTCMonth();
+    const day = shifted.getUTCDate();
+    return new Date(Date.UTC(year, month, day, 23, 59, 59, 999) - istUtcOffset);
+}
+
+function buildLeaveDateMatch(leaveDate: Date) {
+    const start = getUtcStartOfIstDay(leaveDate);
+    const end = getUtcEndOfIstDay(leaveDate);
+
+    return {
+        $or: [
+            { date: { $gte: start, $lte: end } },
+            {
+                dates: {
+                    $elemMatch: {
+                        date: { $gte: start, $lte: end },
+                    },
+                },
+            },
+        ],
+    };
+}
+
+function serializeLeave(leave: {
+    _id: Types.ObjectId | string;
+    date: Date;
+    reason: string;
+    requester: { _id: Types.ObjectId | string; username: string } | Types.ObjectId | string;
+    status: LeaveStatus;
+    dates?: { date: Date; dayType: LeaveDayType }[];
+}): ILeaveResponse {
+    const requester = leave.requester as {
+        _id?: Types.ObjectId | string;
+        username?: string;
+    };
+
+    return {
+        _id: leave._id.toString(),
+        username: requester.username ?? "",
+        date: new Date(leave.date).getTime(),
+        reason: leave.reason,
+        userId: requester._id?.toString?.() ?? leave.requester.toString(),
+        status: leave.status,
+        dates: leave.dates?.map((d) => ({
+            date: new Date(d.date).getTime(),
+            dayType: d.dayType,
+        })) ?? [],
+    };
+}
+
+function buildLeaveAggregationPipeline(matchStage: Record<string, unknown>, skip: number, limit: number): PipelineStage[] {
+    return [
+        { $match: matchStage },
+        { $sort: { date: -1, createdAt: 1, _id: 1 } },
+        { $skip: skip },
+        { $limit: limit },
+        {
+            $lookup: {
+                from: "users",
+                localField: "requester",
+                foreignField: "_id",
+                as: "requester",
+            },
+        },
+        {
+            $unwind: {
+                path: "$requester",
+                preserveNullAndEmptyArrays: false,
+            },
+        },
+        {
+            $project: {
+                requester: {
+                    _id: "$requester._id",
+                    username: "$requester.username",
+                },
+                date: 1,
+                reason: 1,
+                status: 1,
+                dates: 1,
+                _id: 1,
+            },
+        },
+    ];
+}
+
+async function resolveScopedRequesterMatch(req: Request, data: z.infer<typeof leaveRequestQuerySchema>) {
+    if (!req.userId) {
+        throw new Error("User not found");
+    }
+
+    if (["staff"].includes(req.privilege) || data.view_self) {
+        return { requester: new Types.ObjectId(req.userId) };
+    }
+
+    if (data.userId) {
+        return { requester: new Types.ObjectId(data.userId) };
+    }
+
+    if (req.privilege === "manager" && !data.view_self) {
+        const staffIds = await User.find({ manager: req.userId }, { _id: 1 }).lean().then((e) => e.map((i) => i._id));
+        return { requester: { $in: staffIds } };
+    }
+
+    return {};
+}
+
+function buildMatchStage(requesterMatch: Record<string, unknown>, data: z.infer<typeof leaveRequestQuerySchema>) {
+    const matchConditions: Record<string, unknown>[] = [];
+
+    if (Object.keys(requesterMatch).length > 0) {
+        matchConditions.push(requesterMatch);
+    }
+
+    if (data.status) {
+        matchConditions.push({ status: data.status });
+    }
+
+    if (data.startDate || data.endDate) {
+        const dateRange: Record<string, Date> = {};
+        if (data.startDate) {
+            dateRange.$gte = data.startDate;
+        }
+        if (data.endDate) {
+            dateRange.$lte = data.endDate;
+        }
+        matchConditions.push({ date: dateRange });
+    }
+
+    if (data.leaveDate) {
+        matchConditions.push(buildLeaveDateMatch(data.leaveDate));
+    }
+
+    if (matchConditions.length === 0) {
+        return {};
+    }
+
+    if (matchConditions.length === 1) {
+        return matchConditions[0];
+    }
+
+    return { $and: matchConditions };
+}
+
+async function getAccessibleHistoryTarget(req: Request, targetUserId: string): Promise<{ status: number; message: string } | undefined> {
+    const targetUser = await User.findById(targetUserId, { username: 1, privilege: 1, manager: 1 }).lean();
+
+    if (!targetUser) {
+        return { status: 404, message: "User not found" };
+    }
+
+    if (req.privilege === "admin") {
+        return undefined;
+    }
+
+    if (!req.userId) {
+        return { status: 401, message: "User not found" };
+    }
+
+    if (req.privilege === "staff") {
+        if (req.userId.toString() !== targetUserId) {
+            return { status: 403, message: "Not allowed" };
+        }
+        return undefined;
+    }
+
+    if (req.privilege === "manager") {
+        if (targetUser.privilege !== "staff") {
+            return { status: 403, message: "Not allowed" };
+        }
+
+        if (!targetUser.manager || targetUser.manager.toString() !== req.userId.toString()) {
+            return { status: 403, message: "Not allowed" };
+        }
+
+        return undefined;
+    }
+
+    return { status: 403, message: "Not allowed" };
+}
 
 export const applyLeave = asyncHandler(
     async (req: Request, res: TypedResponse<void>) => {
@@ -18,21 +259,21 @@ export const applyLeave = asyncHandler(
             }
             const data = z.object({
                 reason: z.string().min(4, "Minimum 4 char required"),
-                date: z.number().transform(e => new Date(e)),
+                date: z.number().transform((e) => new Date(e)),
                 dates: z.array(z.object({
-                    date: z.number().transform(e => new Date(e)),
-                    dayType: leaveDayTypeSchema
-                })).default([])
+                    date: z.number().transform((e) => new Date(e)),
+                    dayType: leaveDayTypeSchema,
+                })).default([]),
             }).parse(req.body);
 
             const createdLeave = await Leave.create({
                 requester: req.userId,
                 reason: data.reason,
                 date: data.date,
-                dates: data.dates
+                dates: data.dates,
             });
             const superAdmins = await User.find({ secondPrivilege: "super" }, { _id: true })
-                .lean().then(e => e.map(e => e._id));
+                .lean().then((e) => e.map((user) => user._id));
 
             for (const id of superAdmins) {
                 sendPushNotification({
@@ -47,98 +288,101 @@ export const applyLeave = asyncHandler(
             onCatchError(e, res);
         }
     }
-)
-
-interface ILeaveResponse {
-    date: number;
-    reason: string;
-    userId: string;
-    username: string;
-    status: LeaveStatus;
-    _id: string;
-    dates: { date: number, dayType: LeaveDayType }[];
-}
-
-const leaveRequestQuerySchema = z.object({
-    userId: ObjectIdSchema.optional(),
-    view_self: z.string().default('false').transform(e => e === 'true'),
-}).merge(paginationSchema).merge(optionalDateQueryFiltersSchema);
+);
 
 export const getLeaves = async (req: Request, res: TypedResponse<ILeaveResponse[]>) => {
     try {
-        let data = leaveRequestQuerySchema.parse(req.query);
+        const data = leaveRequestQuerySchema.parse(req.query);
+
         if (!req.userId) {
             res.status(401).json({ message: "User not found" });
             return;
         }
-        const matchStage: any = {};
 
-        if (['staff'].includes(req.privilege) || data.view_self) {
-            //when staff or the manager want self, show then their own leave requests only.
-            matchStage.requester = new Types.ObjectId(req.userId);
-        } else if (data.userId) {
-            matchStage.requester = new Types.ObjectId(data.userId);
-        } else if (req.privilege === 'manager' && !data.view_self) {
-            //when manager don't want his own only, send all his staffs.
-            const staffsIds = await User.find({ manager: req.userId }, { _id: 1 }).lean().then((e) => e.map((i) => i._id));
-            matchStage.requester = { $in: staffsIds }
-        }
-
-        const pipeline = [];
-        if (data.startDate || data.endDate) {
-            matchStage.date = {};
-            if (data.startDate) matchStage.date.$gte = data.startDate;
-            if (data.endDate) matchStage.date.$lte = data.endDate;
-        }
-
-        pipeline.push({ $match: matchStage });
+        const requesterMatch = await resolveScopedRequesterMatch(req, data);
+        const matchStage = buildMatchStage(requesterMatch, data);
         const leaves = await Leave.aggregate([
-            ...pipeline,
-            {
-                $sort: { createdAt: -1 }
-            },
-            { $skip: data.skip },
-            { $limit: data.limit },
-            {
-                $lookup: {
-                    from: 'users',
-                    localField: 'requester',
-                    foreignField: '_id',
-                    as: 'requester'
-                }
-            },
-            {
-                $unwind: {
-                    path: '$requester',
-                    preserveNullAndEmptyArrays: false
-                }
-            },
-            {
-                $project: {
-                    username: '$requester.username',
-                    date: 1,
-                    reason: 1,
-                    requester: '$requester._id',
-                    status: 1,
-                    dates: 1,
-                    _id: 1
-                }
-            }
+            ...buildLeaveAggregationPipeline(matchStage, data.skip, data.limit),
         ]);
 
-        res.status(200).json(leaves.map(e => ({
-            username: e.username,
-            date: (e.date as Date).getTime(),
-            reason: e.reason as string,
-            userId: e.requester,
-            status: e.status as LeaveStatus,
-            dates: e.dates?.map((d: { date: Date, dayType: LeaveDayType }) => ({ date: d.date.getTime(), dayType: d.dayType })) ?? [],
-            _id: e._id
-        })));
+        res.status(200).json(leaves.map((leave) => serializeLeave(leave)));
     } catch (e) {
         onCatchError(e, res);
     }
-}
+};
+
+export const getLeaveHistory = async (req: Request, res: TypedResponse<ILeaveHistoryResponse>) => {
+    try {
+        if (!req.userId) {
+            res.status(401).json({ message: "User not found" });
+            return;
+        }
+
+        const targetUserId = ObjectIdSchema.parse(req.params.userId);
+        const historyQuery = historyQuerySchema.parse(req.query);
+        const accessError = await getAccessibleHistoryTarget(req, targetUserId);
+
+        if (accessError) {
+            res.status(accessError.status).json({ message: accessError.message });
+            return;
+        }
+
+        const baseMatch: Record<string, unknown> = {
+            requester: new Types.ObjectId(targetUserId),
+        };
+        if (historyQuery.status) {
+            baseMatch.status = historyQuery.status;
+        }
+
+        const leaves = await Leave.aggregate([
+            { $match: baseMatch },
+            { $sort: { date: -1, createdAt: 1, _id: 1 } },
+            { $skip: historyQuery.skip },
+            { $limit: historyQuery.limit + 1 },
+            {
+                $lookup: {
+                    from: "users",
+                    localField: "requester",
+                    foreignField: "_id",
+                    as: "requester",
+                },
+            },
+            {
+                $unwind: {
+                    path: "$requester",
+                    preserveNullAndEmptyArrays: false,
+                },
+            },
+            {
+                $project: {
+                    requester: {
+                        _id: "$requester._id",
+                        username: "$requester.username",
+                    },
+                    date: 1,
+                    reason: 1,
+                    status: 1,
+                    dates: 1,
+                    _id: 1,
+                },
+            },
+        ]);
+
+        const hasMore = leaves.length > historyQuery.limit;
+        const items = hasMore ? leaves.slice(0, historyQuery.limit) : leaves;
+
+        res.status(200).json({
+            items: items.map((leave) => serializeLeave(leave)),
+            pagination: {
+                skip: historyQuery.skip,
+                limit: historyQuery.limit,
+                hasMore,
+            },
+        });
+    } catch (e) {
+        onCatchError(e, res);
+    }
+};
 
 export const updateLeaveStatus = async (req: Request, res: TypedResponse<ILeaveResponse>) => {
     try {
@@ -154,13 +398,13 @@ export const updateLeaveStatus = async (req: Request, res: TypedResponse<ILeaveR
         //collecting request body.
         const data = z.object({
             id: ObjectIdSchema,
-            status: leaveStatusSchema
+            status: leaveStatusSchema,
         }).parse(req.body);
 
         // first fetch leave to validate dates before updating status
         const existingLeave = await Leave
             .findById(data.id)
-            .populate<{ requester: { username: string, _id: string, privilege: string, secondPrivilege?: string } }>('requester', 'username privilege secondPrivilege');
+            .populate<{ requester: { username: string, _id: string, privilege: string, secondPrivilege?: string } }>("requester", "username privilege secondPrivilege");
 
         if (!existingLeave) {
             res.status(404).json({ message: "Leave not found" });
@@ -169,18 +413,17 @@ export const updateLeaveStatus = async (req: Request, res: TypedResponse<ILeaveR
 
         // If the requester is an admin, only super admins can update the status
         const requesterPrivilege = (existingLeave.requester as any)?.privilege as string | undefined;
-        if (requesterPrivilege === 'admin' && req.secondPrivilege !== 'super') {
+        if (requesterPrivilege === "admin" && req.secondPrivilege !== "super") {
             res.status(200).json({ message: "Not allowed" });
             return;
         }
 
         // Determine the last requested leave date (considering single and multiple dates)
         const allDates: Date[] = [existingLeave.date, ...(existingLeave.dates ?? []).map((d: { date: Date }) => d.date)];
-        const latestLeaveDateMs = Math.max(...allDates.map(d => new Date(d).getTime()));
+        const latestLeaveDateMs = Math.max(...allDates.map((d) => new Date(d).getTime()));
 
         // Allow updates up to one day (24h) after the latest leave date
-        const oneDayMs = 24 * 60 * 60 * 1000;
-        const cutoffMs = latestLeaveDateMs + oneDayMs;
+        const cutoffMs = latestLeaveDateMs + ONE_DAY_MS;
         const nowMs = Date.now();
 
         if (nowMs > cutoffMs) {
@@ -191,18 +434,17 @@ export const updateLeaveStatus = async (req: Request, res: TypedResponse<ILeaveR
         // proceed with update after validation
         existingLeave.status = data.status;
         const leave = await existingLeave.save();
+        await leave.populate("requester", "username privilege secondPrivilege");
 
-        sendPushNotification({ title: "Update on leave request", body: `You leave request ${data.status}` , userId: existingLeave.requester._id.toString(), leaveId: leave._id.toString() })
-        res.status(200).json({
-            username: (existingLeave.requester as any).username,
-            date: leave.date.getTime(),
-            reason: leave.reason as string,
-            userId: (existingLeave.requester as any)._id,
-            status: leave.status,
-            _id: leave._id.toString(),
-            dates: leave.dates?.map((d: { date: Date, dayType: LeaveDayType }) => ({ date: d.date.getTime(), dayType: d.dayType })) ?? [],
+        sendPushNotification({
+            title: "Update on leave request",
+            body: `You leave request ${data.status}`,
+            userId: (leave.requester as any)._id.toString(),
+            leaveId: leave._id.toString(),
         });
+
+        res.status(200).json(serializeLeave(leave as any));
     } catch (e) {
         onCatchError(e, res);
     }
-}
+};

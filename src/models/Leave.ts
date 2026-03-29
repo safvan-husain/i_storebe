@@ -44,6 +44,7 @@ const leaveSchema = new mongoose.Schema(
         },
         status: {
             type: String,
+            enum: ['pending', 'approved', 'rejected'],
             default: 'pending'
         }
     },
@@ -51,6 +52,11 @@ const leaveSchema = new mongoose.Schema(
         timestamps: true,
     }
 );
+
+leaveSchema.index({ requester: 1, status: 1, date: -1, createdAt: 1, _id: 1 });
+leaveSchema.index({ status: 1, date: -1, createdAt: 1, _id: 1 });
+leaveSchema.index({ requester: 1, status: 1, "dates.date": 1, createdAt: 1, _id: 1 });
+leaveSchema.index({ status: 1, "dates.date": 1, createdAt: 1, _id: 1 });
 
 const Leave = mongoose.model<ILeave>('Leave', leaveSchema);
 
