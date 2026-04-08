@@ -210,6 +210,10 @@ function buildLeaveAggregationPipeline(
                             in: "$$requestDate.date",
                         },
                     },
+                },
+            },
+            {
+                $addFields: {
                     requestDateDistances: {
                         $map: {
                             input: "$requestDateValues",
