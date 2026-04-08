@@ -263,6 +263,10 @@ function buildLeaveAggregationPipeline(
                             },
                         },
                     },
+                },
+            },
+            {
+                $addFields: {
                     statusPriority: {
                         $cond: [{ $eq: ["$status", "pending"] }, 0, 1],
                     },
