@@ -210,30 +210,54 @@ function buildLeaveAggregationPipeline(
                             in: "$$requestDate.date",
                         },
                     },
-                    upcomingRequestedDates: {
-                        $filter: {
-                            input: {
-                                $map: {
-                                    input: "$requestDates",
-                                    as: "requestDate",
-                                    in: "$$requestDate.date",
+                    requestDateDistances: {
+                        $map: {
+                            input: "$requestDateValues",
+                            as: "requestDateValue",
+                            in: {
+                                date: "$$requestDateValue",
+                                distance: {
+                                    $abs: {
+                                        $subtract: ["$$requestDateValue", todayStartUtc],
+                                    },
                                 },
                             },
-                            as: "requestDateValue",
-                            cond: { $gte: ["$$requestDateValue", todayStartUtc] },
                         },
                     },
-                    latestRequestedDate: { $max: "$requestDateValues" },
                 },
             },
             {
                 $addFields: {
                     nextRelevantLeaveDate: {
-                        $cond: [
-                            { $gt: [{ $size: "$upcomingRequestedDates" }, 0] },
-                            { $min: "$upcomingRequestedDates" },
-                            "$latestRequestedDate",
-                        ],
+                        $let: {
+                            vars: {
+                                closestDateEntry: {
+                                    $arrayElemAt: [
+                                        {
+                                            $sortArray: {
+                                                input: "$requestDateDistances",
+                                                sortBy: { distance: 1, date: 1 },
+                                            },
+                                        },
+                                        0,
+                                    ],
+                                },
+                            },
+                            in: "$$closestDateEntry.date",
+                        },
+                    },
+                    closestDistanceMs: {
+                        $min: {
+                            $map: {
+                                input: "$requestDateValues",
+                                as: "requestDateValue",
+                                in: {
+                                    $abs: {
+                                        $subtract: ["$$requestDateValue", todayStartUtc],
+                                    },
+                                },
+                            },
+                        },
                     },
                     statusPriority: {
                         $cond: [{ $eq: ["$status", "pending"] }, 0, 1],
@@ -241,7 +265,7 @@ function buildLeaveAggregationPipeline(
                     pendingSortDate: {
                         $cond: [
                             { $eq: ["$status", "pending"] },
-                            "$nextRelevantLeaveDate",
+                            "$closestDistanceMs",
                             null,
                         ],
                     },
