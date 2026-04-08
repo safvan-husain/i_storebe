@@ -158,14 +158,23 @@ function buildLeaveAggregationPipeline(
         pipeline.push(
             {
                 $addFields: {
-                    requestDates: {
-                        $cond: [
-                            { $gt: [{ $size: "$dates" }, 0] },
-                            "$dates",
-                            [{ date: "$date", dayType: "full" }],
-                        ],
+                    normalizedDates: { $ifNull: ["$dates", []] },
+                    normalizedPrimaryDate: {
+                        date: "$date",
+                        dayType: "full",
                     },
                     appliedDate: "$createdAt",
+                },
+            },
+            {
+                $addFields: {
+                    requestDates: {
+                        $cond: [
+                            { $gt: [{ $size: "$normalizedDates" }, 0] },
+                            "$normalizedDates",
+                            ["$normalizedPrimaryDate"],
+                        ],
+                    },
                 },
             },
             {
