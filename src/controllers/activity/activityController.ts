@@ -405,15 +405,21 @@ export const getStaffReport = async (req: Request, res: TypedResponse<any>) => {
 }
 
 const createPdf = async (html: string) => {
-    const browser = await puppeteer.launch();
-    const page = await browser.newPage();
-    await page.setContent('<html><body>' + html + '</body></html>', { waitUntil: 'load' });
-    const bdfBuffer = await page.pdf({
-        // path: 'output.pdf',
-        format: 'A4',
+    const isRootUser = typeof process.getuid === 'function' && process.getuid() === 0;
+    const browser = await puppeteer.launch({
+        args: isRootUser ? ['--no-sandbox', '--disable-setuid-sandbox'] : [],
     });
-    await browser.close();
-    return bdfBuffer;
+
+    try {
+        const page = await browser.newPage();
+        await page.setContent('<html><body>' + html + '</body></html>', { waitUntil: 'load' });
+        const pdfBuffer = await page.pdf({
+            format: 'A4',
+        });
+        return pdfBuffer;
+    } finally {
+        await browser.close();
+    }
 }
 
 const generateTableHtml = (items: any, start: Date, end: Date, manager?: string) => {
