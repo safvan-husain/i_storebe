@@ -194,14 +194,27 @@ function buildLeaveAggregationPipeline(
                             },
                         },
                     },
-                    upcomingRequestedDates: {
-                        $filter: {
+                    requestDateValues: {
+                        $map: {
                             input: "$requestDates",
                             as: "requestDate",
-                            cond: { $gte: ["$$requestDate.date", todayStartUtc] },
+                            in: "$$requestDate.date",
                         },
                     },
-                    latestRequestedDate: { $max: "$requestDates.date" },
+                    upcomingRequestedDates: {
+                        $filter: {
+                            input: {
+                                $map: {
+                                    input: "$requestDates",
+                                    as: "requestDate",
+                                    in: "$$requestDate.date",
+                                },
+                            },
+                            as: "requestDateValue",
+                            cond: { $gte: ["$$requestDateValue", todayStartUtc] },
+                        },
+                    },
+                    latestRequestedDate: { $max: "$requestDateValues" },
                 },
             },
             {
@@ -209,7 +222,7 @@ function buildLeaveAggregationPipeline(
                     nextRelevantLeaveDate: {
                         $cond: [
                             { $gt: [{ $size: "$upcomingRequestedDates" }, 0] },
-                            { $min: "$upcomingRequestedDates.date" },
+                            { $min: "$upcomingRequestedDates" },
                             "$latestRequestedDate",
                         ],
                     },
