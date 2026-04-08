@@ -25,6 +25,9 @@ interface ILeaveResponse {
     status: LeaveStatus;
     _id: string;
     dates: { date: number; dayType: LeaveDayType }[];
+    appliedDate?: number;
+    leaveDayCount?: number;
+    nextRelevantLeaveDate?: number;
 }
 
 interface ILeaveHistoryResponse {
@@ -41,6 +44,8 @@ const leaveRequestQuerySchema = z.object({
     view_self: z.string().default("false").transform((e) => e === "true"),
     status: leaveStatusSchema.optional(),
     leaveDate: IstToUtsOptionalFromStringSchema,
+    reviewMode: z.string().optional().transform((value) => value === "true"),
+    sortMode: z.enum(["default", "quick_review"]).optional().default("default"),
 }).merge(paginationSchema).merge(optionalDateQueryFiltersSchema);
 
 const historyPaginationSchema = z.object({
@@ -99,6 +104,9 @@ function serializeLeave(leave: {
     requester: { _id: Types.ObjectId | string; username: string } | Types.ObjectId | string;
     status: LeaveStatus;
     dates?: { date: Date; dayType: LeaveDayType }[];
+    appliedDate?: number | Date;
+    leaveDayCount?: number;
+    nextRelevantLeaveDate?: number | Date;
 }): ILeaveResponse {
     const requester = leave.requester as {
         _id?: Types.ObjectId | string;
@@ -116,13 +124,137 @@ function serializeLeave(leave: {
             date: new Date(d.date).getTime(),
             dayType: d.dayType,
         })) ?? [],
+        appliedDate: leave.appliedDate ? new Date(leave.appliedDate).getTime() : undefined,
+        leaveDayCount: typeof leave.leaveDayCount === "number" ? leave.leaveDayCount : undefined,
+        nextRelevantLeaveDate: leave.nextRelevantLeaveDate
+            ? new Date(leave.nextRelevantLeaveDate).getTime()
+            : undefined,
     };
 }
 
-function buildLeaveAggregationPipeline(matchStage: Record<string, unknown>, skip: number, limit: number): PipelineStage[] {
-    return [
+function getReviewSortMode(data: z.infer<typeof leaveRequestQuerySchema>) {
+    if (data.sortMode === "quick_review" || data.reviewMode) {
+        return "quick_review" as const;
+    }
+    return "default" as const;
+}
+
+function getQuickReviewTodayStartUtc() {
+    return getUtcStartOfIstDay(new Date());
+}
+
+function buildLeaveAggregationPipeline(
+    matchStage: Record<string, unknown>,
+    skip: number,
+    limit: number,
+    sortMode: "default" | "quick_review",
+): PipelineStage[] {
+    const pipeline: PipelineStage[] = [
         { $match: matchStage },
-        { $sort: { date: -1, createdAt: 1, _id: 1 } },
+    ];
+
+    if (sortMode === "quick_review") {
+        const todayStartUtc = getQuickReviewTodayStartUtc();
+        pipeline.push(
+            {
+                $addFields: {
+                    requestDates: {
+                        $cond: [
+                            { $gt: [{ $size: "$dates" }, 0] },
+                            "$dates",
+                            [{ date: "$date", dayType: "full" }],
+                        ],
+                    },
+                    appliedDate: "$createdAt",
+                },
+            },
+            {
+                $addFields: {
+                    leaveDayCount: {
+                        $sum: {
+                            $map: {
+                                input: "$requestDates",
+                                as: "requestDate",
+                                in: {
+                                    $cond: [
+                                        { $eq: ["$$requestDate.dayType", "half"] },
+                                        0.5,
+                                        1,
+                                    ],
+                                },
+                            },
+                        },
+                    },
+                    upcomingRequestedDates: {
+                        $filter: {
+                            input: "$requestDates",
+                            as: "requestDate",
+                            cond: { $gte: ["$$requestDate.date", todayStartUtc] },
+                        },
+                    },
+                    latestRequestedDate: { $max: "$requestDates.date" },
+                },
+            },
+            {
+                $addFields: {
+                    nextRelevantLeaveDate: {
+                        $cond: [
+                            { $gt: [{ $size: "$upcomingRequestedDates" }, 0] },
+                            { $min: "$upcomingRequestedDates.date" },
+                            "$latestRequestedDate",
+                        ],
+                    },
+                    statusPriority: {
+                        $cond: [{ $eq: ["$status", "pending"] }, 0, 1],
+                    },
+                    pendingSortDate: {
+                        $cond: [
+                            { $eq: ["$status", "pending"] },
+                            "$nextRelevantLeaveDate",
+                            null,
+                        ],
+                    },
+                    pendingSortAppliedDate: {
+                        $cond: [
+                            { $eq: ["$status", "pending"] },
+                            "$appliedDate",
+                            null,
+                        ],
+                    },
+                    nonPendingSortDate: {
+                        $cond: [
+                            { $eq: ["$status", "pending"] },
+                            null,
+                            "$date",
+                        ],
+                    },
+                    nonPendingSortAppliedDate: {
+                        $cond: [
+                            { $eq: ["$status", "pending"] },
+                            null,
+                            "$appliedDate",
+                        ],
+                    },
+                },
+            },
+            {
+                $sort: {
+                    statusPriority: 1,
+                    pendingSortDate: 1,
+                    pendingSortAppliedDate: 1,
+                    nonPendingSortDate: -1,
+                    nonPendingSortAppliedDate: 1,
+                    _id: 1,
+                },
+            },
+        );
+    } else {
+        pipeline.push({
+            $sort: { date: -1, createdAt: 1, _id: 1 },
+        });
+    }
+
+    pipeline.push(
         { $skip: skip },
         { $limit: limit },
         {
@@ -150,9 +282,14 @@ function buildLeaveAggregationPipeline(matchStage: Record<string, unknown>, skip
                 status: 1,
                 dates: 1,
                 _id: 1,
+                appliedDate: 1,
+                leaveDayCount: 1,
+                nextRelevantLeaveDate: 1,
             },
         },
-    ];
+    );
+
+    return pipeline;
 }
 
 async function resolveScopedRequesterMatch(req: Request, data: z.infer<typeof leaveRequestQuerySchema>) {
@@ -301,8 +438,9 @@ export const getLeaves = async (req: Request, res: TypedResponse<ILeaveResponse[
 
         const requesterMatch = await resolveScopedRequesterMatch(req, data);
         const matchStage = buildMatchStage(requesterMatch, data);
+        const sortMode = getReviewSortMode(data);
         const leaves = await Leave.aggregate([
-            ...buildLeaveAggregationPipeline(matchStage, data.skip, data.limit),
+            ...buildLeaveAggregationPipeline(matchStage, data.skip, data.limit, sortMode),
         ]);
 
         res.status(200).json(leaves.map((leave) => serializeLeave(leave)));
