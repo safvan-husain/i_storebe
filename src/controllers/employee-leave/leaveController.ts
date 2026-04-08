@@ -39,6 +39,15 @@ interface ILeaveHistoryResponse {
     };
 }
 
+const leaveAggregatePreviewSchema = z.object({
+    pipeline: z.array(z.record(z.string(), z.unknown())).min(1).max(50),
+});
+
+const disallowedAggregateStages = new Set([
+    "$out",
+    "$merge",
+]);
+
 const leaveRequestQuerySchema = z.object({
     userId: ObjectIdSchema.optional(),
     view_self: z.string().default("false").transform((e) => e === "true"),
@@ -604,6 +613,51 @@ export const updateLeaveStatus = async (req: Request, res: TypedResponse<ILeaveR
         });
 
         res.status(200).json(serializeLeave(leave as any));
+    } catch (e) {
+        onCatchError(e, res);
+    }
+};
+
+export const previewLeaveAggregation = async (req: Request, res: TypedResponse<unknown[]>) => {
+    try {
+        if (!req.userId) {
+            res.status(401).json({ message: "User not found" });
+            return;
+        }
+
+        if (req.secondPrivilege !== "super") {
+            res.status(403).json({ message: "Not allowed" });
+            return;
+        }
+
+        const { pipeline } = leaveAggregatePreviewSchema.parse(req.body);
+
+        for (const stage of pipeline) {
+            const keys = Object.keys(stage);
+            if (keys.length !== 1) {
+                res.status(400).json({ message: "Each aggregation stage must contain exactly one operator" });
+                return;
+            }
+
+            const stageName = keys[0];
+            if (!stageName.startsWith("$")) {
+                res.status(400).json({ message: "Invalid aggregation stage operator" });
+                return;
+            }
+
+            if (disallowedAggregateStages.has(stageName)) {
+                res.status(400).json({ message: `${stageName} is not allowed in preview endpoint` });
+                return;
+            }
+        }
+
+        const previewPipeline = pipeline as unknown as PipelineStage[];
+        const results = await Leave.aggregate([
+            ...previewPipeline,
+            { $limit: 100 },
+        ]);
+
+        res.status(200).json(results);
     } catch (e) {
         onCatchError(e, res);
     }
