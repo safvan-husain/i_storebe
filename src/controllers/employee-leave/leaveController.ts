@@ -6,7 +6,6 @@ import Leave, { LeaveDayType, LeaveStatus, leaveDayTypeSchema, leaveStatusSchema
 import { TypedResponse } from "../../common/interface";
 import {
     istUtcOffset,
-    IstToUtsOptionalFromStringSchema,
     optionalDateQueryFiltersSchema,
     ObjectIdSchema,
     paginationSchema,
@@ -48,11 +47,19 @@ const disallowedAggregateStages = new Set([
     "$merge",
 ]);
 
+const leaveDateQuerySchema = z.string().optional().refine(
+    (value) => !value || /^-?\d+$/.test(value),
+    { message: "Should be milliseconds since epoch" },
+).transform((value) => {
+    if (!value) return undefined;
+    return new Date(parseInt(value, 10));
+});
+
 const leaveRequestQuerySchema = z.object({
     userId: ObjectIdSchema.optional(),
     view_self: z.string().default("false").transform((e) => e === "true"),
     status: leaveStatusSchema.optional(),
-    leaveDate: IstToUtsOptionalFromStringSchema,
+    leaveDate: leaveDateQuerySchema,
     reviewMode: z.string().optional().transform((value) => value === "true"),
     sortMode: z.enum(["default", "quick_review"]).optional().default("default"),
 }).merge(paginationSchema).merge(optionalDateQueryFiltersSchema);
