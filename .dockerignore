@@ -1,0 +1,14 @@
+node_modules/
+dist/
+logs/
+*.log
+npm-debug.log*
+
+.env
+.env.*
+!.env.docker.example
+
+src/secret/
+.git/
+.idea/
+.vscode/

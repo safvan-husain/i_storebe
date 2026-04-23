@@ -2,6 +2,77 @@
 
 This document outlines the backend architecture and business logic of a **CRM (Customer Relationship Management)** system designed to manage leads, customers, and employee activities, all within a role-based mobile application.
 
+## Development Docker Setup
+
+This Docker setup is for local development and testing only. It runs the backend with `npm run dev` and a local MongoDB 8.0 container so production backup data can be tested without touching the live production database.
+
+Strict production warning:
+
+- Do not use `Dockerfile.dev` or `docker-compose.dev.yml` in production.
+- Production must continue to run without Docker by using the existing PM2 flow: `npm run build`, then PM2 with `ecosystem.config.js`.
+- The MongoDB backup archive contains production data. Do not commit it, share it, or restore it anywhere except an isolated local development MongoDB.
+
+### Environment
+
+Copy the example Docker env file and fill in development-safe values:
+
+```bash
+cp .env.docker.example .env.docker
+```
+
+The Docker Compose file sets these development defaults:
+
+```bash
+PORT=4000
+MONGODB_URI=mongodb://mongo:27017/i-store-db
+```
+
+Firebase credentials are still required because the backend initializes Firebase on startup. Provide one of `FIREBASE_SA_JSON`, `FIREBASE_SA_B64`, or mount a service account file and set `GOOGLE_APPLICATION_CREDENTIALS`. Gmail/OAuth values are also needed if you want the existing email jobs to work in Docker.
+
+### Start Development Services
+
+From the `backend` directory:
+
+```bash
+docker compose -f docker-compose.dev.yml up --build
+```
+
+The API is exposed at:
+
+```text
+http://localhost:4000/
+```
+
+MongoDB is exposed locally at:
+
+```text
+mongodb://localhost:27017/i-store-db
+```
+
+### Restore The Production Backup Into Local Docker MongoDB
+
+The restore is manual by design. Starting Docker will not wipe your local development data.
+
+The expected backup archive is:
+
+```text
+/Users/safvanhusain/code/hashqubes/istore/mongodb-backup-2026-04-23T14-22-08-986899.archive.gz
+```
+
+To drop and re-import the `i-store-db` collections into the Docker MongoDB service:
+
+```bash
+docker compose -f docker-compose.dev.yml --profile restore run --rm mongo-restore
+```
+
+This command targets only the Compose MongoDB service at `mongodb://mongo:27017`, reads the archive as read-only, uses `--gzip --archive=/backup/archive.gz`, and uses `--drop` so restored collections replace the existing local Docker copies.
+
+To inspect restored collections:
+
+```bash
+docker compose -f docker-compose.dev.yml exec mongo mongosh i-store-db --eval "show collections"
+```
+
 ---
 
 ## 🧩 System Overview
@@ -149,4 +220,3 @@ req.user = {
   id: "user_id",
   privilege: "admin" | "manager" | "staff",
 }
-

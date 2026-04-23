@@ -1,4 +1,6 @@
 .env
+.env.*
+!.env.docker.example
 node_modules/
 src/secret/
 dist/
