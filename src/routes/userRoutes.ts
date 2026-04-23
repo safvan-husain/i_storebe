@@ -1,7 +1,7 @@
 import express from 'express';
 import {createUser, getUsers, getUserById, updateFcmToken, deleteAccount} from '../controllers/auth/authController';
 import { protect } from '../middleware/auth';
-import {changeUserPassword, getManagers, getStaffs, updateActiveStatus, getActiveStaffsForManager} from "../controllers/user/usersController";
+import {changeUserPassword, getManagers, getStaffs, updateActiveStatus, getActiveStaffsForManager, queryEmployees} from "../controllers/user/usersController";
 import {getNotifications} from "../services/notification-services";
 
 const router = express.Router();
@@ -13,6 +13,7 @@ router
 
 router.route('/manager').get(protect, getManagers);
 router.route('/staff').get(protect, getStaffs);
+router.route('/employees/query').post(protect, queryEmployees);
 router.route('/manager/active-staff').get(protect, getActiveStaffsForManager);
 router.route('/update-active-status').put(protect, updateActiveStatus)
 router.route('/change-password').put(protect, changeUserPassword)

@@ -15,10 +15,12 @@ import Leave from "./models/Leave";
 import {generateToken} from "./utils/jwtUtils";
 import {targetRoutes} from "./routes/targetRoutes";
 import {leaveRouter} from "./routes/leave-routes";
-import {onCatchError} from "./middleware/error";
+import {errorHandler, onCatchError} from "./middleware/error";
+import { notFound } from "./middleware/not_found";
 import {customerRouter} from "./routes/customer-router";
 import adminRoutes from "./routes/adminRoutes";
 import customReportRoutes from "./routes/customReportRoutes";
+import {branchRoutes} from "./routes/branchRoutes";
 import {initializeApp} from "firebase-admin/app";
 import {credential, ServiceAccount} from "firebase-admin";
 import cron from 'node-cron';
@@ -29,11 +31,30 @@ import fs from 'fs';
 import path from 'path';
 import swaggerUi from 'swagger-ui-express';
 import { getOpenApiDocument } from './openapi/document';
+import { logger } from './logging/logger';
 
 require("dotenv").config();
 const PORT = process.env.PORT || 3000;
 
 const app = express();
+
+function logProcessError(message: string, error: unknown) {
+  const normalizedError = error instanceof Error ? error : new Error(String(error));
+  console.error(message, error);
+  void logger.error(message, {
+    errorMessage: normalizedError.message,
+    errorStack: normalizedError.stack,
+    details: error instanceof Error ? undefined : error,
+  });
+}
+
+process.on('uncaughtException', (error) => {
+  logProcessError('Uncaught exception', error);
+});
+
+process.on('unhandledRejection', (reason) => {
+  logProcessError('Unhandled promise rejection', reason);
+});
 
 function loadServiceAccount(): ServiceAccount {
   if (process.env.FIREBASE_SA_JSON) {
@@ -61,11 +82,18 @@ function loadServiceAccount(): ServiceAccount {
   return JSON.parse(content) as ServiceAccount;
 }
 
-connectDb().catch(err => console.log(err));
-
-initializeApp({
-  credential: credential.cert(loadServiceAccount()),
+connectDb().catch(err => {
+  logProcessError('Startup database connection failed', err);
 });
+
+try {
+  initializeApp({
+    credential: credential.cert(loadServiceAccount()),
+  });
+} catch (error) {
+  logProcessError('Firebase initialization failed', error);
+  throw error;
+}
 
 app.use(express.urlencoded({ extended: true }));
 app.use(cors());
@@ -87,6 +115,7 @@ app.use('/api/leave', leaveRouter);
 app.use('/api/data', customerRouter);
 app.use('/api/admin', adminRoutes);
 app.use('/api/custom-reports', customReportRoutes);
+app.use('/api/branches', branchRoutes);
 
 const openApiDocument = getOpenApiDocument();
 
@@ -129,7 +158,14 @@ app.get('/api/transform', async (_, res) => {
             }
         });
     } catch (e) {
-        console.log(e);
+        const normalizedError = e instanceof Error ? e : new Error(String(e));
+        console.error(e);
+        void logger.error('Transform route failed', {
+            status: 500,
+            errorMessage: normalizedError.message,
+            errorStack: normalizedError.stack,
+            details: e instanceof Error ? undefined : e,
+        });
         res.status(500).json(e)
     }
 })
@@ -196,6 +232,12 @@ app.post('/api/notifications/test', async (req, res) => {
         });
     } catch (e) {
         console.error('Error in /api/notifications/test', e);
+        const normalizedError = e instanceof Error ? e : new Error(String(e));
+        void logger.error('Notification test route failed', {
+            status: 500,
+            errorMessage: normalizedError.message,
+            errorStack: normalizedError.stack,
+        });
         return res.status(500).json({ message: 'Internal server error' });
     }
 });
@@ -203,13 +245,23 @@ app.post('/api/notifications/test', async (req, res) => {
 // Run daily at 12:00 AM IST
 cron.schedule('0 0 * * *', async () => {
     console.log("Running cron job", new Date());
-    await wishBirthDayToCustomers();
+    try {
+        await wishBirthDayToCustomers();
+    } catch (error) {
+        logProcessError('Birthday cron failed', error);
+    }
 }, {
     timezone: "Asia/Kolkata"
 })
 
 startTaskScheduler();
 
+app.use(notFound);
+app.use(errorHandler);
+
 app.listen(PORT, () => {
     console.log(`Server is running on http://0.0.0.0:${PORT}`);
+    void logger.log('Server started', {
+        port: PORT,
+    });
 });

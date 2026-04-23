@@ -194,7 +194,7 @@ export const getUsers = asyncHandler(async (req: Request, res: TypedResponse<Man
         } else if (req.privilege === 'manager') {
             managerId = Types.ObjectId.createFromHexString(req.userId);
         }
-        let query: FilterQuery<IUser> = {}
+        let query: FilterQuery<IUser> = { isAccountDeleted: { $ne: true } }
         if (managerId && req.secondPrivilege !== 'call-center') {
             query.$or = [{manager: managerId}, {_id: managerId}]
         }
@@ -233,6 +233,7 @@ export const getUsers = asyncHandler(async (req: Request, res: TypedResponse<Man
                                 as: "managerInfo"
                             }},
                         { $unwind: "$managerInfo" },
+                        { $match: { "managerInfo.isAccountDeleted": { $ne: true } } },
                         // Format the output
                         { $project: {
                                 _id: "$_id",

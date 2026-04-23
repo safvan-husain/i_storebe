@@ -1,12 +1,50 @@
 import {Request, Response} from 'express';
 
 import asyncHandler from 'express-async-handler';
-import {getStaffRequestSchema} from "./validation";
-import User from "../../models/User";
+import {FilterQuery, Types} from 'mongoose';
+import {employeeQuerySchema, getStaffRequestSchema} from "./validation";
+import User, {IUser} from "../../models/User";
+import Branch from "../../models/Branch";
 import {onCatchError} from "../../middleware/error";
 import {TypedResponse} from "../../common/interface";
-import {ObjectIdSchema, UserPrivilegeSchema} from "../../common/types";
+import {UserPrivilegeSchema} from "../../common/types";
 import {changeUserPasswordRequestSchema, inActivateUserRequestSchema} from "../leads/validations";
+
+const escapeRegex = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+const getBranchMemberIds = async (branchId: string) => {
+    const branch = await Branch.findById(branchId, { manager: true, staffs: true }).lean();
+    if (!branch) return null;
+    return [
+        ...(branch.manager ? [branch.manager] : []),
+        ...(branch.staffs ?? []),
+    ].map(id => Types.ObjectId.createFromHexString(String(id)));
+};
+
+const getBranchMapForUsers = async (userIds: string[]) => {
+    if (userIds.length === 0) return new Map<string, { _id: string, name: string }>();
+    const objectIds = userIds.map(id => Types.ObjectId.createFromHexString(id));
+    const branches = await Branch.find({
+        $or: [
+            { manager: { $in: objectIds } },
+            { staffs: { $in: objectIds } },
+        ],
+    }, { name: true, manager: true, staffs: true }).lean();
+
+    const branchMap = new Map<string, { _id: string, name: string }>();
+    for (const branch of branches) {
+        const value = { _id: String(branch._id), name: branch.name };
+        if (branch.manager && userIds.includes(String(branch.manager))) {
+            branchMap.set(String(branch.manager), value);
+        }
+        for (const staffId of branch.staffs ?? []) {
+            if (userIds.includes(String(staffId))) {
+                branchMap.set(String(staffId), value);
+            }
+        }
+    }
+    return branchMap;
+};
 
 export const getStaffs = asyncHandler(async (req: Request, res: Response) => {
     try {
@@ -21,6 +59,7 @@ export const getStaffs = asyncHandler(async (req: Request, res: Response) => {
         if (req.privilege === 'manager') query.manager = req.userId;
 
         query.privilege = 'staff';
+        query.isAccountDeleted = { $ne: true };
 
         let staffs = await User.find(query).lean();
         res.status(200).json(staffs);
@@ -79,7 +118,10 @@ export const getManagers = asyncHandler(async (req: Request, res: Response) => {
             res.status(403).json({message: "Not allowed"});
             return;
         }
-        let staffs = await User.find({privilege: 'manager'}).lean();
+        let staffs = await User.find({
+            privilege: 'manager',
+            isAccountDeleted: { $ne: true },
+        }).lean();
         res.status(200).json(staffs);
     } catch (e) {
         onCatchError(e, res);
@@ -105,6 +147,71 @@ export const getActiveStaffsForManager = asyncHandler(async (req: Request, res: 
         }).lean();
 
         res.status(200).json(staffs);
+    } catch (e) {
+        onCatchError(e, res);
+    }
+});
+
+export const queryEmployees = asyncHandler(async (req: Request, res: Response) => {
+    try {
+        if (req.privilege !== UserPrivilegeSchema.enum.admin) {
+            res.status(403).json({ message: 'Only admins can query employees' });
+            return;
+        }
+
+        const filter = employeeQuerySchema.parse(req.body ?? {});
+        const query: FilterQuery<IUser> = {
+            isAccountDeleted: { $ne: true },
+            privilege: { $in: filter.privileges },
+        };
+
+        if (typeof filter.active !== 'undefined') {
+            query.isActive = filter.active;
+        }
+        if (filter.secondPrivileges && filter.secondPrivileges.length > 0) {
+            query.secondPrivilege = { $in: filter.secondPrivileges };
+        }
+        if (filter.search) {
+            query.username = { $regex: escapeRegex(filter.search), $options: 'i' };
+        }
+
+        if (filter.branchId || filter.excludeBranchId) {
+            const branchId = filter.branchId ?? filter.excludeBranchId!;
+            const memberIds = await getBranchMemberIds(branchId);
+            if (!memberIds) {
+                res.status(404).json({ message: 'Branch not found' });
+                return;
+            }
+            query._id = filter.branchId
+                ? { $in: memberIds }
+                : { $nin: memberIds };
+        }
+
+        const total = await User.countDocuments(query);
+        const usersQuery = User.find(query)
+            .select('_id username privilege secondPrivilege isActive manager')
+            .sort({ username: 1 })
+            .skip(filter.skip)
+            .lean();
+        if (filter.limit) usersQuery.limit(filter.limit);
+
+        const users = await usersQuery;
+        const branchMap = await getBranchMapForUsers(users.map(user => String(user._id)));
+        const employees = users.map(user => ({
+            _id: String(user._id),
+            username: user.username,
+            privilege: user.privilege,
+            secondPrivilege: user.secondPrivilege,
+            isActive: user.isActive,
+            branch: branchMap.get(String(user._id)) ?? null,
+        }));
+
+        res.status(200).json({
+            total,
+            skip: filter.skip,
+            limit: filter.limit ?? null,
+            employees,
+        });
     } catch (e) {
         onCatchError(e, res);
     }

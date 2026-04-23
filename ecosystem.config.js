@@ -9,12 +9,12 @@ module.exports = {
       env: {
         NODE_ENV: 'production',
         PORT: 4000,
+        LOG_DIR: 'logs',
       },
       watch: false,
       max_memory_restart: '512M',
-      // Optional: log paths (PM2 will create them). Without this, PM2 uses its own default logs dir.
-      // error_file: 'logs/err.log',
-      // out_file: 'logs/out.log',
+      error_file: 'logs/pm2-error.log',
+      out_file: 'logs/pm2-out.log',
       time: true,
       env_file: '.env'
     },

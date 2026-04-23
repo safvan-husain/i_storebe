@@ -6,7 +6,7 @@ import User from './User';
 export interface IActivity extends Document {
     _id: Types.ObjectId;
     activator: Types.ObjectId;
-    lead: Types.ObjectId;
+    lead?: Types.ObjectId;
     action: string;
     type: ActivityType;
     optionalMessage?: string;
@@ -21,7 +21,7 @@ interface IActivityModel extends mongoose.Model<IActivity> {
 const activitySchema = new Schema<IActivity>(
     {
         activator: {type: Schema.Types.ObjectId, ref: 'User', required: true},
-        lead: {type: Schema.Types.ObjectId, ref: 'Lead', required: true},
+        lead: {type: Schema.Types.ObjectId, ref: 'Lead', required: false},
         task: {type: Schema.Types.ObjectId, ref: 'Task'},
         action: {type: String, required: true},
         optionalMessage: {type: String, required: false},
@@ -85,6 +85,30 @@ activitySchema.statics.createActivity = async function (activityData) {
             case 'dialed':
                 activityData.action = `${activatorName} dialed`;
                 break;
+            case 'branch_created':
+                activityData.action = `${activatorName} created a branch`;
+                break;
+            case 'branch_updated':
+                activityData.action = `${activatorName} updated a branch`;
+                break;
+            case 'branch_staff_added':
+                activityData.action = `${activatorName} added staff to a branch`;
+                break;
+            case 'branch_staff_removed':
+                activityData.action = `${activatorName} removed staff from a branch`;
+                break;
+            case 'branch_staff_transferred':
+                activityData.action = `${activatorName} transferred staff between branches`;
+                break;
+            case 'branch_location_updated':
+                activityData.action = `${activatorName} updated a branch location`;
+                break;
+            case 'branch_activated':
+                activityData.action = `${activatorName} activated a branch`;
+                break;
+            case 'branch_inactivated':
+                activityData.action = `${activatorName} inactivated a branch`;
+                break;
             default:
                 activityData.action = `${activatorName} performed an action`;
         }
@@ -95,6 +119,5 @@ activitySchema.statics.createActivity = async function (activityData) {
 const Activity = mongoose.model<IActivity, IActivityModel>('Activity', activitySchema);
 
 export default Activity;
-
 
 

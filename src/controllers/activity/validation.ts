@@ -7,7 +7,10 @@ export const activityTypeSchema = z.enum(
         'lead_updated', 'note_added', 'followup_added',
         'status_updated', 'made_won', 'removed_won', 'completed',
         'purpose_updated', 'check_in', 'check_out',
-        'lead_transfer', 'call_status_updated', 'dialed'
+        'lead_transfer', 'call_status_updated', 'dialed',
+        'branch_created', 'branch_updated', 'branch_staff_added',
+        'branch_staff_removed', 'branch_staff_transferred',
+        'branch_location_updated', 'branch_activated', 'branch_inactivated'
     ]);
 
 export type ActivityType = z.infer<typeof activityTypeSchema>;
@@ -52,4 +55,3 @@ export const statsSchema = z.object({
     pending_tasks: z.number().default(0),
     overdue_tasks: z.number().default(0)
 });
-
