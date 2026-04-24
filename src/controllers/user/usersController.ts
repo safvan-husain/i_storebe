@@ -189,7 +189,8 @@ export const queryEmployees = asyncHandler(async (req: Request, res: Response) =
 
         const total = await User.countDocuments(query);
         const usersQuery = User.find(query)
-            .select('_id username privilege secondPrivilege isActive manager')
+            .select('_id username privilege secondPrivilege isActive manager profileImageFile')
+            .populate('profileImageFile', '_id fileName path mimeType size')
             .sort({ username: 1 })
             .skip(filter.skip)
             .lean();
@@ -203,6 +204,7 @@ export const queryEmployees = asyncHandler(async (req: Request, res: Response) =
             privilege: user.privilege,
             secondPrivilege: user.secondPrivilege,
             isActive: user.isActive,
+            profileImageFile: (user as any).profileImageFile ?? null,
             branch: branchMap.get(String(user._id)) ?? null,
         }));
 

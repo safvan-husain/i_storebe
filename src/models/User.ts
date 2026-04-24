@@ -21,6 +21,7 @@ export interface IUser extends Document {
     fcmToken?: string;
     //for hosting (app store guideline)
     isAccountDeleted: boolean;
+    profileImageFile?: Types.ObjectId;
 }
 
 interface UserModel extends Model<IUser> {
@@ -30,6 +31,7 @@ interface UserModel extends Model<IUser> {
     privilege: UserPrivilege;
     secondPrivilege: SecondUserPrivilege;
     manager?: Types.ObjectId;
+    profileImageFile?: Types.ObjectId;
     phone: string;
 }
 
@@ -71,6 +73,10 @@ const UserSchema = new mongoose.Schema(
         manager: {
             type: mongoose.Schema.Types.ObjectId,
             ref: 'User',
+        },
+        profileImageFile: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'FileDocument',
         },
         isActive: { type: Boolean, default: true},
         isNewPassword: { type: Boolean, default: false }

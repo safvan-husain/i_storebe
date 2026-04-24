@@ -1,5 +1,5 @@
 import express from 'express';
-import {createUser, getUsers, getUserById, updateFcmToken, deleteAccount} from '../controllers/auth/authController';
+import {createUser, createUserV2, getUsers, getUserById, updateFcmToken, deleteAccount, updateUserImageV2, updateUserV2} from '../controllers/auth/authController';
 import { protect } from '../middleware/auth';
 import {changeUserPassword, getManagers, getStaffs, updateActiveStatus, getActiveStaffsForManager, queryEmployees} from "../controllers/user/usersController";
 import {getNotifications} from "../services/notification-services";
@@ -11,6 +11,9 @@ router
   .post(protect, createUser)
   .get(protect, getUsers);
 
+router.route('/v2').post(protect, createUserV2);
+router.route('/v2/:id').put(protect, updateUserV2);
+router.route('/v2/:id/image').put(protect, updateUserImageV2);
 router.route('/manager').get(protect, getManagers);
 router.route('/staff').get(protect, getStaffs);
 router.route('/employees/query').post(protect, queryEmployees);

@@ -10,6 +10,22 @@ export const UserRequestSchema = z.object({
   secondPrivilege: secondUserPrivilegeSchema.exclude(['super']).default('regular')
 });
 
+export const userImagePayloadSchema = z.object({
+  fileName: z.string().trim().min(1),
+  mimeType: z.string().trim().optional(),
+  base64: z.string().trim().min(1),
+}).optional();
+
+export const UserRequestV2Schema = UserRequestSchema.extend({
+  manager: ObjectIdSchema.optional().nullable(),
+  image: userImagePayloadSchema,
+});
+
+export const UpdateUserV2Schema = z.object({
+  secondPrivilege: secondUserPrivilegeSchema.exclude(['super']),
+  image: userImagePayloadSchema,
+});
+
 export const loginSchema = z.object({
   username: z.string(), // Adjust min/max based on phone format requirements
   password: z.string().min(8), // Ensure a minimum length for security

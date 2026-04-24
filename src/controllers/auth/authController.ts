@@ -1,16 +1,19 @@
 import {Request, Response} from 'express';
 import User, {IUser} from '../../models/User';
 import LoginHistory from '../../models/LoginHistory';
+import FileDocument from '../../models/FileDocument';
 import {generateToken} from '../../utils/jwtUtils';
 import asyncHandler from 'express-async-handler';
-import {loginSchema, UserRequestSchema} from './validation';
-import {onCatchError} from '../../middleware/error';
+import {loginSchema, UpdateUserV2Schema, UserRequestSchema, UserRequestV2Schema, userImagePayloadSchema} from './validation';
+import {AppError, onCatchError} from '../../middleware/error';
 import {FilterQuery, Types} from 'mongoose';
 import {ObjectIdSchema, SecondUserPrivilege, UserPrivilege, UserPrivilegeSchema} from "../../common/types";
 import {TypedResponse} from "../../common/interface";
 import {z} from "zod";
 import {ManagerWithStaffs, managerWithStaffsSchema} from "../leads/validations";
 import {runtimeValidation} from "../../utils/validation";
+import fs from 'fs/promises';
+import path from 'path';
 
 interface UserResponse {
     username: string;
@@ -18,7 +21,53 @@ interface UserResponse {
     privilege: UserPrivilege;
     secondPrivilege: SecondUserPrivilege;
     manager?: string;
+    profileImageFile?: string;
 }
+
+const uploadRoot = path.resolve(__dirname, '../../../uploads/users');
+
+const extensionFromMimeType = (mimeType?: string) => {
+    switch (mimeType) {
+        case 'image/jpeg':
+            return '.jpg';
+        case 'image/png':
+            return '.png';
+        case 'image/webp':
+            return '.webp';
+        default:
+            return '';
+    }
+};
+
+const sanitizeFileName = (fileName: string) =>
+    path.basename(fileName).replace(/[^a-zA-Z0-9._-]/g, '_');
+
+const createImageDocument = async (
+    image: NonNullable<z.infer<typeof userImagePayloadSchema>>,
+    uploadedBy?: string,
+) => {
+    const mimeType = image.mimeType;
+    if (mimeType && !['image/jpeg', 'image/png', 'image/webp'].includes(mimeType)) {
+        throw new AppError('Only jpeg, png, and webp profile images are supported', 400);
+    }
+
+    await fs.mkdir(uploadRoot, { recursive: true });
+    const originalName = sanitizeFileName(image.fileName);
+    const extension = path.extname(originalName) || extensionFromMimeType(mimeType);
+    const fileName = `${Date.now()}-${new Types.ObjectId().toString()}${extension}`;
+    const filePath = path.join(uploadRoot, fileName);
+    const buffer = Buffer.from(image.base64, 'base64');
+    await fs.writeFile(filePath, buffer);
+
+    return FileDocument.create({
+        fileName,
+        originalName,
+        path: `uploads/users/${fileName}`,
+        mimeType,
+        size: buffer.length,
+        uploadedBy: uploadedBy ? Types.ObjectId.createFromHexString(uploadedBy) : undefined,
+    });
+};
 
 export const loginUser = asyncHandler(async (req: Request, res: Response) => {
     try {
@@ -169,6 +218,158 @@ export const createUser = asyncHandler(async (req: Request, res: TypedResponse<U
         } else {
             res.status(200).json({message: "Failed to create user"});
         }
+    } catch (error) {
+        onCatchError(error, res);
+    }
+});
+
+export const createUserV2 = asyncHandler(async (req: Request, res: TypedResponse<UserResponse>) => {
+    try {
+        let {username, privilege, manager, image, ...rest} = UserRequestV2Schema.parse(req.body);
+        username = username.trim();
+
+        if (!['admin', 'manager'].includes(req?.privilege ?? "")) {
+            res.status(403).json({message: "You don't have permission to create users"});
+            return;
+        }
+
+        if (req?.privilege === 'manager') {
+            if (privilege !== 'staff') {
+                res.status(403).json({message: "You only have permission to create staff"});
+                return;
+            }
+            manager = req.userId;
+        }
+
+        const userExists = await User.findOne({username});
+        if (userExists) {
+            res.status(400).json({message: "User already exists"});
+            return;
+        }
+
+        let managerId: string | undefined;
+        if (manager) {
+            const managerExists = await User.findById(manager, {privilege: true});
+            if (!managerExists) {
+                res.status(404).json({message: "Manager not found"});
+                return;
+            }
+            if (managerExists.privilege !== 'manager') {
+                res.status(400).json({message: "provided manager is not a manager"});
+                return;
+            }
+            managerId = manager;
+        }
+
+        const imageDocument = image ? await createImageDocument(image, req.userId) : undefined;
+
+        const user = await User.create({
+            ...rest,
+            username,
+            privilege,
+            manager: privilege === 'staff' ? managerId : undefined,
+            profileImageFile: imageDocument?._id,
+        });
+
+        res.status(201).json({
+            username: user.username,
+            _id: user._id.toString(),
+            privilege: user.privilege,
+            secondPrivilege: user.secondPrivilege,
+            ...(user.profileImageFile ? {profileImageFile: user.profileImageFile.toString()} : {}),
+        });
+    } catch (error) {
+        onCatchError(error, res);
+    }
+});
+
+const updateUserImageV2Schema = z.object({
+    image: userImagePayloadSchema.refine(Boolean, { message: 'image is required' }),
+});
+
+export const updateUserImageV2 = asyncHandler(async (req: Request, res: TypedResponse<any>) => {
+    try {
+        if (!req.userId) {
+            res.status(403).json({message: "user id not found"});
+            return;
+        }
+        if (req.privilege === UserPrivilegeSchema.enum.staff) {
+            res.status(403).json({ message: "Not authorized not access this api"});
+            return;
+        }
+
+        const id = ObjectIdSchema.parse(req.params.id);
+        const {image} = updateUserImageV2Schema.parse(req.body);
+        if (!image) {
+            res.status(400).json({ message: 'image is required' });
+            return;
+        }
+        const imageDocument = await createImageDocument(image, req.userId);
+        const user = await User.findByIdAndUpdate(id, { profileImageFile: imageDocument._id }, { new: true });
+        if (!user) {
+            res.status(404).json({message: "user not found"});
+            return;
+        }
+
+        res.status(200).json({
+            message: 'profile image updated',
+            profileImageFile: imageDocument._id.toString(),
+            image: {
+                _id: imageDocument._id.toString(),
+                fileName: imageDocument.fileName,
+                path: imageDocument.path,
+            },
+        });
+    } catch (error) {
+        onCatchError(error, res);
+    }
+});
+
+export const updateUserV2 = asyncHandler(async (req: Request, res: TypedResponse<any>) => {
+    try {
+        if (!req.userId) {
+            res.status(403).json({message: "user id not found"});
+            return;
+        }
+        if (req.privilege === UserPrivilegeSchema.enum.staff) {
+            res.status(403).json({ message: "Not authorized not access this api"});
+            return;
+        }
+
+        const id = ObjectIdSchema.parse(req.params.id);
+        const {secondPrivilege, image} = UpdateUserV2Schema.parse(req.body);
+        const targetUser = await User.findById(id, { privilege: true, isAccountDeleted: true });
+        if (!targetUser || targetUser.isAccountDeleted) {
+            res.status(404).json({message: "user not found"});
+            return;
+        }
+        if (req.privilege === UserPrivilegeSchema.enum.manager && targetUser.privilege !== UserPrivilegeSchema.enum.staff) {
+            res.status(403).json({message: "Managers can only edit staff users"});
+            return;
+        }
+
+        const imageDocument = image ? await createImageDocument(image, req.userId) : undefined;
+        const user = await User.findByIdAndUpdate(
+            id,
+            {
+                secondPrivilege,
+                ...(imageDocument ? { profileImageFile: imageDocument._id } : {}),
+            },
+            { new: true },
+        )
+            .select('_id username privilege secondPrivilege profileImageFile')
+            .populate('profileImageFile', '_id fileName path mimeType size')
+            .lean();
+
+        res.status(200).json({
+            user: {
+                _id: String(user!._id),
+                username: user!.username,
+                privilege: user!.privilege,
+                secondPrivilege: user!.secondPrivilege,
+                profileImageFile: (user as any).profileImageFile ?? null,
+            },
+        });
     } catch (error) {
         onCatchError(error, res);
     }
