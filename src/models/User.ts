@@ -22,6 +22,10 @@ export interface IUser extends Document {
     //for hosting (app store guideline)
     isAccountDeleted: boolean;
     profileImageFile?: Types.ObjectId;
+    faceEmbedding?: number[];
+    faceEmbeddingModel?: string;
+    faceEmbeddingUpdatedAt?: Date;
+    faceEmbeddingSourceImage?: Types.ObjectId;
 }
 
 interface UserModel extends Model<IUser> {
@@ -32,6 +36,10 @@ interface UserModel extends Model<IUser> {
     secondPrivilege: SecondUserPrivilege;
     manager?: Types.ObjectId;
     profileImageFile?: Types.ObjectId;
+    faceEmbedding?: number[];
+    faceEmbeddingModel?: string;
+    faceEmbeddingUpdatedAt?: Date;
+    faceEmbeddingSourceImage?: Types.ObjectId;
     phone: string;
 }
 
@@ -75,6 +83,21 @@ const UserSchema = new mongoose.Schema(
             ref: 'User',
         },
         profileImageFile: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'FileDocument',
+        },
+        faceEmbedding: {
+            type: [Number],
+            select: false,
+        },
+        faceEmbeddingModel: {
+            type: String,
+            trim: true,
+        },
+        faceEmbeddingUpdatedAt: {
+            type: Date,
+        },
+        faceEmbeddingSourceImage: {
             type: mongoose.Schema.Types.ObjectId,
             ref: 'FileDocument',
         },

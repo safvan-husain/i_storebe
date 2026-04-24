@@ -7,10 +7,53 @@ import User, {IUser} from "../../models/User";
 import Branch from "../../models/Branch";
 import {onCatchError} from "../../middleware/error";
 import {TypedResponse} from "../../common/interface";
-import {UserPrivilegeSchema} from "../../common/types";
+import {ObjectIdSchema, UserPrivilegeSchema} from "../../common/types";
 import {changeUserPasswordRequestSchema, inActivateUserRequestSchema} from "../leads/validations";
+import {faceEmbeddingPayloadSchema} from "../auth/validation";
+import {z} from "zod";
 
 const escapeRegex = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+const faceEnrollmentUpdateSchema = z.object({
+    faceEmbedding: faceEmbeddingPayloadSchema.refine(Boolean, { message: 'faceEmbedding is required' }),
+});
+
+const canManageFaceEnrollment = async (req: Request, userId: string, res: Response) => {
+    if (!req.userId) {
+        res.status(403).json({ message: 'user id not found' });
+        return null;
+    }
+    if (req.privilege === UserPrivilegeSchema.enum.staff) {
+        res.status(403).json({ message: 'Not authorized not access this api' });
+        return null;
+    }
+
+    const user = await User.findById(userId)
+        .select('_id username privilege profileImageFile isAccountDeleted faceEmbeddingModel faceEmbeddingUpdatedAt faceEmbeddingSourceImage +faceEmbedding')
+        .populate('profileImageFile', '_id fileName path mimeType size')
+        .lean();
+
+    if (!user || user.isAccountDeleted) {
+        res.status(404).json({ message: 'user not found' });
+        return null;
+    }
+
+    if (req.privilege === UserPrivilegeSchema.enum.manager && user.privilege !== UserPrivilegeSchema.enum.staff) {
+        res.status(403).json({ message: 'Managers can only manage staff users' });
+        return null;
+    }
+
+    return user;
+};
+
+const faceEnrollmentResponse = (user: any) => ({
+    userId: String(user._id),
+    faceEnrolled: Array.isArray(user.faceEmbedding) && user.faceEmbedding.length > 0,
+    faceEmbedding: user.faceEmbedding ?? null,
+    faceEmbeddingModel: user.faceEmbeddingModel ?? null,
+    faceEmbeddingUpdatedAt: user.faceEmbeddingUpdatedAt ?? null,
+    profileImageFile: user.profileImageFile ?? null,
+});
 
 const getBranchMemberIds = async (branchId: string) => {
     const branch = await Branch.findById(branchId, { manager: true, staffs: true }).lean();
@@ -189,7 +232,7 @@ export const queryEmployees = asyncHandler(async (req: Request, res: Response) =
 
         const total = await User.countDocuments(query);
         const usersQuery = User.find(query)
-            .select('_id username privilege secondPrivilege isActive manager profileImageFile')
+            .select('_id username privilege secondPrivilege isActive manager profileImageFile +faceEmbedding')
             .populate('profileImageFile', '_id fileName path mimeType size')
             .sort({ username: 1 })
             .skip(filter.skip)
@@ -205,6 +248,7 @@ export const queryEmployees = asyncHandler(async (req: Request, res: Response) =
             secondPrivilege: user.secondPrivilege,
             isActive: user.isActive,
             profileImageFile: (user as any).profileImageFile ?? null,
+            faceEnrolled: Array.isArray((user as any).faceEmbedding) && (user as any).faceEmbedding.length > 0,
             branch: branchMap.get(String(user._id)) ?? null,
         }));
 
@@ -214,6 +258,65 @@ export const queryEmployees = asyncHandler(async (req: Request, res: Response) =
             limit: filter.limit ?? null,
             employees,
         });
+    } catch (e) {
+        onCatchError(e, res);
+    }
+});
+
+export const getFaceEnrollment = asyncHandler(async (req: Request, res: Response) => {
+    try {
+        const id = ObjectIdSchema.parse(req.params.id);
+        const user = await canManageFaceEnrollment(req, id, res);
+        if (!user) return;
+
+        res.status(200).json(faceEnrollmentResponse(user));
+    } catch (e) {
+        onCatchError(e, res);
+    }
+});
+
+export const updateFaceEnrollment = asyncHandler(async (req: Request, res: Response) => {
+    try {
+        const id = ObjectIdSchema.parse(req.params.id);
+        const existingUser = await canManageFaceEnrollment(req, id, res);
+        if (!existingUser) return;
+        if (!(existingUser as any).profileImageFile) {
+            res.status(400).json({ message: 'profile image is required before enrolling face' });
+            return;
+        }
+
+        const parsedBody = faceEnrollmentUpdateSchema.safeParse(req.body);
+        if (!parsedBody.success) {
+            res.status(400).json({
+                message: parsedBody.error.errors.length > 0
+                    ? `${parsedBody.error.errors[0].path[0]}: ${parsedBody.error.errors[0].message}`
+                    : 'Validation error',
+                errors: parsedBody.error.errors,
+            });
+            return;
+        }
+
+        const { faceEmbedding } = parsedBody.data;
+        if (!faceEmbedding) {
+            res.status(400).json({ message: 'faceEmbedding is required' });
+            return;
+        }
+
+        const user = await User.findByIdAndUpdate(
+            id,
+            {
+                faceEmbedding: faceEmbedding.vector,
+                faceEmbeddingModel: faceEmbedding.model,
+                faceEmbeddingUpdatedAt: new Date(),
+                faceEmbeddingSourceImage: (existingUser as any).profileImageFile._id ?? (existingUser as any).profileImageFile,
+            },
+            { new: true },
+        )
+            .select('_id username privilege profileImageFile faceEmbeddingModel faceEmbeddingUpdatedAt faceEmbeddingSourceImage +faceEmbedding')
+            .populate('profileImageFile', '_id fileName path mimeType size')
+            .lean();
+
+        res.status(200).json(faceEnrollmentResponse(user));
     } catch (e) {
         onCatchError(e, res);
     }

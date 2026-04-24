@@ -4,7 +4,7 @@ import LoginHistory from '../../models/LoginHistory';
 import FileDocument from '../../models/FileDocument';
 import {generateToken} from '../../utils/jwtUtils';
 import asyncHandler from 'express-async-handler';
-import {loginSchema, UpdateUserV2Schema, UserRequestSchema, UserRequestV2Schema, userImagePayloadSchema} from './validation';
+import {faceEmbeddingPayloadSchema, loginSchema, UpdateUserV2Schema, UserRequestSchema, UserRequestV2Schema, userImagePayloadSchema} from './validation';
 import {AppError, onCatchError} from '../../middleware/error';
 import {FilterQuery, Types} from 'mongoose';
 import {ObjectIdSchema, SecondUserPrivilege, UserPrivilege, UserPrivilegeSchema} from "../../common/types";
@@ -67,6 +67,28 @@ const createImageDocument = async (
         size: buffer.length,
         uploadedBy: uploadedBy ? Types.ObjectId.createFromHexString(uploadedBy) : undefined,
     });
+};
+
+const faceEmbeddingUpdate = (
+    faceEmbedding: z.infer<typeof faceEmbeddingPayloadSchema>,
+    sourceImageId?: Types.ObjectId,
+) => {
+    if (!faceEmbedding) return {};
+    return {
+        faceEmbedding: faceEmbedding.vector,
+        faceEmbeddingModel: faceEmbedding.model,
+        faceEmbeddingUpdatedAt: new Date(),
+        ...(sourceImageId ? { faceEmbeddingSourceImage: sourceImageId } : {}),
+    };
+};
+
+const clearFaceEmbeddingUpdate = {
+    $unset: {
+        faceEmbedding: '',
+        faceEmbeddingModel: '',
+        faceEmbeddingUpdatedAt: '',
+        faceEmbeddingSourceImage: '',
+    },
 };
 
 export const loginUser = asyncHandler(async (req: Request, res: Response) => {
@@ -225,7 +247,7 @@ export const createUser = asyncHandler(async (req: Request, res: TypedResponse<U
 
 export const createUserV2 = asyncHandler(async (req: Request, res: TypedResponse<UserResponse>) => {
     try {
-        let {username, privilege, manager, image, ...rest} = UserRequestV2Schema.parse(req.body);
+        let {username, privilege, manager, image, faceEmbedding, ...rest} = UserRequestV2Schema.parse(req.body);
         username = username.trim();
 
         if (!['admin', 'manager'].includes(req?.privilege ?? "")) {
@@ -269,6 +291,7 @@ export const createUserV2 = asyncHandler(async (req: Request, res: TypedResponse
             privilege,
             manager: privilege === 'staff' ? managerId : undefined,
             profileImageFile: imageDocument?._id,
+            ...faceEmbeddingUpdate(faceEmbedding, imageDocument?._id),
         });
 
         res.status(201).json({
@@ -285,6 +308,7 @@ export const createUserV2 = asyncHandler(async (req: Request, res: TypedResponse
 
 const updateUserImageV2Schema = z.object({
     image: userImagePayloadSchema.refine(Boolean, { message: 'image is required' }),
+    faceEmbedding: faceEmbeddingPayloadSchema,
 });
 
 export const updateUserImageV2 = asyncHandler(async (req: Request, res: TypedResponse<any>) => {
@@ -299,13 +323,22 @@ export const updateUserImageV2 = asyncHandler(async (req: Request, res: TypedRes
         }
 
         const id = ObjectIdSchema.parse(req.params.id);
-        const {image} = updateUserImageV2Schema.parse(req.body);
+        const {image, faceEmbedding} = updateUserImageV2Schema.parse(req.body);
         if (!image) {
             res.status(400).json({ message: 'image is required' });
             return;
         }
         const imageDocument = await createImageDocument(image, req.userId);
-        const user = await User.findByIdAndUpdate(id, { profileImageFile: imageDocument._id }, { new: true });
+        const update = faceEmbedding
+            ? {
+                profileImageFile: imageDocument._id,
+                ...faceEmbeddingUpdate(faceEmbedding, imageDocument._id),
+            }
+            : {
+                $set: { profileImageFile: imageDocument._id },
+                ...clearFaceEmbeddingUpdate,
+            };
+        const user = await User.findByIdAndUpdate(id, update, { new: true });
         if (!user) {
             res.status(404).json({message: "user not found"});
             return;
@@ -337,7 +370,7 @@ export const updateUserV2 = asyncHandler(async (req: Request, res: TypedResponse
         }
 
         const id = ObjectIdSchema.parse(req.params.id);
-        const {secondPrivilege, image} = UpdateUserV2Schema.parse(req.body);
+        const {secondPrivilege, image, faceEmbedding} = UpdateUserV2Schema.parse(req.body);
         const targetUser = await User.findById(id, { privilege: true, isAccountDeleted: true });
         if (!targetUser || targetUser.isAccountDeleted) {
             res.status(404).json({message: "user not found"});
@@ -349,12 +382,19 @@ export const updateUserV2 = asyncHandler(async (req: Request, res: TypedResponse
         }
 
         const imageDocument = image ? await createImageDocument(image, req.userId) : undefined;
-        const user = await User.findByIdAndUpdate(
-            id,
-            {
+        const update: any = {
+            $set: {
                 secondPrivilege,
                 ...(imageDocument ? { profileImageFile: imageDocument._id } : {}),
+                ...faceEmbeddingUpdate(faceEmbedding, imageDocument?._id),
             },
+        };
+        if (imageDocument && !faceEmbedding) {
+            update.$unset = clearFaceEmbeddingUpdate.$unset;
+        }
+        const user = await User.findByIdAndUpdate(
+            id,
+            update,
             { new: true },
         )
             .select('_id username privilege secondPrivilege profileImageFile')

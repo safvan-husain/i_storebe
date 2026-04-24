@@ -16,14 +16,24 @@ export const userImagePayloadSchema = z.object({
   base64: z.string().trim().min(1),
 }).optional();
 
+export const faceEmbeddingPayloadSchema = z.object({
+  model: z.string().trim().min(1).max(120),
+  vector: z.array(z.number().finite()).refine(
+    value => value.length === 128 || value.length === 192,
+    { message: 'Face embedding vector must contain 128 or 192 values' },
+  ),
+}).optional();
+
 export const UserRequestV2Schema = UserRequestSchema.extend({
   manager: ObjectIdSchema.optional().nullable(),
   image: userImagePayloadSchema,
+  faceEmbedding: faceEmbeddingPayloadSchema,
 });
 
 export const UpdateUserV2Schema = z.object({
   secondPrivilege: secondUserPrivilegeSchema.exclude(['super']),
   image: userImagePayloadSchema,
+  faceEmbedding: faceEmbeddingPayloadSchema,
 });
 
 export const loginSchema = z.object({
