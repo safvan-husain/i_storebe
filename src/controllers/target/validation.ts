@@ -20,13 +20,23 @@ export function getMonthOnly(val?: number) : Date {
 
 
 export const TargetCreateSchema = z.object({
-    assigned: ObjectIdSchema,
+    assigned: ObjectIdSchema.optional(),
+    branch: ObjectIdSchema.optional(),
+    branchId: ObjectIdSchema.optional(),
     //saving month in utc.
     month: z.number().transform(getMonthOnly),
-    total: z.number()
+    total: z.number(),
+    allocations: z.array(z.object({
+        assigned: ObjectIdSchema,
+        total: z.number(),
+    })).optional(),
+}).refine(value => value.assigned || value.branch || value.branchId, {
+    message: 'Pass either assigned or branch',
 });
 
 export const TargetFilterSchema = z.object({
+    branch: ObjectIdSchema.optional(),
+    branchId: ObjectIdSchema.optional(),
     month: IstToUtsOptionalFromStringSchema.transform(val => {
         if(!val) return  getMonthOnly();
         return getMonthOnly(val.getTime() + istUtcOffset);

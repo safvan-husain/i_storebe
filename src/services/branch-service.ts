@@ -4,6 +4,7 @@ import Branch, { IBranch } from '../models/Branch';
 import User from '../models/User';
 import { AppError } from '../middleware/error';
 import { ObjectIdSchema, UserPrivilegeSchema } from '../common/types';
+import { closeOpenMembershipsForUsers, syncOpenMembershipsForBranch } from './branch-context';
 import {
     addStaffSchema,
     createBranchSchema,
@@ -229,6 +230,13 @@ export const branchService = {
 
         await removeUsersFromOtherBranches({ branchId: branch._id, managerId, staffIds });
         if (staffIds.length > 0) await syncStaffManagers(staffIds, managerId);
+        await syncOpenMembershipsForBranch({
+            branch: branch._id,
+            manager: managerId,
+            staffs: staffIds,
+            actor: toObjectId(actor.userId),
+            startedAt: branch.createdAt,
+        });
         const manager = managerId ? await User.findById(managerId, { username: true }).lean() : null;
         await logBranchActivity({
             actor,
@@ -336,6 +344,7 @@ export const branchService = {
         const removedStaffs = previousStaffs
             .filter(id => !nextStaffStrings.includes(id))
             .map(id => toObjectId(id));
+        const managerChanged = String(nextManager ?? '') !== String(oldManager ?? '');
 
         await removeUsersFromOtherBranches({ branchId, managerId: nextManager, staffIds: nextStaffs });
 
@@ -346,6 +355,20 @@ export const branchService = {
 
         await syncStaffManagers(nextStaffs, nextManager);
         await syncStaffManagers(removedStaffs, null);
+        if (managerChanged && oldManager) {
+            await closeOpenMembershipsForUsers({
+                users: [toObjectId(oldManager)],
+                endedBy: toObjectId(actor.userId),
+                endReason: 'manager_changed',
+            });
+        }
+        await syncOpenMembershipsForBranch({
+            branch: branch._id,
+            manager: branch.manager,
+            staffs: branch.staffs,
+            actor: toObjectId(actor.userId),
+            removedReason: 'removed',
+        });
         if (data.name && data.name.trim().replace(/\s+/g, ' ') !== oldName) {
             await logBranchActivity({
                 actor,
@@ -404,6 +427,7 @@ export const branchService = {
 
     async addStaffToBranch(actor: Actor, branchIdParam: string, payload: unknown) {
         ensureAdmin(actor);
+        if (!actor.userId) throw new AppError('User id not found', 401);
         const branchId = toObjectId(ObjectIdSchema.parse(branchIdParam));
         const data = addStaffSchema.parse(payload);
         const branch = await Branch.findById(branchId);
@@ -422,6 +446,12 @@ export const branchService = {
         branch.staffs = allStaffIds;
         await branch.save();
         await syncStaffManagers(staffIds, branch.manager);
+        await syncOpenMembershipsForBranch({
+            branch: branch._id,
+            manager: branch.manager,
+            staffs: branch.staffs,
+            actor: toObjectId(actor.userId),
+        });
         await logBranchActivity({
             actor,
             type: conflicts.length > 0 ? 'branch_staff_transferred' : 'branch_staff_added',
@@ -434,6 +464,7 @@ export const branchService = {
 
     async removeStaffFromBranch(actor: Actor, branchIdParam: string, staffIdParam: string) {
         ensureAdmin(actor);
+        if (!actor.userId) throw new AppError('User id not found', 401);
         const branchId = toObjectId(ObjectIdSchema.parse(branchIdParam));
         const staffId = toObjectId(ObjectIdSchema.parse(staffIdParam));
         const branch = await Branch.findById(branchId);
@@ -442,6 +473,13 @@ export const branchService = {
         branch.staffs = branch.staffs.filter(id => String(id) !== String(staffId));
         await branch.save();
         await syncStaffManagers([staffId], null);
+        await syncOpenMembershipsForBranch({
+            branch: branch._id,
+            manager: branch.manager,
+            staffs: branch.staffs,
+            actor: toObjectId(actor.userId),
+            removedReason: 'removed',
+        });
         await logBranchActivity({
             actor,
             type: 'branch_staff_removed',

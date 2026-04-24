@@ -82,17 +82,20 @@ function loadServiceAccount(): ServiceAccount {
   return JSON.parse(content) as ServiceAccount;
 }
 
-connectDb().catch(err => {
-  logProcessError('Startup database connection failed', err);
-});
-
-try {
-  initializeApp({
-    credential: credential.cert(loadServiceAccount()),
+async function bootstrap() {
+  await connectDb().catch(err => {
+    logProcessError('Startup database connection failed', err);
+    throw err;
   });
-} catch (error) {
-  logProcessError('Firebase initialization failed', error);
-  throw error;
+
+  try {
+    initializeApp({
+      credential: credential.cert(loadServiceAccount()),
+    });
+  } catch (error) {
+    logProcessError('Firebase initialization failed', error);
+    throw error;
+  }
 }
 
 app.use(express.urlencoded({ extended: true }));
@@ -243,26 +246,36 @@ app.post('/api/notifications/test', async (req, res) => {
     }
 });
 
-// Run daily at 12:00 AM IST
-cron.schedule('0 0 * * *', async () => {
-    console.log("Running cron job", new Date());
-    try {
-        await wishBirthDayToCustomers();
-    } catch (error) {
-        logProcessError('Birthday cron failed', error);
-    }
-}, {
-    timezone: "Asia/Kolkata"
-})
-
-startTaskScheduler();
+export default app;
 
 app.use(notFound);
 app.use(errorHandler);
 
-app.listen(PORT, () => {
-    console.log(`Server is running on http://0.0.0.0:${PORT}`);
-    void logger.log('Server started', {
-        port: PORT,
+if (process.env.NODE_ENV !== 'test' && require.main === module) {
+  void bootstrap()
+    .then(() => {
+      app.listen(PORT, () => {
+        console.log(`Server is running on http://localhost:${PORT}`);
+      });
+    })
+    .catch((error) => {
+      logProcessError('Server bootstrap failed', error);
+      process.exit(1);
     });
-});
+}
+
+if (process.env.NODE_ENV !== 'test') {
+  // Run daily at 12:00 AM IST
+  cron.schedule('0 0 * * *', async () => {
+      console.log("Running cron job", new Date());
+      try {
+          await wishBirthDayToCustomers();
+      } catch (error) {
+          logProcessError('Birthday cron failed', error);
+      }
+  }, {
+      timezone: "Asia/Kolkata"
+  });
+
+  startTaskScheduler();
+}

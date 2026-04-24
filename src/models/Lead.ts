@@ -9,6 +9,10 @@ export interface ILead<T = Types.ObjectId, S = Types.ObjectId> extends Document 
     callStatus: CallStatus;
     createdBy: mongoose.Types.ObjectId;
     manager: mongoose.Types.ObjectId;
+    createdBranch?: mongoose.Types.ObjectId;
+    handlingBranch?: mongoose.Types.ObjectId;
+    wonBranch?: mongoose.Types.ObjectId;
+    wonBy?: mongoose.Types.ObjectId;
     //useful when call center staff transfer the lead.
     isAvailableForAllUnderManager: boolean;
     //when transferring this would be useful.
@@ -64,6 +68,22 @@ const LeadSchema = new mongoose.Schema(
             ref: 'User',
             required: true,
         },
+        createdBranch: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'Branch',
+        },
+        handlingBranch: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'Branch',
+        },
+        wonBranch: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'Branch',
+        },
+        wonBy: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'User',
+        },
         handledBy: {
             type: mongoose.Schema.Types.ObjectId,
             ref: 'User',
@@ -97,6 +117,9 @@ const LeadSchema = new mongoose.Schema(
 LeadSchema.index({ manager: 1 });
 LeadSchema.index({ handledBy: 1 });
 LeadSchema.index({ createdBy: 1 });
+LeadSchema.index({ createdBranch: 1 });
+LeadSchema.index({ handlingBranch: 1 });
+LeadSchema.index({ wonBranch: 1 });
 
 const Lead = mongoose.model<ILead>('Lead', LeadSchema);
 

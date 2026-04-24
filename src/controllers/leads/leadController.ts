@@ -32,6 +32,7 @@ import { TypedResponse } from "../../common/interface";
 import Task from "../../models/Task";
 import { createNotificationForUsers } from "../../services/notification-services";
 import { runtimeValidation } from "../../utils/validation";
+import { getCurrentBranchIdForUser } from "../../services/branch-context";
 
 //search Note to see the notes for specific sections
 export const createLead = asyncHandler(
@@ -118,6 +119,8 @@ export const createLead = asyncHandler(
         customer: customer._id,
         createdBy: req.userId,
         handledBy: req.userId,
+        createdBranch: await getCurrentBranchIdForUser(req.userId),
+        handlingBranch: await getCurrentBranchIdForUser(req.userId),
         contactSnapshot: {
           name: leadData.name,
           phone: leadData.phone,
@@ -714,19 +717,22 @@ export const transferLead = asyncHandler(
       }
 
       if (data.manager) {
+        const handlingBranch = await getCurrentBranchIdForUser(data.manager);
         //when transferring to manager, this will available to all staff under him
         if (
           !(await Lead.findByIdAndUpdate(data.lead, {
             manager: data.manager,
             handledBy: data.manager,
+            handlingBranch,
           }))
         ) {
           res.status(401).json({ message: "lead not found" });
           return;
         }
       } else {
+        const handlingBranch = await getCurrentBranchIdForUser(data.staff);
         if (
-          !(await Lead.findByIdAndUpdate(data.lead, { handledBy: data.staff }))
+          !(await Lead.findByIdAndUpdate(data.lead, { handledBy: data.staff, handlingBranch }))
         ) {
           res.status(401).json({ message: "lead not found" });
           return;
@@ -772,6 +778,7 @@ const internalLeadTransfer = async ({
   if (user.privilege === "manager") {
     lead.manager = user._id;
   }
+  lead.handlingBranch = await getCurrentBranchIdForUser(user._id) as any;
   await Activity.createActivity({
     activator: requester._id,
     lead: lead._id,
@@ -968,13 +975,18 @@ export const internalLeadStatusUpdate = async ({
     if (previousStatus === "won" && nextStatus !== "won") {
       //if switched from won.
       await handleTarget({
-        updater: lead.handledBy._id as unknown as ObjectId,
+        updater: (lead.wonBy ?? lead.handledBy._id) as unknown as ObjectId,
         lead,
         type: "decrement",
       });
+      lead.wonBranch = undefined;
+      lead.wonBy = undefined as any;
     }
     lead.enquireStatus = nextStatus;
     if (nextStatus === "won") {
+      lead.wonBy = requestedUser._id;
+      lead.wonBranch = (await getCurrentBranchIdForUser(requestedUser._id)) as any
+        ?? lead.handlingBranch as any;
       await handleTarget({
         updater: requestedUser._id as unknown as ObjectId,
         lead,

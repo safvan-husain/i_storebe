@@ -1,6 +1,7 @@
 import mongoose, {Document, Schema, Types} from 'mongoose';
 import {ActivityType} from "../controllers/activity/validation";
 import User from './User';
+import { getCurrentBranchIdForUser } from '../services/branch-context';
 
 
 export interface IActivity extends Document {
@@ -11,6 +12,7 @@ export interface IActivity extends Document {
     type: ActivityType;
     optionalMessage?: string;
     task?: Types.ObjectId,
+    actorBranch?: Types.ObjectId;
     createdAt: Date;
 }
 
@@ -23,6 +25,7 @@ const activitySchema = new Schema<IActivity>(
         activator: {type: Schema.Types.ObjectId, ref: 'User', required: true},
         lead: {type: Schema.Types.ObjectId, ref: 'Lead', required: false},
         task: {type: Schema.Types.ObjectId, ref: 'Task'},
+        actorBranch: {type: Schema.Types.ObjectId, ref: 'Branch'},
         action: {type: String, required: true},
         optionalMessage: {type: String, required: false},
         type: {type: String, required: true}
@@ -31,6 +34,14 @@ const activitySchema = new Schema<IActivity>(
         timestamps: true,
     }
 );
+
+activitySchema.pre('validate', async function (next) {
+    if (!this.actorBranch && this.activator) {
+        const branchId = await getCurrentBranchIdForUser(this.activator);
+        if (branchId) this.actorBranch = branchId;
+    }
+    next();
+});
 
 // Pre-save hook to set the action based on type
 activitySchema.statics.createActivity = async function (activityData) {
@@ -119,5 +130,4 @@ activitySchema.statics.createActivity = async function (activityData) {
 const Activity = mongoose.model<IActivity, IActivityModel>('Activity', activitySchema);
 
 export default Activity;
-
 

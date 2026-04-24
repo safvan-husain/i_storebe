@@ -17,6 +17,7 @@ export type ActivityType = z.infer<typeof activityTypeSchema>;
 
 export const activityFilterSchema = z.object({
     manager: z.array(ObjectIdSchema).optional(),
+    branch: z.array(ObjectIdSchema).optional(),
     activityType: z.array(activityTypeSchema).optional(),
     staff: z.array(ObjectIdSchema).optional(),
     //the lead will be used only on specific lead, it is not actually filtering.

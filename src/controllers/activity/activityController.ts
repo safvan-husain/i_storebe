@@ -13,6 +13,7 @@ import Task, { ITask } from "../../models/Task";
 import Lead, { ILead } from "../../models/Lead";
 import Target, { ITarget } from "../../models/Target";
 import { runtimeValidation } from "../../utils/validation";
+import BranchMembership from "../../models/BranchMembership";
 
 export const getActivity = asyncHandler(
     async (req: Request, res: Response) => {
@@ -24,6 +25,7 @@ export const getActivity = asyncHandler(
             if (reqFilter.lead) {
                 query = { lead: reqFilter.lead };
             } else {
+                if (reqFilter.branch?.length ?? 0) query.actorBranch = { $in: reqFilter.branch };
                 if (reqFilter.manager?.length ?? 0) query.activator = { $in: reqFilter.manager };
                 if (reqFilter.staff?.length ?? 0) query.activator = { $in: reqFilter.staff };
                 if (reqFilter.startDate && reqFilter.endDate) {
@@ -131,10 +133,11 @@ export const createNote = asyncHandler(
 
 const requestSchema = z.object({
     manager: ObjectIdSchema.optional(),
+    branch: ObjectIdSchema.optional(),
     staff: ObjectIdSchema.optional()
 }).merge(dateFiltersSchema.partial()).refine(e => {
-    return !(e.manager && e.staff);
-}, { message: "Should not pass both manager and staff" })
+    return [e.manager, e.branch, e.staff].filter(Boolean).length <= 1;
+}, { message: "Pass only one of manager, branch, or staff" })
 
 export const getStaffReport = async (req: Request, res: TypedResponse<any>) => {
     try {
@@ -153,7 +156,7 @@ export const getStaffReport = async (req: Request, res: TypedResponse<any>) => {
         let usernames: string[] = [];
 
         //if no manager or staff, specified, group them by manager.
-        const shouldGroupByManager = !query.manager && !query.staff;
+        const shouldGroupByManager = !query.manager && !query.branch && !query.staff;
         let createdAt;
         let managerName;
 
@@ -167,6 +170,33 @@ export const getStaffReport = async (req: Request, res: TypedResponse<any>) => {
                 $gte: query.startDate,
                 $lte: query.endDate
             };
+        }
+
+        if (query.branch) {
+            const branchId = Types.ObjectId.createFromHexString(query.branch);
+            matchQuery.actorBranch = branchId;
+
+            const rangeStart = query.startDate ?? new Date(0);
+            const rangeEnd = query.endDate ?? new Date();
+            const memberships = await BranchMembership.find({
+                branch: branchId,
+                startedAt: { $lte: rangeEnd },
+                $or: [
+                    { endedAt: { $exists: false } },
+                    { endedAt: { $gte: rangeStart } },
+                ],
+            }, { user: true }).lean();
+            const membershipUserIds = memberships.map(item => item.user);
+            const activityUserIds = await Activity.distinct('activator', {
+                actorBranch: branchId,
+                ...(createdAt ? { createdAt } : {}),
+            });
+            const userIds = [...new Set([...membershipUserIds, ...activityUserIds].map(String))]
+                .map(id => Types.ObjectId.createFromHexString(id));
+
+            staffs = { $in: userIds };
+            usernames = await User.find({ _id: { $in: userIds } }, { username: true })
+                .lean().then(e => e.map(e => e.username));
         }
 
         if (query.manager) {
@@ -219,7 +249,7 @@ export const getStaffReport = async (req: Request, res: TypedResponse<any>) => {
                 .lean().then(e => e.map(e => e.username));
         }
 
-        if (staffs && !shouldGroupByManager) {
+        if (staffs && !shouldGroupByManager && !query.branch) {
             matchQuery.activator = staffs;
             //taking usernames to map at last, so user with no activity will still be shown
             let userQuery: FilterQuery<IUser> = {}
@@ -227,7 +257,7 @@ export const getStaffReport = async (req: Request, res: TypedResponse<any>) => {
             userQuery.isActive = true;
             usernames = await User.find(userQuery, { username: true })
                 .lean().then(e => e.map(e => e.username));
-        } else if (!shouldGroupByManager) {
+        } else if (!shouldGroupByManager && !query.branch) {
             // If staffs is set but we're not grouping by manager, set the match query
             matchQuery.activator = staffs;
         }
@@ -333,6 +363,9 @@ export const getStaffReport = async (req: Request, res: TypedResponse<any>) => {
 
         if (staffs) {
             leadDbQuery.createdBy = staffs;
+        }
+        if (query.branch) {
+            leadDbQuery.handlingBranch = Types.ObjectId.createFromHexString(query.branch);
         }
 
         let leadStatus: {
