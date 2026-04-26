@@ -4,6 +4,7 @@ export interface IBranch extends Document {
     _id: Types.ObjectId;
     name: string;
     normalizedName: string;
+    timezone: string;
     manager?: Types.ObjectId;
     staffs: Types.ObjectId[];
     location?: {
@@ -31,6 +32,12 @@ const BranchSchema = new mongoose.Schema(
             unique: true,
             trim: true,
             lowercase: true,
+        },
+        timezone: {
+            type: String,
+            required: true,
+            trim: true,
+            default: 'Asia/Dubai',
         },
         manager: {
             type: mongoose.Schema.Types.ObjectId,

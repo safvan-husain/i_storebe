@@ -21,6 +21,7 @@ import {customerRouter} from "./routes/customer-router";
 import adminRoutes from "./routes/adminRoutes";
 import customReportRoutes from "./routes/customReportRoutes";
 import {branchRoutes} from "./routes/branchRoutes";
+import {attendanceRoutes} from "./routes/attendanceRoutes";
 import {initializeApp} from "firebase-admin/app";
 import {credential, ServiceAccount} from "firebase-admin";
 import cron from 'node-cron';
@@ -120,6 +121,7 @@ app.use('/api/data', customerRouter);
 app.use('/api/admin', adminRoutes);
 app.use('/api/custom-reports', customReportRoutes);
 app.use('/api/branches', branchRoutes);
+app.use('/api/attendance', attendanceRoutes);
 
 const openApiDocument = getOpenApiDocument();
 

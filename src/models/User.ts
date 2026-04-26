@@ -26,6 +26,7 @@ export interface IUser extends Document {
     faceEmbeddingModel?: string;
     faceEmbeddingUpdatedAt?: Date;
     faceEmbeddingSourceImage?: Types.ObjectId;
+    attendancePrivilegeIds: Types.ObjectId[];
 }
 
 interface UserModel extends Model<IUser> {
@@ -40,6 +41,7 @@ interface UserModel extends Model<IUser> {
     faceEmbeddingModel?: string;
     faceEmbeddingUpdatedAt?: Date;
     faceEmbeddingSourceImage?: Types.ObjectId;
+    attendancePrivilegeIds: Types.ObjectId[];
     phone: string;
 }
 
@@ -101,6 +103,10 @@ const UserSchema = new mongoose.Schema(
             type: mongoose.Schema.Types.ObjectId,
             ref: 'FileDocument',
         },
+        attendancePrivilegeIds: [{
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'AttendancePrivilege',
+        }],
         isActive: { type: Boolean, default: true},
         isNewPassword: { type: Boolean, default: false }
     },
