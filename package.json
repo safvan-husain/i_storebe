@@ -14,7 +14,8 @@
     "seed:custom-reports": "ts-node src/scripts/seedCustomReports.ts",
     "change-password": "ts-node src/scripts/changePassword.ts",
     "backfill:branch-snapshots": "ts-node src/scripts/backfillBranchSnapshots.ts",
-    "provision:branches": "ts-node src/scripts/provisionBranchesFromManagers.ts"
+    "provision:branches": "ts-node src/scripts/provisionBranchesFromManagers.ts",
+    "finalize:mapped-branches": "ts-node src/scripts/finalizeMappedManagerBranches.ts"
   },
   "keywords": [],
   "author": "",

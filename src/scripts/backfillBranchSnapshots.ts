@@ -35,6 +35,15 @@ const run = async () => {
     for (const staff of branch.staffs ?? []) userBranch.set(String(staff), branch._id);
   }
 
+  const openMemberships = await BranchMembership.find({
+    endedAt: { $exists: false },
+  }, { user: true, branch: true }).lean();
+  for (const membership of openMemberships) {
+    if (!userBranch.has(String(membership.user))) {
+      userBranch.set(String(membership.user), membership.branch);
+    }
+  }
+
   let membershipsToCreate = 0;
   let leadsMatched = 0;
   let leadsUnresolved = 0;

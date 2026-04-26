@@ -16,12 +16,21 @@ export const getCurrentBranchForUser = async (userId?: string | Types.ObjectId |
         ? Types.ObjectId.createFromHexString(userId)
         : userId;
 
-    return Branch.findOne({
+    const directBranch = await Branch.findOne({
         $or: [
             { manager: objectId },
             { staffs: objectId },
         ],
     }, { _id: true, name: true }).lean();
+    if (directBranch) return directBranch;
+
+    const membership = await BranchMembership.findOne({
+        user: objectId,
+        endedAt: { $exists: false },
+    }, { branch: true }).lean();
+    if (!membership?.branch) return null;
+
+    return Branch.findById(membership.branch, { _id: true, name: true }).lean();
 };
 
 export const getCurrentBranchIdForUser = async (userId?: string | Types.ObjectId | null) => {
