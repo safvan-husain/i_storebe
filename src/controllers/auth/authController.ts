@@ -4,7 +4,7 @@ import LoginHistory from '../../models/LoginHistory';
 import FileDocument from '../../models/FileDocument';
 import {generateToken} from '../../utils/jwtUtils';
 import asyncHandler from 'express-async-handler';
-import {faceEmbeddingPayloadSchema, loginSchema, UpdateUserV2Schema, UserRequestSchema, UserRequestV2Schema, userImagePayloadSchema} from './validation';
+import {loginSchema, UpdateUserV2Schema, UserRequestSchema, UserRequestV2Schema, userImagePayloadSchema} from './validation';
 import {AppError, onCatchError} from '../../middleware/error';
 import {FilterQuery, Types} from 'mongoose';
 import {ObjectIdSchema, SecondUserPrivilege, UserPrivilege, UserPrivilegeSchema} from "../../common/types";
@@ -14,6 +14,12 @@ import {ManagerWithStaffs, managerWithStaffsSchema} from "../leads/validations";
 import {runtimeValidation} from "../../utils/validation";
 import fs from 'fs/promises';
 import path from 'path';
+import {
+    buildFaceEnrollmentFields,
+    buildProfileImageFaceEnrollmentUpdate,
+    clearFaceEnrollmentUpdate,
+    faceEmbeddingPayloadSchema,
+} from '../../services/face-enrollment-service';
 
 interface UserResponse {
     username: string;
@@ -67,28 +73,6 @@ const createImageDocument = async (
         size: buffer.length,
         uploadedBy: uploadedBy ? Types.ObjectId.createFromHexString(uploadedBy) : undefined,
     });
-};
-
-const faceEmbeddingUpdate = (
-    faceEmbedding: z.infer<typeof faceEmbeddingPayloadSchema>,
-    sourceImageId?: Types.ObjectId,
-) => {
-    if (!faceEmbedding) return {};
-    return {
-        faceEmbedding: faceEmbedding.vector,
-        faceEmbeddingModel: faceEmbedding.model,
-        faceEmbeddingUpdatedAt: new Date(),
-        ...(sourceImageId ? { faceEmbeddingSourceImage: sourceImageId } : {}),
-    };
-};
-
-const clearFaceEmbeddingUpdate = {
-    $unset: {
-        faceEmbedding: '',
-        faceEmbeddingModel: '',
-        faceEmbeddingUpdatedAt: '',
-        faceEmbeddingSourceImage: '',
-    },
 };
 
 export const loginUser = asyncHandler(async (req: Request, res: Response) => {
@@ -291,7 +275,7 @@ export const createUserV2 = asyncHandler(async (req: Request, res: TypedResponse
             privilege,
             manager: privilege === 'staff' ? managerId : undefined,
             profileImageFile: imageDocument?._id,
-            ...faceEmbeddingUpdate(faceEmbedding, imageDocument?._id),
+            ...buildFaceEnrollmentFields(faceEmbedding, imageDocument?._id),
         });
 
         res.status(201).json({
@@ -329,15 +313,7 @@ export const updateUserImageV2 = asyncHandler(async (req: Request, res: TypedRes
             return;
         }
         const imageDocument = await createImageDocument(image, req.userId);
-        const update = faceEmbedding
-            ? {
-                profileImageFile: imageDocument._id,
-                ...faceEmbeddingUpdate(faceEmbedding, imageDocument._id),
-            }
-            : {
-                $set: { profileImageFile: imageDocument._id },
-                ...clearFaceEmbeddingUpdate,
-            };
+        const update = buildProfileImageFaceEnrollmentUpdate(imageDocument._id, faceEmbedding);
         const user = await User.findByIdAndUpdate(id, update, { new: true });
         if (!user) {
             res.status(404).json({message: "user not found"});
@@ -386,11 +362,11 @@ export const updateUserV2 = asyncHandler(async (req: Request, res: TypedResponse
             $set: {
                 secondPrivilege,
                 ...(imageDocument ? { profileImageFile: imageDocument._id } : {}),
-                ...faceEmbeddingUpdate(faceEmbedding, imageDocument?._id),
+                ...buildFaceEnrollmentFields(faceEmbedding, imageDocument?._id),
             },
         };
         if (imageDocument && !faceEmbedding) {
-            update.$unset = clearFaceEmbeddingUpdate.$unset;
+            update.$unset = clearFaceEnrollmentUpdate.$unset;
         }
         const user = await User.findByIdAndUpdate(
             id,

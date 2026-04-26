@@ -1,6 +1,8 @@
 import { z } from 'zod';
-import {Types} from "mongoose";
 import {ObjectIdSchema, secondUserPrivilegeSchema, UserPrivilegeSchema} from "../../common/types";
+import { faceEmbeddingPayloadSchema } from "../../services/face-enrollment-service";
+
+export { faceEmbeddingPayloadSchema };
 
 export const UserRequestSchema = z.object({
   username: z.string(),
@@ -14,14 +16,6 @@ export const userImagePayloadSchema = z.object({
   fileName: z.string().trim().min(1),
   mimeType: z.string().trim().optional(),
   base64: z.string().trim().min(1),
-}).optional();
-
-export const faceEmbeddingPayloadSchema = z.object({
-  model: z.string().trim().min(1).max(120),
-  vector: z.array(z.number().finite()).refine(
-    value => value.length === 128 || value.length === 192,
-    { message: 'Face embedding vector must contain 128 or 192 values' },
-  ),
 }).optional();
 
 export const UserRequestV2Schema = UserRequestSchema.extend({
