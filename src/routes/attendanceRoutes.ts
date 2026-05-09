@@ -6,12 +6,14 @@ import {
     checkIn,
     checkOut,
     correctCheckout,
+    assignShiftMembers,
     createBreakSubtype,
     createBreakType,
     createPrivilege,
     createScheduleAssignment,
     createScheduleTemplate,
     createShift,
+    createShiftOverride,
     finalizeDailySnapshots,
     getEmployeeDailySnapshots,
     getEmployeePrivileges,
@@ -24,13 +26,17 @@ import {
     listPrivileges,
     listScheduleAssignments,
     listScheduleTemplates,
+    listShiftMemberships,
+    listShiftOverrides,
     listShifts,
+    removeShiftMembership,
     setEmployeePrivileges,
     updateBreakSubtype,
     updateBreakType,
     updatePrivilege,
     updateScheduleTemplate,
     updateShift,
+    updateShiftOverride,
 } from '../controllers/attendance/attendanceController';
 
 const router = express.Router();
@@ -43,6 +49,20 @@ router.route('/shifts')
 
 router.route('/shifts/:id')
     .patch(updateShift);
+
+router.route('/shift-memberships')
+    .post(assignShiftMembers)
+    .get(listShiftMemberships);
+
+router.route('/shift-memberships/:id')
+    .delete(removeShiftMembership);
+
+router.route('/shift-overrides')
+    .post(createShiftOverride)
+    .get(listShiftOverrides);
+
+router.route('/shift-overrides/:id')
+    .patch(updateShiftOverride);
 
 router.route('/privileges')
     .post(createPrivilege)

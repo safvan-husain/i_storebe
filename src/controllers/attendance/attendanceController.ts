@@ -4,7 +4,13 @@ import mongoose, { Types } from 'mongoose';
 import { AppError, onCatchError } from '../../middleware/error';
 import User from '../../models/User';
 import Branch from '../../models/Branch';
-import AttendanceShift from '../../models/AttendanceShift';
+import AttendanceShift, {
+    AttendanceWeekday,
+    IAttendanceShiftDayRule,
+    IAttendanceShiftWeeklyPattern,
+} from '../../models/AttendanceShift';
+import AttendanceShiftMembership from '../../models/AttendanceShiftMembership';
+import AttendanceShiftOverride from '../../models/AttendanceShiftOverride';
 import AttendancePrivilege from '../../models/AttendancePrivilege';
 import AttendanceBreakType, { AttendanceBreakSubtype } from '../../models/AttendanceBreak';
 import AttendanceScheduleTemplate, { AttendanceScheduleAssignment } from '../../models/AttendanceSchedule';
@@ -16,15 +22,32 @@ type GeneratedBy = 'checkout' | 'scheduled_job' | 'correction' | 'manual';
 type Actor = Pick<Request, 'userId' | 'privilege'>;
 type ResolvedShift = {
     _id: Types.ObjectId;
+    version?: number;
     startTime: string;
     endTime: string;
     requiredWorkMinutes: number;
     graceLateMinutes?: number;
     graceEarlyLeaveMinutes?: number;
 };
+type ResolvedSchedule = {
+    employeeId: string;
+    branchId: string;
+    branchTimezone: string;
+    source: 'branch' | 'global' | 'shift_membership' | null;
+    assignment: { _id: Types.ObjectId } | null;
+    template: { _id: Types.ObjectId } | null;
+    shiftMembership?: { _id: Types.ObjectId } | null;
+    override?: { _id: Types.ObjectId; overrideType: 'hours' | 'off_day' } | null;
+    shifts: ResolvedShift[];
+    scheduledSegments: Array<{ shift: Types.ObjectId; scheduledStart: string; scheduledEnd: string; requiredWorkMinutes: number }>;
+    scheduledStart?: string;
+    scheduledEnd?: string;
+    requiredWorkMinutes: number;
+};
 
 const timePattern = /^([01]\d|2[0-3]):[0-5]\d$/;
 const datePattern = /^\d{4}-\d{2}-\d{2}$/;
+const weekdays: AttendanceWeekday[] = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
 
 function requireUserId(req: Request) {
     if (!req.userId || !Types.ObjectId.isValid(req.userId)) {
@@ -87,6 +110,53 @@ function parseDate(value: unknown, fieldName: string) {
     return date;
 }
 
+function normalizeDayRule(value: unknown, fieldName: string): IAttendanceShiftDayRule | null {
+    if (value === null || value === undefined || value === false) return null;
+    if (typeof value !== 'object' || Array.isArray(value)) {
+        throw new AppError(`${fieldName} must be a day rule or null`, 400);
+    }
+    const source = value as Record<string, unknown>;
+    assertTime(source.startTime, `${fieldName}.startTime`);
+    assertTime(source.endTime, `${fieldName}.endTime`);
+    return {
+        startTime: String(source.startTime),
+        endTime: String(source.endTime),
+        requiredWorkMinutes: numberOrDefault(source.requiredWorkMinutes, 0),
+    };
+}
+
+function normalizeWeeklyPattern(body: Record<string, unknown>): IAttendanceShiftWeeklyPattern {
+    if (body.weeklyPattern && typeof body.weeklyPattern === 'object' && !Array.isArray(body.weeklyPattern)) {
+        const source = body.weeklyPattern as Record<string, unknown>;
+        return weekdays.reduce((pattern, weekday) => {
+            pattern[weekday] = normalizeDayRule(source[weekday], `weeklyPattern.${weekday}`);
+            return pattern;
+        }, {} as IAttendanceShiftWeeklyPattern);
+    }
+
+    assertTime(body.startTime, 'startTime');
+    assertTime(body.endTime, 'endTime');
+    const weekdayRule = {
+        startTime: String(body.startTime),
+        endTime: String(body.endTime),
+        requiredWorkMinutes: numberOrDefault(body.requiredWorkMinutes, 0),
+    };
+
+    return {
+        monday: weekdayRule,
+        tuesday: weekdayRule,
+        wednesday: weekdayRule,
+        thursday: weekdayRule,
+        friday: weekdayRule,
+        saturday: null,
+        sunday: null,
+    };
+}
+
+function firstWorkingRule(pattern: IAttendanceShiftWeeklyPattern) {
+    return weekdays.map((weekday) => pattern[weekday]).find((rule): rule is IAttendanceShiftDayRule => !!rule);
+}
+
 function branchLocalParts(date: Date, timezone: string) {
     const formatter = new Intl.DateTimeFormat('en-US', {
         timeZone: timezone,
@@ -109,15 +179,7 @@ function branchLocalWeekday(dateString: string, timezone: string) {
     return new Intl.DateTimeFormat('en-US', {
         timeZone: timezone,
         weekday: 'long',
-    }).format(date).toLowerCase() as keyof {
-        monday: unknown;
-        tuesday: unknown;
-        wednesday: unknown;
-        thursday: unknown;
-        friday: unknown;
-        saturday: unknown;
-        sunday: unknown;
-    };
+    }).format(date).toLowerCase() as AttendanceWeekday;
 }
 
 function minutesBetween(start: Date, end: Date) {
@@ -151,6 +213,14 @@ function timezoneOffsetMinutes(date: Date, timezone: string) {
         Number(parts.second)
     );
     return (asUtc - date.getTime()) / 60000;
+}
+
+function nextBranchLocalDayBoundaryUtc(timezone: string, from = new Date()) {
+    const local = branchLocalParts(from, timezone);
+    const [year, month, day] = local.date.split('-').map(Number);
+    const approximate = new Date(Date.UTC(year, month - 1, day + 1, 0, 0, 0));
+    const offset = timezoneOffsetMinutes(approximate, timezone);
+    return new Date(approximate.getTime() - offset * 60000);
 }
 
 function branchLocalDateTimeToUtc(dateString: string, time: string, timezone: string) {
@@ -191,10 +261,117 @@ async function assertManagerCanViewEmployee(actor: Actor, employeeId: string) {
     }
 }
 
-async function resolveSchedule(employeeId: Types.ObjectId, branchId: Types.ObjectId, dateString: string) {
+function ruleFromShiftForWeekday(shift: any, weekday: AttendanceWeekday): IAttendanceShiftDayRule | null {
+    const weeklyRule = shift.weeklyPattern?.[weekday] as IAttendanceShiftDayRule | null | undefined;
+    if (weeklyRule) return weeklyRule;
+    if (shift.startTime && shift.endTime) {
+        return {
+            startTime: shift.startTime,
+            endTime: shift.endTime,
+            requiredWorkMinutes: shift.requiredWorkMinutes ?? 0,
+        };
+    }
+    return null;
+}
+
+async function resolveWorkingShiftSchedule(
+    employeeId: Types.ObjectId,
+    branch: { _id: Types.ObjectId; timezone: string },
+    dateString: string
+): Promise<ResolvedSchedule | null> {
+    const dayStart = new Date(`${dateString}T00:00:00.000Z`);
+    const dayEnd = new Date(`${dateString}T23:59:59.999Z`);
+    const membership = await AttendanceShiftMembership.findOne({
+        employee: employeeId,
+        branch: branch._id,
+        status: 'active',
+        activeFrom: { $lte: dayEnd },
+        $or: [
+            { inactiveFrom: { $exists: false } },
+            { inactiveFrom: null },
+            { inactiveFrom: { $gt: dayStart } },
+        ],
+    }).sort({ activeFrom: -1 });
+
+    if (!membership) return null;
+
+    const shift = await AttendanceShift.findOne({ _id: membership.shift, isActive: true }).lean();
+    if (!shift) return null;
+
+    const employeeOverride = await AttendanceShiftOverride.findOne({
+        targetType: 'employee',
+        branch: branch._id,
+        employee: employeeId,
+        date: dateString,
+        isActive: true,
+    }).sort({ version: -1, createdAt: -1 }).lean();
+
+    const shiftOverride = await AttendanceShiftOverride.findOne({
+        targetType: 'shift',
+        branch: branch._id,
+        shift: shift._id,
+        date: dateString,
+        isActive: true,
+    }).sort({ version: -1, createdAt: -1 }).lean();
+
+    const override = employeeOverride ?? shiftOverride;
+    let rule = ruleFromShiftForWeekday(shift, branchLocalWeekday(dateString, branch.timezone));
+
+    if (override?.overrideType === 'off_day') {
+        rule = null;
+    } else if (override?.overrideType === 'hours') {
+        rule = {
+            startTime: override.startTime!,
+            endTime: override.endTime!,
+            requiredWorkMinutes: override.requiredWorkMinutes,
+        };
+    }
+
+    const resolvedShift: ResolvedShift | null = rule
+        ? {
+            _id: shift._id,
+            version: shift.version,
+            startTime: rule.startTime,
+            endTime: rule.endTime,
+            requiredWorkMinutes: rule.requiredWorkMinutes,
+            graceLateMinutes: shift.graceLateMinutes,
+            graceEarlyLeaveMinutes: shift.graceEarlyLeaveMinutes,
+        }
+        : null;
+
+    const scheduledSegments = resolvedShift
+        ? [{
+            shift: resolvedShift._id,
+            scheduledStart: resolvedShift.startTime,
+            scheduledEnd: resolvedShift.endTime,
+            requiredWorkMinutes: resolvedShift.requiredWorkMinutes,
+        }]
+        : [];
+
+    return {
+        employeeId: String(employeeId),
+        branchId: String(branch._id),
+        branchTimezone: branch.timezone,
+        source: 'shift_membership',
+        assignment: null,
+        template: null,
+        shiftMembership: { _id: membership._id },
+        override: override ? { _id: override._id, overrideType: override.overrideType } : null,
+        shifts: resolvedShift ? [resolvedShift] : [],
+        scheduledSegments,
+        scheduledStart: scheduledSegments[0]?.scheduledStart,
+        scheduledEnd: scheduledSegments[scheduledSegments.length - 1]?.scheduledEnd,
+        requiredWorkMinutes: scheduledSegments.reduce((sum, segment) => sum + segment.requiredWorkMinutes, 0),
+    };
+}
+
+async function resolveSchedule(employeeId: Types.ObjectId, branchId: Types.ObjectId, dateString: string): Promise<ResolvedSchedule> {
     assertDate(dateString, 'date');
     const branch = await Branch.findById(branchId).lean();
     if (!branch) throw new AppError('Branch not found', 404);
+
+    const workingShiftSchedule = await resolveWorkingShiftSchedule(employeeId, branch, dateString);
+    if (workingShiftSchedule) return workingShiftSchedule;
 
     const dayStart = new Date(`${dateString}T00:00:00.000Z`);
     const dayEnd = new Date(`${dateString}T23:59:59.999Z`);
@@ -228,6 +405,8 @@ async function resolveSchedule(employeeId: Types.ObjectId, branchId: Types.Objec
             source: null,
             assignment: null,
             template: null,
+            shiftMembership: null,
+            override: null,
             shifts: [] as ResolvedShift[],
             scheduledSegments: [] as Array<{ shift: Types.ObjectId; scheduledStart: string; scheduledEnd: string; requiredWorkMinutes: number }>,
             scheduledStart: undefined as string | undefined,
@@ -258,6 +437,8 @@ async function resolveSchedule(employeeId: Types.ObjectId, branchId: Types.Objec
         source,
         assignment,
         template,
+        shiftMembership: null,
+        override: null,
         shifts: orderedShifts,
         scheduledSegments,
         scheduledStart: scheduledSegments[0]?.scheduledStart,
@@ -437,13 +618,16 @@ function ok(handler: (req: Request, res: Response) => Promise<void>) {
 export const createShift = ok(async (req, res) => {
     requireAdmin(req);
     const createdBy = requireUserId(req);
-    assertTime(req.body.startTime, 'startTime');
-    assertTime(req.body.endTime, 'endTime');
+    const weeklyPattern = normalizeWeeklyPattern(req.body);
+    const firstRule = firstWorkingRule(weeklyPattern);
+    if (!firstRule) throw new AppError('At least one working day is required', 400);
     const shift = await AttendanceShift.create({
         name: req.body.name,
-        startTime: req.body.startTime,
-        endTime: req.body.endTime,
-        requiredWorkMinutes: numberOrDefault(req.body.requiredWorkMinutes, 0),
+        startTime: req.body.startTime ?? firstRule.startTime,
+        endTime: req.body.endTime ?? firstRule.endTime,
+        requiredWorkMinutes: req.body.requiredWorkMinutes ?? firstRule.requiredWorkMinutes,
+        weeklyPattern,
+        version: 1,
         graceLateMinutes: numberOrDefault(req.body.graceLateMinutes, 0),
         graceEarlyLeaveMinutes: numberOrDefault(req.body.graceEarlyLeaveMinutes, 0),
         isActive: req.body.isActive ?? true,
@@ -460,11 +644,251 @@ export const listShifts = ok(async (req, res) => {
 
 export const updateShift = ok(async (req, res) => {
     requireAdmin(req);
-    if (req.body.startTime) assertTime(req.body.startTime, 'startTime');
-    if (req.body.endTime) assertTime(req.body.endTime, 'endTime');
-    const shift = await AttendanceShift.findByIdAndUpdate(req.params.id, req.body, { new: true, runValidators: true });
+    const existing = await AttendanceShift.findById(req.params.id);
+    if (!existing) throw new AppError('Shift not found', 404);
+
+    const update: Record<string, unknown> = { ...req.body };
+    if (req.body.weeklyPattern || req.body.startTime || req.body.endTime || req.body.requiredWorkMinutes !== undefined) {
+        const bodyForPattern = {
+            startTime: req.body.startTime ?? existing.startTime,
+            endTime: req.body.endTime ?? existing.endTime,
+            requiredWorkMinutes: req.body.requiredWorkMinutes ?? existing.requiredWorkMinutes,
+            weeklyPattern: req.body.weeklyPattern ?? existing.weeklyPattern,
+        };
+        const weeklyPattern = normalizeWeeklyPattern(bodyForPattern);
+        const firstRule = firstWorkingRule(weeklyPattern);
+        if (!firstRule) throw new AppError('At least one working day is required', 400);
+        update.weeklyPattern = weeklyPattern;
+        update.startTime = req.body.startTime ?? firstRule.startTime;
+        update.endTime = req.body.endTime ?? firstRule.endTime;
+        update.requiredWorkMinutes = req.body.requiredWorkMinutes ?? firstRule.requiredWorkMinutes;
+    }
+    if (update.graceLateMinutes !== undefined) update.graceLateMinutes = numberOrDefault(update.graceLateMinutes, 0);
+    if (update.graceEarlyLeaveMinutes !== undefined) update.graceEarlyLeaveMinutes = numberOrDefault(update.graceEarlyLeaveMinutes, 0);
+
+    existing.previousVersions.push({
+        version: existing.version,
+        name: existing.name,
+        startTime: existing.startTime,
+        endTime: existing.endTime,
+        requiredWorkMinutes: existing.requiredWorkMinutes,
+        weeklyPattern: existing.weeklyPattern,
+        graceLateMinutes: existing.graceLateMinutes,
+        graceEarlyLeaveMinutes: existing.graceEarlyLeaveMinutes,
+        isActive: existing.isActive,
+        savedAt: new Date(),
+    });
+    existing.set({ ...update, version: existing.version + 1 });
+    const shift = await existing.save();
     if (!shift) throw new AppError('Shift not found', 404);
     res.status(200).json(shift);
+});
+
+async function getBranchForAssignment(branchId: Types.ObjectId) {
+    const branch = await Branch.findById(branchId);
+    if (!branch || !branch.isActive) throw new AppError('Branch not found or inactive', 404);
+    return branch;
+}
+
+function branchContainsEmployee(branch: { staffs?: Types.ObjectId[] }, employeeId: Types.ObjectId) {
+    return (branch.staffs ?? []).some((staffId) => String(staffId) === String(employeeId));
+}
+
+export const assignShiftMembers = ok(async (req, res) => {
+    requireAdmin(req);
+    const createdBy = requireUserId(req);
+    const shift = await AttendanceShift.findById(toObjectId(req.body.shiftId, 'shiftId')).lean();
+    if (!shift || !shift.isActive) throw new AppError('Shift not found or inactive', 404);
+
+    const branch = await getBranchForAssignment(toObjectId(req.body.branchId, 'branchId'));
+    const employeeIds = req.body.allStaff === true
+        ? (branch.staffs ?? []).map((id) => new Types.ObjectId(String(id)))
+        : Array.isArray(req.body.employeeIds)
+            ? req.body.employeeIds.map((id: string) => toObjectId(id, 'employeeIds'))
+            : [];
+
+    if (employeeIds.length === 0) throw new AppError('At least one employee is required', 400);
+    const uniqueEmployeeIds = (Array.from(new Set(employeeIds.map(String))) as string[])
+        .map((id) => Types.ObjectId.createFromHexString(id));
+    for (const employeeId of uniqueEmployeeIds) {
+        if (!branchContainsEmployee(branch, employeeId)) {
+            throw new AppError('Employees must belong to the selected branch', 400);
+        }
+    }
+
+    const activeFrom = nextBranchLocalDayBoundaryUtc(branch.timezone);
+    const existing = await AttendanceShiftMembership.find({
+        employee: { $in: uniqueEmployeeIds },
+        branch: branch._id,
+        status: 'active',
+        $or: [{ inactiveFrom: { $exists: false } }, { inactiveFrom: null }, { inactiveFrom: { $gt: activeFrom } }],
+    });
+
+    const conflicts = existing.filter((item) => String(item.shift) !== String(shift._id));
+    if (conflicts.length > 0 && req.body.replaceExisting !== true) {
+        res.status(409).json({
+            message: 'One or more employees already have active shift coverage',
+            conflicts: conflicts.map((item) => ({
+                employeeId: String(item.employee),
+                shiftId: String(item.shift),
+                membershipId: String(item._id),
+            })),
+        });
+        return;
+    }
+
+    if (req.body.replaceExisting === true && existing.length > 0) {
+        await AttendanceShiftMembership.updateMany(
+            { _id: { $in: existing.map((item) => item._id) } },
+            {
+                $set: {
+                    status: 'inactive',
+                    inactiveFrom: activeFrom,
+                    endedBy: createdBy,
+                },
+            }
+        );
+    }
+
+    const existingSameShift = req.body.replaceExisting === true
+        ? new Set<string>()
+        : new Set(
+            existing
+                .filter((item) => String(item.shift) === String(shift._id) && item.status === 'active')
+                .map((item) => String(item.employee))
+        );
+    const docs = uniqueEmployeeIds
+        .filter((employeeId) => !existingSameShift.has(String(employeeId)))
+        .map((employeeId) => ({
+            shift: shift._id,
+            employee: employeeId,
+            branch: branch._id,
+            version: 1,
+            status: 'active',
+            activeFrom,
+            createdBy,
+        }));
+    const memberships = docs.length > 0 ? await AttendanceShiftMembership.insertMany(docs) : [];
+    res.status(201).json({ items: memberships, activeFrom });
+});
+
+export const listShiftMemberships = ok(async (req, res) => {
+    requireAdmin(req);
+    const query: Record<string, unknown> = {};
+    if (req.query.shiftId) query.shift = toObjectId(req.query.shiftId, 'shiftId');
+    if (req.query.branchId) query.branch = toObjectId(req.query.branchId, 'branchId');
+    if (req.query.employeeId) query.employee = toObjectId(req.query.employeeId, 'employeeId');
+    if (req.query.status) query.status = String(req.query.status);
+    const items = await AttendanceShiftMembership.find(query)
+        .populate('shift', 'name version isActive')
+        .populate('employee', 'username privilege isActive')
+        .populate('branch', 'name timezone isActive')
+        .sort({ createdAt: -1 });
+    res.status(200).json({ items });
+});
+
+export const removeShiftMembership = ok(async (req, res) => {
+    requireAdmin(req);
+    const membership = await AttendanceShiftMembership.findById(req.params.id);
+    if (!membership) throw new AppError('Shift membership not found', 404);
+    const branch = await Branch.findById(membership.branch).lean();
+    if (!branch) throw new AppError('Branch not found', 404);
+    membership.status = 'inactive';
+    membership.inactiveFrom = nextBranchLocalDayBoundaryUtc(branch.timezone);
+    membership.endedBy = requireUserId(req);
+    await membership.save();
+    res.status(200).json(membership);
+});
+
+export const createShiftOverride = ok(async (req, res) => {
+    requireAdmin(req);
+    const createdBy = requireUserId(req);
+    const branch = await getBranchForAssignment(toObjectId(req.body.branchId, 'branchId'));
+    assertDate(req.body.date, 'date');
+    if (!['shift', 'employee'].includes(req.body.targetType)) {
+        throw new AppError('targetType must be shift or employee', 400);
+    }
+    if (!['hours', 'off_day'].includes(req.body.overrideType)) {
+        throw new AppError('overrideType must be hours or off_day', 400);
+    }
+
+    const targetType = req.body.targetType as 'shift' | 'employee';
+    const overrideType = req.body.overrideType as 'hours' | 'off_day';
+    const shift = targetType === 'shift' ? toObjectId(req.body.shiftId, 'shiftId') : undefined;
+    const employee = targetType === 'employee' ? toObjectId(req.body.employeeId, 'employeeId') : undefined;
+    if (employee && !branchContainsEmployee(branch, employee)) {
+        throw new AppError('Employee must belong to the selected branch', 400);
+    }
+    if (overrideType === 'hours') {
+        assertTime(req.body.startTime, 'startTime');
+        assertTime(req.body.endTime, 'endTime');
+    }
+
+    const conflictFilter = targetType === 'shift'
+        ? { targetType, branch: branch._id, shift, date: req.body.date, isActive: true }
+        : { targetType, branch: branch._id, employee, date: req.body.date, isActive: true };
+    const existing = await AttendanceShiftOverride.find(conflictFilter).sort({ version: -1 });
+    if (existing.length > 0 && req.body.replaceExisting !== true) {
+        res.status(409).json({
+            message: 'An active override already exists for this target and date',
+            conflicts: existing.map((item) => String(item._id)),
+        });
+        return;
+    }
+    if (existing.length > 0) {
+        await AttendanceShiftOverride.updateMany(
+            { _id: { $in: existing.map((item) => item._id) } },
+            { $set: { isActive: false, supersededAt: new Date() } }
+        );
+    }
+
+    const override = await AttendanceShiftOverride.create({
+        targetType,
+        branch: branch._id,
+        shift,
+        employee,
+        date: req.body.date,
+        overrideType,
+        startTime: overrideType === 'hours' ? req.body.startTime : undefined,
+        endTime: overrideType === 'hours' ? req.body.endTime : undefined,
+        requiredWorkMinutes: overrideType === 'hours' ? numberOrDefault(req.body.requiredWorkMinutes, 0) : 0,
+        note: req.body.note,
+        version: existing[0] ? existing[0].version + 1 : 1,
+        isActive: true,
+        createdBy,
+    });
+    res.status(201).json(override);
+});
+
+export const listShiftOverrides = ok(async (req, res) => {
+    requireAdmin(req);
+    const query: Record<string, unknown> = {};
+    if (req.query.branchId) query.branch = toObjectId(req.query.branchId, 'branchId');
+    if (req.query.shiftId) query.shift = toObjectId(req.query.shiftId, 'shiftId');
+    if (req.query.employeeId) query.employee = toObjectId(req.query.employeeId, 'employeeId');
+    if (req.query.date) {
+        assertDate(req.query.date, 'date');
+        query.date = String(req.query.date);
+    }
+    if (req.query.isActive !== undefined) query.isActive = String(req.query.isActive) !== 'false';
+    const items = await AttendanceShiftOverride.find(query)
+        .populate('shift', 'name version isActive')
+        .populate('employee', 'username privilege isActive')
+        .populate('branch', 'name timezone isActive')
+        .sort({ date: -1, createdAt: -1 });
+    res.status(200).json({ items });
+});
+
+export const updateShiftOverride = ok(async (req, res) => {
+    requireAdmin(req);
+    const update: Record<string, unknown> = { ...req.body };
+    if (update.date) assertDate(update.date, 'date');
+    if (update.startTime) assertTime(update.startTime, 'startTime');
+    if (update.endTime) assertTime(update.endTime, 'endTime');
+    if (update.requiredWorkMinutes !== undefined) update.requiredWorkMinutes = numberOrDefault(update.requiredWorkMinutes, 0);
+    const override = await AttendanceShiftOverride.findByIdAndUpdate(req.params.id, update, { new: true, runValidators: true });
+    if (!override) throw new AppError('Shift override not found', 404);
+    res.status(200).json(override);
 });
 
 export const createPrivilege = ok(async (req, res) => {
@@ -691,6 +1115,9 @@ export const getEmployeeSchedule = ok(async (req, res) => {
         source: schedule.source,
         assignmentId: schedule.assignment?._id,
         templateId: schedule.template?._id,
+        shiftMembershipId: schedule.shiftMembership?._id,
+        overrideId: schedule.override?._id,
+        overrideType: schedule.override?.overrideType,
         scheduledStart: schedule.scheduledStart,
         scheduledEnd: schedule.scheduledEnd,
         requiredWorkMinutes: schedule.requiredWorkMinutes,

@@ -396,6 +396,140 @@ describe('Attendance endpoints e2e', () => {
     expect(response.body.message).toMatch(/global|branch|target/i);
   });
 
+  it('allows admins to assign working-shift memberships and create day overrides', async () => {
+    const seed = await seedUsers();
+    const adminToken = await login('admin');
+
+    const salesShift = await request(app)
+      .post('/api/attendance/shifts')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        name: 'Sales Standard Week',
+        weeklyPattern: {
+          monday: { startTime: '09:00', endTime: '17:00', requiredWorkMinutes: 420 },
+          tuesday: { startTime: '09:00', endTime: '17:00', requiredWorkMinutes: 420 },
+          wednesday: { startTime: '09:00', endTime: '17:00', requiredWorkMinutes: 420 },
+          thursday: { startTime: '09:00', endTime: '17:00', requiredWorkMinutes: 420 },
+          friday: { startTime: '09:00', endTime: '13:00', requiredWorkMinutes: 210 },
+          saturday: null,
+          sunday: null,
+        },
+        graceLateMinutes: 10,
+        graceEarlyLeaveMinutes: 10,
+      });
+    expect(salesShift.status).toBe(201);
+    expect(salesShift.body.version).toBe(1);
+    expect(salesShift.body.weeklyPattern.friday).toMatchObject({
+      startTime: '09:00',
+      endTime: '13:00',
+      requiredWorkMinutes: 210,
+    });
+
+    const membership = await request(app)
+      .post('/api/attendance/shift-memberships')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        shiftId: salesShift.body._id,
+        branchId: seed.branchId,
+        employeeIds: [seed.staffId],
+      });
+    expect(membership.status).toBe(201);
+    expect(membership.body.items).toHaveLength(1);
+    expect(membership.body.items[0]).toMatchObject({
+      shift: salesShift.body._id,
+      employee: seed.staffId,
+      branch: seed.branchId,
+      status: 'active',
+    });
+
+    const conflictShift = await request(app)
+      .post('/api/attendance/shifts')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        name: 'Late Week',
+        startTime: '10:00',
+        endTime: '18:00',
+        requiredWorkMinutes: 420,
+      });
+    expect(conflictShift.status).toBe(201);
+
+    const conflict = await request(app)
+      .post('/api/attendance/shift-memberships')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        shiftId: conflictShift.body._id,
+        branchId: seed.branchId,
+        employeeIds: [seed.staffId],
+      });
+    expect(conflict.status).toBe(409);
+
+    const replaced = await request(app)
+      .post('/api/attendance/shift-memberships')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        shiftId: conflictShift.body._id,
+        branchId: seed.branchId,
+        employeeIds: [seed.staffId],
+        replaceExisting: true,
+      });
+    expect(replaced.status).toBe(201);
+    expect(replaced.body.items[0].shift).toBe(conflictShift.body._id);
+
+    const shiftOverride = await request(app)
+      .post('/api/attendance/shift-overrides')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        targetType: 'shift',
+        branchId: seed.branchId,
+        shiftId: conflictShift.body._id,
+        date: '2099-05-04',
+        overrideType: 'hours',
+        startTime: '11:00',
+        endTime: '19:00',
+        requiredWorkMinutes: 420,
+        note: 'Branch meeting day',
+      });
+    expect(shiftOverride.status).toBe(201);
+
+    const resolvedShiftOverride = await request(app)
+      .get(`/api/attendance/employees/${seed.staffId}/schedule`)
+      .query({ date: '2099-05-04' })
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(resolvedShiftOverride.status).toBe(200);
+    expect(resolvedShiftOverride.body).toMatchObject({
+      source: 'shift_membership',
+      scheduledStart: '11:00',
+      scheduledEnd: '19:00',
+      requiredWorkMinutes: 420,
+      overrideType: 'hours',
+    });
+
+    const employeeOverride = await request(app)
+      .post('/api/attendance/shift-overrides')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        targetType: 'employee',
+        branchId: seed.branchId,
+        employeeId: seed.staffId,
+        date: '2099-05-04',
+        overrideType: 'off_day',
+        note: 'Approved admin exception',
+      });
+    expect(employeeOverride.status).toBe(201);
+
+    const resolvedEmployeeOverride = await request(app)
+      .get(`/api/attendance/employees/${seed.staffId}/schedule`)
+      .query({ date: '2099-05-04' })
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(resolvedEmployeeOverride.status).toBe(200);
+    expect(resolvedEmployeeOverride.body).toMatchObject({
+      source: 'shift_membership',
+      requiredWorkMinutes: 0,
+      overrideType: 'off_day',
+    });
+    expect(resolvedEmployeeOverride.body.scheduledSegments).toEqual([]);
+  });
+
   it('resolves branch assignment before global assignment for staff expected schedule', async () => {
     const seed = await seedUsers();
     const adminToken = await login('admin');
