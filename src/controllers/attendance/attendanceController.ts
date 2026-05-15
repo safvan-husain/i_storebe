@@ -58,6 +58,23 @@ const timePattern = /^([01]\d|2[0-3]):[0-5]\d$/;
 const datePattern = /^\d{4}-\d{2}-\d{2}$/;
 const weekdays: AttendanceWeekday[] = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
 
+function serializeDailySnapshot(snapshot: any) {
+    const value = typeof snapshot?.toObject === 'function' ? snapshot.toObject() : snapshot;
+    const employee = value?.employee;
+    const branch = value?.branch;
+    return {
+        ...value,
+        employee: employee?._id ?? employee,
+        employeeName: employee?.username,
+        branch: branch?._id ?? branch,
+        branchName: branch?.name,
+    };
+}
+
+function serializeDailySnapshots(snapshots: any[]) {
+    return snapshots.map(serializeDailySnapshot);
+}
+
 function requireUserId(req: Request) {
     if (!req.userId || !Types.ObjectId.isValid(req.userId)) {
         throw new AppError('Not authorized', 401);
@@ -894,8 +911,14 @@ async function generateDailySnapshot(params: {
         productiveWorkMinutes = Math.max(0, grossMinutes - breakCalculation.totalBreakMinutes);
     }
 
-    const overtimeMinutes = Math.max(0, productiveWorkMinutes - schedule.requiredWorkMinutes);
-    const undertimeMinutes = Math.max(0, schedule.requiredWorkMinutes - productiveWorkMinutes);
+    const isClosedWorkSession = Boolean(firstCheckIn && lastCheckOut);
+    const shouldCalculateWorkDelta = isClosedWorkSession || status === 'absent';
+    const overtimeMinutes = shouldCalculateWorkDelta
+        ? Math.max(0, productiveWorkMinutes - schedule.requiredWorkMinutes)
+        : 0;
+    const undertimeMinutes = shouldCalculateWorkDelta
+        ? Math.max(0, schedule.requiredWorkMinutes - productiveWorkMinutes)
+        : 0;
     const firstLocal = firstCheckIn ? branchLocalParts(firstCheckIn.timestamp, schedule.branchTimezone) : undefined;
     const lastLocal = lastCheckOut ? branchLocalParts(lastCheckOut.timestamp, schedule.branchTimezone) : undefined;
     const firstMinutes = timeToMinutes(firstLocal?.time);
@@ -1888,7 +1911,10 @@ export const getMyAttendanceStatus = ok(async (req, res) => {
 
     const schedule = await resolveSchedule(employeeId, branch._id, date);
     const events = await getDayEvents(employeeId, date);
-    const snapshot = await AttendanceDailySnapshot.findOne({ employee: employeeId, date }).lean();
+    const snapshot = await AttendanceDailySnapshot.findOne({ employee: employeeId, date })
+        .populate('employee', 'username')
+        .populate('branch', 'name')
+        .lean();
     const { firstCheckIn, lastCheckOut, openBreak, breakPairs } = splitAttendanceEvents(events);
     const workingSchedule = hasWorkingSchedule(schedule);
     let workStatus: MyAttendanceWorkStatus;
@@ -1934,7 +1960,7 @@ export const getMyAttendanceStatus = ok(async (req, res) => {
             requiredWorkMinutes: schedule.requiredWorkMinutes,
             scheduledSegments: schedule.scheduledSegments,
         },
-        snapshot,
+        snapshot: snapshot ? serializeDailySnapshot(snapshot) : null,
         workStatus,
         canCheckIn: workStatus === 'not_started' && workingSchedule,
         canStartBreak: workStatus === 'checked_in',
@@ -2077,16 +2103,24 @@ export const getMyDailySnapshots = ok(async (req, res) => {
     const employeeId = requireUserId(req);
     const query: Record<string, unknown> = { employee: employeeId };
     if (req.query.date) query.date = String(req.query.date);
-    const items = await AttendanceDailySnapshot.find(query).sort({ date: -1 });
-    res.status(200).json({ items });
+    const items = await AttendanceDailySnapshot.find(query)
+        .populate('employee', 'username')
+        .populate('branch', 'name')
+        .sort({ date: -1 })
+        .lean();
+    res.status(200).json({ items: serializeDailySnapshots(items) });
 });
 
 export const getEmployeeDailySnapshots = ok(async (req, res) => {
     await assertManagerCanViewEmployee(req, req.params.employeeId);
     const query: Record<string, unknown> = { employee: toObjectId(req.params.employeeId, 'employeeId') };
     if (req.query.date) query.date = String(req.query.date);
-    const items = await AttendanceDailySnapshot.find(query).sort({ date: -1 });
-    res.status(200).json({ items });
+    const items = await AttendanceDailySnapshot.find(query)
+        .populate('employee', 'username')
+        .populate('branch', 'name')
+        .sort({ date: -1 })
+        .lean();
+    res.status(200).json({ items: serializeDailySnapshots(items) });
 });
 
 export const getTeamDailySnapshots = ok(async (req, res) => {
@@ -2097,8 +2131,12 @@ export const getTeamDailySnapshots = ok(async (req, res) => {
         const staffIds = await User.find({ manager: req.userId }, { _id: 1 }).lean();
         query.employee = { $in: staffIds.map((staff) => staff._id) };
     }
-    const items = await AttendanceDailySnapshot.find(query).sort({ date: -1 });
-    res.status(200).json({ items });
+    const items = await AttendanceDailySnapshot.find(query)
+        .populate('employee', 'username')
+        .populate('branch', 'name')
+        .sort({ date: -1 })
+        .lean();
+    res.status(200).json({ items: serializeDailySnapshots(items) });
 });
 
 export const getTeamAttendanceAttention = ok(async (req, res) => {
@@ -2126,11 +2164,15 @@ export const getTeamAttendanceAttention = ok(async (req, res) => {
         const staffIds = await User.find({ manager: req.userId }, { _id: 1 }).lean();
         query.employee = { $in: staffIds.map((staff) => staff._id) };
     }
-    const snapshots = await AttendanceDailySnapshot.find(query).sort({ date: -1, updatedAt: -1 });
+    const snapshots = await AttendanceDailySnapshot.find(query)
+        .populate('employee', 'username')
+        .populate('branch', 'name')
+        .sort({ date: -1, updatedAt: -1 })
+        .lean();
     const items = beforeDate
         ? snapshots
         : snapshots.filter((snapshot) => snapshot.date < branchLocalParts(now, snapshot.branchTimezone).date);
-    res.status(200).json({ items });
+    res.status(200).json({ items: serializeDailySnapshots(items) });
 });
 
 export const finalizeDailySnapshots = ok(async (req, res) => {

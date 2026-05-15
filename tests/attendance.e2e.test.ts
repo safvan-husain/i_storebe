@@ -1095,6 +1095,9 @@ describe('Attendance endpoints e2e', () => {
       expect.objectContaining({
         status: 'incomplete',
         firstCheckIn: '08:45',
+        employeeName: 'staff-one',
+        overtimeMinutes: 0,
+        undertimeMinutes: 0,
         generatedBy: 'event',
         calculationBasis: expect.objectContaining({
           scheduledStart: '09:00',
@@ -1123,6 +1126,8 @@ describe('Attendance endpoints e2e', () => {
     expect(afterBreakStartSnapshots.status).toBe(200);
     expect(afterBreakStartSnapshots.body.items[0]).toMatchObject({
       status: 'open_break',
+      overtimeMinutes: 0,
+      undertimeMinutes: 0,
       generatedBy: 'event',
     });
 
@@ -1143,6 +1148,8 @@ describe('Attendance endpoints e2e', () => {
     expect(afterBreakEndSnapshots.status).toBe(200);
     expect(afterBreakEndSnapshots.body.items[0]).toMatchObject({
       status: 'incomplete',
+      overtimeMinutes: 0,
+      undertimeMinutes: 0,
       generatedBy: 'event',
     });
 
@@ -1847,6 +1854,8 @@ describe('Attendance endpoints e2e', () => {
         expect.objectContaining({
           employee: seed.staffId,
           status: 'missing_checkout',
+          overtimeMinutes: 0,
+          undertimeMinutes: 0,
           generatedBy: 'scheduled_job',
         }),
       ])
