@@ -50,6 +50,7 @@ jest.mock('../src/services/task-scheduler', () => ({
 import app from '../src/server';
 import User from '../src/models/User';
 import Branch from '../src/models/Branch';
+import AttendanceDailySnapshot from '../src/models/AttendanceDailySnapshot';
 
 jest.setTimeout(60000);
 
@@ -207,7 +208,7 @@ describe('Attendance endpoints e2e', () => {
         templateId: template.body._id,
         targetType: 'branch',
         branchId: seed.branchId,
-        effectiveFrom: '2026-05-01',
+        effectiveFrom: '2099-05-01',
       });
     expect(branchAssignment.status).toBe(201);
 
@@ -339,7 +340,7 @@ describe('Attendance endpoints e2e', () => {
         templateId: template.body._id,
         targetType: 'branch',
         branchId: seed.branchId,
-        effectiveFrom: '2026-05-01',
+        effectiveFrom: '2099-05-01',
       });
 
     expect(branchAssignment.status).toBe(201);
@@ -372,7 +373,7 @@ describe('Attendance endpoints e2e', () => {
       .send({
         templateId: new mongoose.Types.ObjectId().toString(),
         targetType: 'global',
-        effectiveFrom: '2026-05-01',
+        effectiveFrom: '2099-05-01',
       });
 
     expect(staffAssignmentAttempt.status).toBe(403);
@@ -389,145 +390,660 @@ describe('Attendance endpoints e2e', () => {
         templateId: new mongoose.Types.ObjectId().toString(),
         targetType: 'employees',
         employeeIds: [seed.staffId],
-        effectiveFrom: '2026-05-01',
+        effectiveFrom: '2099-05-01',
       });
 
     expect(response.status).toBe(400);
     expect(response.body.message).toMatch(/global|branch|target/i);
   });
 
-  it('allows admins to assign working-shift memberships and create day overrides', async () => {
+  it('allows admin to deactivate a global schedule assignment', async () => {
     const seed = await seedUsers();
     const adminToken = await login('admin');
 
-    const salesShift = await request(app)
+    const setup = await createAttendanceSetup(adminToken, seed);
+    const globalAssignment = await request(app)
+      .post('/api/attendance/schedule-assignments')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        templateId: setup.templateId,
+        targetType: 'global',
+        effectiveFrom: '2099-05-01',
+      });
+    expect(globalAssignment.status).toBe(201);
+
+    const deactivated = await request(app)
+      .patch(`/api/attendance/schedule-assignments/${globalAssignment.body._id}`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ isActive: false });
+    expect(deactivated.status).toBe(200);
+    expect(deactivated.body.isActive).toBe(false);
+    expect(deactivated.body.supersededAt).toBeTruthy();
+
+    await request(app)
+      .patch(`/api/attendance/schedule-assignments/${setup.branchAssignmentId}`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ isActive: false });
+
+    const resolved = await request(app)
+      .get(`/api/attendance/employees/${seed.staffId}/schedule`)
+      .query({ date: '2099-05-04' })
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(resolved.status).toBe(200);
+    expect(resolved.body.source).toBeNull();
+    expect(resolved.body.requiredWorkMinutes).toBe(0);
+  });
+
+  it('blocks manager and staff from updating schedule assignments', async () => {
+    await seedUsers();
+    const managerToken = await login('manager-a');
+    const staffToken = await login('staff-one');
+    const assignmentId = new mongoose.Types.ObjectId().toString();
+
+    const managerAttempt = await request(app)
+      .patch(`/api/attendance/schedule-assignments/${assignmentId}`)
+      .set('Authorization', `Bearer ${managerToken}`)
+      .send({ isActive: false });
+    expect(managerAttempt.status).toBe(403);
+
+    const staffAttempt = await request(app)
+      .patch(`/api/attendance/schedule-assignments/${assignmentId}`)
+      .set('Authorization', `Bearer ${staffToken}`)
+      .send({ isActive: false });
+    expect(staffAttempt.status).toBe(403);
+  });
+
+  it('falls back to global schedule when branch template is inactive', async () => {
+    const seed = await seedUsers();
+    const adminToken = await login('admin');
+
+    const dayShift = await request(app)
       .post('/api/attendance/shifts')
       .set('Authorization', `Bearer ${adminToken}`)
       .send({
-        name: 'Sales Standard Week',
+        name: 'Day Shift',
+        startTime: '09:00',
+        endTime: '17:00',
+        requiredWorkMinutes: 420,
+      });
+    expect(dayShift.status).toBe(201);
+
+    const lateShift = await request(app)
+      .post('/api/attendance/shifts')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        name: 'Late Shift',
+        startTime: '11:00',
+        endTime: '19:00',
+        requiredWorkMinutes: 420,
+      });
+    expect(lateShift.status).toBe(201);
+
+    const globalTemplate = await request(app)
+      .post('/api/attendance/schedule-templates')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        name: 'Global Week',
         weeklyPattern: {
-          monday: { startTime: '09:00', endTime: '17:00', requiredWorkMinutes: 420 },
-          tuesday: { startTime: '09:00', endTime: '17:00', requiredWorkMinutes: 420 },
-          wednesday: { startTime: '09:00', endTime: '17:00', requiredWorkMinutes: 420 },
-          thursday: { startTime: '09:00', endTime: '17:00', requiredWorkMinutes: 420 },
-          friday: { startTime: '09:00', endTime: '13:00', requiredWorkMinutes: 210 },
-          saturday: null,
-          sunday: null,
+          monday: [dayShift.body._id],
+          tuesday: [dayShift.body._id],
+          wednesday: [dayShift.body._id],
+          thursday: [dayShift.body._id],
+          friday: [dayShift.body._id],
+          saturday: [],
+          sunday: [],
         },
-        graceLateMinutes: 10,
-        graceEarlyLeaveMinutes: 10,
+        isActive: true,
       });
-    expect(salesShift.status).toBe(201);
-    expect(salesShift.body.version).toBe(1);
-    expect(salesShift.body.weeklyPattern.friday).toMatchObject({
-      startTime: '09:00',
-      endTime: '13:00',
-      requiredWorkMinutes: 210,
-    });
+    expect(globalTemplate.status).toBe(201);
 
-    const membership = await request(app)
-      .post('/api/attendance/shift-memberships')
+    const branchTemplate = await request(app)
+      .post('/api/attendance/schedule-templates')
       .set('Authorization', `Bearer ${adminToken}`)
       .send({
-        shiftId: salesShift.body._id,
-        branchId: seed.branchId,
-        employeeIds: [seed.staffId],
+        name: 'Inactive Branch Week',
+        weeklyPattern: {
+          monday: [lateShift.body._id],
+          tuesday: [lateShift.body._id],
+          wednesday: [lateShift.body._id],
+          thursday: [lateShift.body._id],
+          friday: [lateShift.body._id],
+          saturday: [],
+          sunday: [],
+        },
+        isActive: false,
       });
-    expect(membership.status).toBe(201);
-    expect(membership.body.items).toHaveLength(1);
-    expect(membership.body.items[0]).toMatchObject({
-      shift: salesShift.body._id,
-      employee: seed.staffId,
-      branch: seed.branchId,
-      status: 'active',
+    expect(branchTemplate.status).toBe(201);
+
+    const globalAssignment = await request(app)
+      .post('/api/attendance/schedule-assignments')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        templateId: globalTemplate.body._id,
+        targetType: 'global',
+        effectiveFrom: '2099-05-01',
+      });
+    expect(globalAssignment.status).toBe(201);
+
+    const branchAssignment = await request(app)
+      .post('/api/attendance/schedule-assignments')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        templateId: branchTemplate.body._id,
+        targetType: 'branch',
+        branchId: seed.branchId,
+        effectiveFrom: '2099-05-01',
+      });
+    expect(branchAssignment.status).toBe(201);
+
+    const resolved = await request(app)
+      .get(`/api/attendance/employees/${seed.staffId}/schedule`)
+      .query({ date: '2099-05-04' })
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(resolved.status).toBe(200);
+    expect(resolved.body).toMatchObject({
+      source: 'global',
+      scheduledStart: '09:00',
+      scheduledEnd: '17:00',
+    });
+  });
+
+  it('supports cross-branch schedule groups and transfer previews', async () => {
+    const seed = await seedUsers();
+    const adminToken = await login('admin');
+
+    const staffTwo = await User.create({
+      username: 'staff-two',
+      password: 'password123',
+      privilege: 'staff',
+      secondPrivilege: 'regular',
+      isActive: true,
+      isAccountDeleted: false,
+    });
+    const branchTwo = await Branch.create({
+      name: 'Dubai Second',
+      normalizedName: 'dubai-second',
+      timezone: 'Asia/Dubai',
+      staffs: [staffTwo._id],
+      createdBy: seed.adminId,
+      isActive: true,
     });
 
-    const conflictShift = await request(app)
+    const earlyGroup = await request(app)
+      .post('/api/attendance/schedule-groups')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ name: 'Morning Team', isActive: true });
+    expect(earlyGroup.status).toBe(201);
+
+    const members = await request(app)
+      .put(`/api/attendance/schedule-groups/${earlyGroup.body._id}/members`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ employeeIds: [seed.staffId, String(staffTwo._id)] });
+    expect(members.status).toBe(200);
+    expect(members.body.members).toHaveLength(2);
+
+    const groups = await request(app)
+      .get('/api/attendance/schedule-groups')
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(groups.status).toBe(200);
+    const group = groups.body.items.find((item: any) => item._id === earlyGroup.body._id);
+    expect(group.memberCount).toBe(2);
+    expect(group.branchIds).toEqual(expect.arrayContaining([seed.branchId, String(branchTwo._id)]));
+
+    const lateGroup = await request(app)
+      .post('/api/attendance/schedule-groups')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ name: 'Late Team', isActive: true });
+    expect(lateGroup.status).toBe(201);
+
+    const blockedMove = await request(app)
+      .put(`/api/attendance/schedule-groups/${lateGroup.body._id}/members`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ employeeIds: [seed.staffId] });
+    expect(blockedMove.status).toBe(409);
+    expect(blockedMove.body.transfers).toEqual([
+      expect.objectContaining({
+        employeeId: seed.staffId,
+        groupName: 'Morning Team',
+      }),
+    ]);
+
+    const confirmedMove = await request(app)
+      .put(`/api/attendance/schedule-groups/${lateGroup.body._id}/members`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ employeeIds: [seed.staffId], confirmTransfer: true });
+    expect(confirmedMove.status).toBe(200);
+    expect(confirmedMove.body.members).toHaveLength(1);
+    expect(confirmedMove.body.members[0]).toMatchObject({
+      employeeId: seed.staffId,
+    });
+  });
+
+  it('resolves employee, group, branch, and global schedule assignment priority', async () => {
+    const seed = await seedUsers();
+    const adminToken = await login('admin');
+
+    const earlyShift = await request(app)
       .post('/api/attendance/shifts')
       .set('Authorization', `Bearer ${adminToken}`)
       .send({
-        name: 'Late Week',
+        name: 'Early Shift',
+        startTime: '08:00',
+        endTime: '16:00',
+        requiredWorkMinutes: 420,
+      });
+    expect(earlyShift.status).toBe(201);
+
+    const lateShift = await request(app)
+      .post('/api/attendance/shifts')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        name: 'Late Shift',
+        startTime: '12:00',
+        endTime: '20:00',
+        requiredWorkMinutes: 420,
+      });
+    expect(lateShift.status).toBe(201);
+
+    const exceptionShift = await request(app)
+      .post('/api/attendance/shifts')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        name: 'Exception Shift',
         startTime: '10:00',
         endTime: '18:00',
         requiredWorkMinutes: 420,
       });
-    expect(conflictShift.status).toBe(201);
+    expect(exceptionShift.status).toBe(201);
 
-    const conflict = await request(app)
-      .post('/api/attendance/shift-memberships')
+    const template = async (name: string, shiftId: string) => {
+      const response = await request(app)
+        .post('/api/attendance/schedule-templates')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          name,
+          weeklyPattern: {
+            monday: [shiftId],
+            tuesday: [shiftId],
+            wednesday: [shiftId],
+            thursday: [shiftId],
+            friday: [shiftId],
+            saturday: [],
+            sunday: [],
+          },
+          isActive: true,
+        });
+      expect(response.status).toBe(201);
+      return response.body._id as string;
+    };
+
+    const branchTemplateId = await template('Branch Week', earlyShift.body._id);
+    const groupTemplateId = await template('Group Week', lateShift.body._id);
+    const employeeTemplateId = await template('Employee Week', exceptionShift.body._id);
+
+    const group = await request(app)
+      .post('/api/attendance/schedule-groups')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ name: 'Late Group', isActive: true });
+    expect(group.status).toBe(201);
+
+    const groupMembers = await request(app)
+      .put(`/api/attendance/schedule-groups/${group.body._id}/members`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ employeeIds: [seed.staffId] });
+    expect(groupMembers.status).toBe(200);
+
+    const branchAssignment = await request(app)
+      .post('/api/attendance/schedule-assignments')
       .set('Authorization', `Bearer ${adminToken}`)
       .send({
-        shiftId: conflictShift.body._id,
+        templateId: branchTemplateId,
+        targetType: 'branch',
         branchId: seed.branchId,
-        employeeIds: [seed.staffId],
+        effectiveFrom: '2099-05-01',
       });
-    expect(conflict.status).toBe(409);
+    expect(branchAssignment.status).toBe(201);
 
-    const replaced = await request(app)
-      .post('/api/attendance/shift-memberships')
+    const groupAssignment = await request(app)
+      .post('/api/attendance/schedule-assignments')
       .set('Authorization', `Bearer ${adminToken}`)
       .send({
-        shiftId: conflictShift.body._id,
-        branchId: seed.branchId,
-        employeeIds: [seed.staffId],
-        replaceExisting: true,
+        templateId: groupTemplateId,
+        targetType: 'group',
+        groupId: group.body._id,
+        effectiveFrom: '2099-05-01',
       });
-    expect(replaced.status).toBe(201);
-    expect(replaced.body.items[0].shift).toBe(conflictShift.body._id);
+    expect(groupAssignment.status).toBe(201);
 
-    const shiftOverride = await request(app)
-      .post('/api/attendance/shift-overrides')
-      .set('Authorization', `Bearer ${adminToken}`)
-      .send({
-        targetType: 'shift',
-        branchId: seed.branchId,
-        shiftId: conflictShift.body._id,
-        date: '2099-05-04',
-        overrideType: 'hours',
-        startTime: '11:00',
-        endTime: '19:00',
-        requiredWorkMinutes: 420,
-        note: 'Branch meeting day',
-      });
-    expect(shiftOverride.status).toBe(201);
-
-    const resolvedShiftOverride = await request(app)
+    const resolvedGroup = await request(app)
       .get(`/api/attendance/employees/${seed.staffId}/schedule`)
       .query({ date: '2099-05-04' })
       .set('Authorization', `Bearer ${adminToken}`);
-    expect(resolvedShiftOverride.status).toBe(200);
-    expect(resolvedShiftOverride.body).toMatchObject({
-      source: 'shift_membership',
-      scheduledStart: '11:00',
-      scheduledEnd: '19:00',
+    expect(resolvedGroup.status).toBe(200);
+    expect(resolvedGroup.body).toMatchObject({
+      source: 'group',
+      scheduledStart: '12:00',
+      scheduledEnd: '20:00',
+    });
+
+    const employeeAssignment = await request(app)
+      .post('/api/attendance/schedule-assignments')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        templateId: employeeTemplateId,
+        targetType: 'employee',
+        employeeId: seed.staffId,
+        effectiveFrom: '2099-05-01',
+      });
+    expect(employeeAssignment.status).toBe(201);
+
+    const resolvedEmployee = await request(app)
+      .get(`/api/attendance/employees/${seed.staffId}/schedule`)
+      .query({ date: '2099-05-04' })
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(resolvedEmployee.status).toBe(200);
+    expect(resolvedEmployee.body).toMatchObject({
+      source: 'employee',
+      scheduledStart: '10:00',
+      scheduledEnd: '18:00',
+    });
+  });
+
+  it('increments shift version when an admin edits a shift', async () => {
+    const seed = await seedUsers();
+    const adminToken = await login('admin');
+    const setup = await createAttendanceSetup(adminToken, seed);
+
+    const updated = await request(app)
+      .patch(`/api/attendance/shifts/${setup.shiftId}`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        name: 'Full Day Updated',
+        startTime: '10:00',
+        endTime: '18:00',
+        requiredWorkMinutes: 420,
+      });
+    expect(updated.status).toBe(200);
+    expect(updated.body).toMatchObject({
+      name: 'Full Day Updated',
+      startTime: '10:00',
+      endTime: '18:00',
+      version: 2,
+    });
+    expect(updated.body.previousVersions).toHaveLength(1);
+  });
+
+  it('resolves day overrides by employee, group, branch, and global specificity', async () => {
+    const seed = await seedUsers();
+    const adminToken = await login('admin');
+    await createAttendanceSetup(adminToken, seed);
+
+    const group = await request(app)
+      .post('/api/attendance/schedule-groups')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ name: 'Morning Crew', isActive: true });
+    expect(group.status).toBe(201);
+
+    const members = await request(app)
+      .put(`/api/attendance/schedule-groups/${group.body._id}/members`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ employeeIds: [seed.staffId] });
+    expect(members.status).toBe(200);
+
+    const globalHoliday = await request(app)
+      .post('/api/attendance/day-overrides')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        targetType: 'global',
+        dates: ['2099-05-04', '2099-05-05', '2099-05-06', '2099-05-07'],
+        overrideType: 'off_day',
+        note: 'Holiday week',
+      });
+    expect(globalHoliday.status).toBe(201);
+    expect(globalHoliday.body.items).toHaveLength(4);
+
+    const globalResolved = await request(app)
+      .get(`/api/attendance/employees/${seed.staffId}/schedule`)
+      .query({ date: '2099-05-04' })
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(globalResolved.status).toBe(200);
+    expect(globalResolved.body).toMatchObject({
+      requiredWorkMinutes: 0,
+      overrideType: 'off_day',
+    });
+    expect(globalResolved.body.scheduledSegments).toEqual([]);
+
+    const branchOverride = await request(app)
+      .post('/api/attendance/day-overrides')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        targetType: 'branch',
+        branchId: seed.branchId,
+        dates: ['2099-05-05', '2099-05-06', '2099-05-07'],
+        overrideType: 'hours',
+        startTime: '10:00',
+        endTime: '18:00',
+        requiredWorkMinutes: 420,
+      });
+    expect(branchOverride.status).toBe(201);
+
+    const branchResolved = await request(app)
+      .get(`/api/attendance/employees/${seed.staffId}/schedule`)
+      .query({ date: '2099-05-05' })
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(branchResolved.status).toBe(200);
+    expect(branchResolved.body).toMatchObject({
+      scheduledStart: '10:00',
+      scheduledEnd: '18:00',
       requiredWorkMinutes: 420,
       overrideType: 'hours',
     });
 
-    const employeeOverride = await request(app)
-      .post('/api/attendance/shift-overrides')
+    const groupOverride = await request(app)
+      .post('/api/attendance/day-overrides')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        targetType: 'group',
+        groupId: group.body._id,
+        dates: ['2099-05-06', '2099-05-07'],
+        overrideType: 'hours',
+        startTime: '12:00',
+        endTime: '20:00',
+        requiredWorkMinutes: 420,
+      });
+    expect(groupOverride.status).toBe(201);
+
+    const groupResolved = await request(app)
+      .get(`/api/attendance/employees/${seed.staffId}/schedule`)
+      .query({ date: '2099-05-06' })
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(groupResolved.status).toBe(200);
+    expect(groupResolved.body).toMatchObject({
+      scheduledStart: '12:00',
+      scheduledEnd: '20:00',
+      requiredWorkMinutes: 420,
+      overrideType: 'hours',
+    });
+
+    const employeePreview = await request(app)
+      .post('/api/attendance/day-overrides/preview')
       .set('Authorization', `Bearer ${adminToken}`)
       .send({
         targetType: 'employee',
-        branchId: seed.branchId,
         employeeId: seed.staffId,
-        date: '2099-05-04',
+        dates: ['2099-05-07'],
+        overrideType: 'off_day',
+      });
+    expect(employeePreview.status).toBe(200);
+    expect(employeePreview.body.conflicts).toHaveLength(0);
+
+    const employeeOverride = await request(app)
+      .post('/api/attendance/day-overrides')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        targetType: 'employee',
+        employeeId: seed.staffId,
+        dates: ['2099-05-07'],
         overrideType: 'off_day',
         note: 'Approved admin exception',
       });
     expect(employeeOverride.status).toBe(201);
 
-    const resolvedEmployeeOverride = await request(app)
+    const employeeResolved = await request(app)
       .get(`/api/attendance/employees/${seed.staffId}/schedule`)
-      .query({ date: '2099-05-04' })
+      .query({ date: '2099-05-07' })
       .set('Authorization', `Bearer ${adminToken}`);
-    expect(resolvedEmployeeOverride.status).toBe(200);
-    expect(resolvedEmployeeOverride.body).toMatchObject({
-      source: 'shift_membership',
+    expect(employeeResolved.status).toBe(200);
+    expect(employeeResolved.body).toMatchObject({
       requiredWorkMinutes: 0,
       overrideType: 'off_day',
     });
-    expect(resolvedEmployeeOverride.body.scheduledSegments).toEqual([]);
+    expect(employeeResolved.body.scheduledSegments).toEqual([]);
+  });
+
+  it('previews and replaces same-target day override conflicts', async () => {
+    const seed = await seedUsers();
+    const adminToken = await login('admin');
+    await createAttendanceSetup(adminToken, seed);
+
+    const created = await request(app)
+      .post('/api/attendance/day-overrides')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        targetType: 'global',
+        dates: ['2099-05-10', '2099-05-11'],
+        overrideType: 'off_day',
+      });
+    expect(created.status).toBe(201);
+    expect(created.body.items).toHaveLength(2);
+
+    const preview = await request(app)
+      .post('/api/attendance/day-overrides/preview')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        targetType: 'global',
+        dates: ['2099-05-10'],
+        overrideType: 'hours',
+        startTime: '10:00',
+        endTime: '18:00',
+        requiredWorkMinutes: 420,
+      });
+    expect(preview.status).toBe(200);
+    expect(preview.body.conflicts).toEqual([
+      expect.objectContaining({
+        date: '2099-05-10',
+        targetType: 'global',
+        targetName: 'Global',
+      }),
+    ]);
+
+    const rejected = await request(app)
+      .post('/api/attendance/day-overrides')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        targetType: 'global',
+        dates: ['2099-05-10'],
+        overrideType: 'hours',
+        startTime: '10:00',
+        endTime: '18:00',
+        requiredWorkMinutes: 420,
+      });
+    expect(rejected.status).toBe(409);
+
+    const replaced = await request(app)
+      .post('/api/attendance/day-overrides')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        targetType: 'global',
+        dates: ['2099-05-10'],
+        overrideType: 'hours',
+        startTime: '10:00',
+        endTime: '18:00',
+        requiredWorkMinutes: 420,
+        confirmConflicts: true,
+      });
+    expect(replaced.status).toBe(201);
+    expect(replaced.body.items[0]).toMatchObject({
+      targetType: 'global',
+      date: '2099-05-10',
+      version: 2,
+    });
+  });
+
+  it('lists only current day overrides by default and supports editing overrides', async () => {
+    await seedUsers();
+    const adminToken = await login('admin');
+
+    const past = await request(app)
+      .post('/api/attendance/day-overrides')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        targetType: 'global',
+        dates: ['2000-01-01'],
+        overrideType: 'off_day',
+      });
+    expect(past.status).toBe(201);
+
+    const future = await request(app)
+      .post('/api/attendance/day-overrides')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        targetType: 'global',
+        dates: ['2099-05-12'],
+        overrideType: 'hours',
+        startTime: '10:00',
+        endTime: '18:00',
+        requiredWorkMinutes: 420,
+      });
+    expect(future.status).toBe(201);
+
+    const edited = await request(app)
+      .patch(`/api/attendance/day-overrides/${future.body.items[0]._id}`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        overrideType: 'hours',
+        startTime: '11:00',
+        endTime: '19:00',
+        requiredWorkMinutes: 360,
+        note: 'Edited hours',
+      });
+    expect(edited.status).toBe(200);
+    expect(edited.body).toMatchObject({
+      date: '2099-05-12',
+      startTime: '11:00',
+      endTime: '19:00',
+      requiredWorkMinutes: 360,
+      note: 'Edited hours',
+    });
+
+    const defaultList = await request(app)
+      .get('/api/attendance/day-overrides')
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(defaultList.status).toBe(200);
+    expect(defaultList.body.items.map((item: any) => item.date)).toEqual(['2099-05-12']);
+
+    const deactivated = await request(app)
+      .patch(`/api/attendance/day-overrides/${future.body.items[0]._id}`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ isActive: false });
+    expect(deactivated.status).toBe(200);
+    expect(deactivated.body.isActive).toBe(false);
+    expect(deactivated.body.supersededAt).toBeTruthy();
+
+    const activeList = await request(app)
+      .get('/api/attendance/day-overrides')
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(activeList.status).toBe(200);
+    expect(activeList.body.items).toHaveLength(0);
+
+    const historyList = await request(app)
+      .get('/api/attendance/day-overrides')
+      .query({ includeHistory: true })
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(historyList.status).toBe(200);
+    expect(historyList.body.items.map((item: any) => item.date)).toEqual(
+      expect.arrayContaining(['2000-01-01', '2099-05-12'])
+    );
   });
 
   it('resolves branch assignment before global assignment for staff expected schedule', async () => {
@@ -537,7 +1053,7 @@ describe('Attendance endpoints e2e', () => {
 
     const response = await request(app)
       .get(`/api/attendance/employees/${seed.staffId}/schedule`)
-      .query({ date: '2026-05-04' })
+      .query({ date: '2099-05-04' })
       .set('Authorization', `Bearer ${adminToken}`);
 
     expect(response.status).toBe(200);
@@ -559,16 +1075,34 @@ describe('Attendance endpoints e2e', () => {
       .post('/api/attendance/events/check-in')
       .set('Authorization', `Bearer ${staffToken}`)
       .send({
-        timestamp: '2026-05-04T04:45:00.000Z',
+        timestamp: '2099-05-04T04:45:00.000Z',
       });
 
     expect(checkIn.status).toBe(201);
     expect(checkIn.body).toMatchObject({
       type: 'check_in',
-      branchLocalDate: '2026-05-04',
+      branchLocalDate: '2099-05-04',
       branchLocalTime: '08:45',
       branchTimezone: 'Asia/Dubai',
     });
+
+    const afterCheckInSnapshots = await request(app)
+      .get('/api/attendance/me/daily-snapshots')
+      .query({ date: '2099-05-04' })
+      .set('Authorization', `Bearer ${staffToken}`);
+    expect(afterCheckInSnapshots.status).toBe(200);
+    expect(afterCheckInSnapshots.body.items[0]).toEqual(
+      expect.objectContaining({
+        status: 'incomplete',
+        firstCheckIn: '08:45',
+        generatedBy: 'event',
+        calculationBasis: expect.objectContaining({
+          scheduledStart: '09:00',
+          scheduledEnd: '17:00',
+          requiredWorkMinutes: 420,
+        }),
+      })
+    );
 
     const breakStart = await request(app)
       .post('/api/attendance/events/break-start')
@@ -576,27 +1110,47 @@ describe('Attendance endpoints e2e', () => {
       .send({
         breakTypeId: setup.breakTypeId,
         breakSubtypeId: setup.breakSubtypeId,
-        timestamp: '2026-05-04T09:00:00.000Z',
+        timestamp: '2099-05-04T09:00:00.000Z',
       });
 
     expect(breakStart.status).toBe(201);
     expect(breakStart.body.type).toBe('break_start');
 
+    const afterBreakStartSnapshots = await request(app)
+      .get('/api/attendance/me/daily-snapshots')
+      .query({ date: '2099-05-04' })
+      .set('Authorization', `Bearer ${staffToken}`);
+    expect(afterBreakStartSnapshots.status).toBe(200);
+    expect(afterBreakStartSnapshots.body.items[0]).toMatchObject({
+      status: 'open_break',
+      generatedBy: 'event',
+    });
+
     const breakEnd = await request(app)
       .post('/api/attendance/events/break-end')
       .set('Authorization', `Bearer ${staffToken}`)
       .send({
-        timestamp: '2026-05-04T09:10:00.000Z',
+        timestamp: '2099-05-04T09:10:00.000Z',
       });
 
     expect(breakEnd.status).toBe(201);
     expect(breakEnd.body.type).toBe('break_end');
 
+    const afterBreakEndSnapshots = await request(app)
+      .get('/api/attendance/me/daily-snapshots')
+      .query({ date: '2099-05-04' })
+      .set('Authorization', `Bearer ${staffToken}`);
+    expect(afterBreakEndSnapshots.status).toBe(200);
+    expect(afterBreakEndSnapshots.body.items[0]).toMatchObject({
+      status: 'incomplete',
+      generatedBy: 'event',
+    });
+
     const checkout = await request(app)
       .post('/api/attendance/events/check-out')
       .set('Authorization', `Bearer ${staffToken}`)
       .send({
-        timestamp: '2026-05-04T13:30:00.000Z',
+        timestamp: '2099-05-04T13:30:00.000Z',
       });
 
     expect(checkout.status).toBe(201);
@@ -618,6 +1172,301 @@ describe('Attendance endpoints e2e', () => {
     );
   });
 
+  it('allows staff to read my attendance status', async () => {
+    const seed = await seedUsers();
+    const adminToken = await login('admin');
+    await createAttendanceSetup(adminToken, seed);
+    const staffToken = await login('staff-one');
+
+    const response = await request(app)
+      .get('/api/attendance/me/status')
+      .query({ date: '2099-05-04' })
+      .set('Authorization', `Bearer ${staffToken}`);
+
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      date: '2099-05-04',
+      workStatus: 'not_started',
+      canCheckIn: true,
+      canStartBreak: false,
+      canEndBreak: false,
+      canCheckOut: false,
+      workedMinutes: 0,
+      schedule: expect.objectContaining({
+        source: 'branch',
+        scheduledStart: '09:00',
+        scheduledEnd: '17:00',
+        requiredWorkMinutes: 420,
+      }),
+    });
+  });
+
+  it('blocks staff check-in when no schedule exists for today', async () => {
+    await seedUsers();
+    const staffToken = await login('staff-one');
+
+    const status = await request(app)
+      .get('/api/attendance/me/status')
+      .query({ date: '2099-05-04' })
+      .set('Authorization', `Bearer ${staffToken}`);
+
+    expect(status.status).toBe(200);
+    expect(status.body).toMatchObject({
+      workStatus: 'no_schedule',
+      canCheckIn: false,
+    });
+
+    const checkIn = await request(app)
+      .post('/api/attendance/events/check-in')
+      .set('Authorization', `Bearer ${staffToken}`)
+      .send({
+        timestamp: '2099-05-04T04:45:00.000Z',
+      });
+
+    expect(checkIn.status).toBe(400);
+    expect(checkIn.body.message).toBe('No attendance schedule is available for today');
+  });
+
+  it('allows manager to resolve my attendance status from their managed branch', async () => {
+    await seedUsers();
+    const managerToken = await login('manager-a');
+
+    const status = await request(app)
+      .get('/api/attendance/me/status')
+      .query({ date: '2099-05-04' })
+      .set('Authorization', `Bearer ${managerToken}`);
+
+    expect(status.status).toBe(200);
+    expect(status.body).toMatchObject({
+      workStatus: 'no_schedule',
+      canCheckIn: false,
+      schedule: expect.objectContaining({
+        source: null,
+        requiredWorkMinutes: 0,
+      }),
+    });
+  });
+
+  it('blocks staff check-in on an off day override', async () => {
+    const seed = await seedUsers();
+    const adminToken = await login('admin');
+    await createAttendanceSetup(adminToken, seed);
+    const staffToken = await login('staff-one');
+
+    const override = await request(app)
+      .post('/api/attendance/day-overrides')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        targetType: 'employee',
+        employeeId: seed.staffId,
+        dates: ['2099-05-04'],
+        overrideType: 'off_day',
+        note: 'Holiday',
+      });
+    expect(override.status).toBe(201);
+
+    const status = await request(app)
+      .get('/api/attendance/me/status')
+      .query({ date: '2099-05-04' })
+      .set('Authorization', `Bearer ${staffToken}`);
+    expect(status.status).toBe(200);
+    expect(status.body).toMatchObject({
+      workStatus: 'no_schedule',
+      canCheckIn: false,
+      schedule: expect.objectContaining({
+        overrideType: 'off_day',
+        requiredWorkMinutes: 0,
+      }),
+    });
+
+    const checkIn = await request(app)
+      .post('/api/attendance/events/check-in')
+      .set('Authorization', `Bearer ${staffToken}`)
+      .send({
+        timestamp: '2099-05-04T04:45:00.000Z',
+      });
+    expect(checkIn.status).toBe(400);
+    expect(checkIn.body.message).toBe('No attendance schedule is available for today');
+  });
+
+  it('reports on-break status after reloading status and blocks checkout while the break is open', async () => {
+    const seed = await seedUsers();
+    const adminToken = await login('admin');
+    const setup = await createAttendanceSetup(adminToken, seed);
+    const staffToken = await login('staff-one');
+
+    const checkIn = await request(app)
+      .post('/api/attendance/events/check-in')
+      .set('Authorization', `Bearer ${staffToken}`)
+      .send({
+        timestamp: '2099-05-04T04:45:00.000Z',
+      });
+    expect(checkIn.status).toBe(201);
+
+    const breakStart = await request(app)
+      .post('/api/attendance/events/break-start')
+      .set('Authorization', `Bearer ${staffToken}`)
+      .send({
+        breakTypeId: setup.breakTypeId,
+        breakSubtypeId: setup.breakSubtypeId,
+        timestamp: '2099-05-04T09:00:00.000Z',
+      });
+    expect(breakStart.status).toBe(201);
+
+    const status = await request(app)
+      .get('/api/attendance/me/status')
+      .query({ date: '2099-05-04' })
+      .set('Authorization', `Bearer ${staffToken}`);
+    expect(status.status).toBe(200);
+    expect(status.body).toMatchObject({
+      workStatus: 'on_break',
+      canCheckIn: false,
+      canStartBreak: false,
+      canEndBreak: true,
+      canCheckOut: false,
+      activeBreak: expect.objectContaining({
+        breakTypeId: setup.breakTypeId,
+        breakSubtypeId: setup.breakSubtypeId,
+        branchLocalTime: '13:00',
+      }),
+    });
+
+    const checkout = await request(app)
+      .post('/api/attendance/events/check-out')
+      .set('Authorization', `Bearer ${staffToken}`)
+      .send({
+        timestamp: '2099-05-04T13:30:00.000Z',
+      });
+    expect(checkout.status).toBe(409);
+    expect(checkout.body.message).toBe('End the open break before checkout');
+  });
+
+  it('requires an open break to be closed before checkout correction', async () => {
+    const seed = await seedUsers();
+    const adminToken = await login('admin');
+    const setup = await createAttendanceSetup(adminToken, seed);
+    const staffToken = await login('staff-one');
+
+    await request(app)
+      .post('/api/attendance/events/check-in')
+      .set('Authorization', `Bearer ${staffToken}`)
+      .send({ timestamp: '2099-05-04T04:45:00.000Z' });
+    const breakStart = await request(app)
+      .post('/api/attendance/events/break-start')
+      .set('Authorization', `Bearer ${staffToken}`)
+      .send({
+        breakTypeId: setup.breakTypeId,
+        breakSubtypeId: setup.breakSubtypeId,
+        timestamp: '2099-05-04T09:00:00.000Z',
+      });
+    expect(breakStart.status).toBe(201);
+
+    const snapshots = await request(app)
+      .get('/api/attendance/team/daily-snapshots')
+      .query({ date: '2099-05-04' })
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(snapshots.status).toBe(200);
+    const snapshotId = snapshots.body.items[0]._id;
+    expect(snapshots.body.items[0]).toMatchObject({ status: 'open_break' });
+
+    const blockedCheckoutCorrection = await request(app)
+      .post(`/api/attendance/daily-snapshots/${snapshotId}/corrections/checkout`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        checkoutTime: '17:30',
+        reason: 'Forgot checkout',
+      });
+    expect(blockedCheckoutCorrection.status).toBe(409);
+
+    const staffBreakCorrection = await request(app)
+      .post(`/api/attendance/daily-snapshots/${snapshotId}/corrections/break-end`)
+      .set('Authorization', `Bearer ${staffToken}`)
+      .send({
+        breakEndTime: '13:15',
+        reason: 'Trying to close my own break',
+      });
+    expect(staffBreakCorrection.status).toBe(403);
+
+    const breakCorrection = await request(app)
+      .post(`/api/attendance/daily-snapshots/${snapshotId}/corrections/break-end`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        breakEndTime: '13:15',
+        reason: 'Admin verified break end.',
+      });
+    expect(breakCorrection.status).toBe(200);
+    expect(breakCorrection.body.snapshot).toMatchObject({
+      status: 'incomplete',
+      generatedBy: 'correction',
+    });
+    expect(breakCorrection.body.snapshot).not.toHaveProperty('lastCheckOut');
+
+    const checkoutCorrection = await request(app)
+      .post(`/api/attendance/daily-snapshots/${snapshotId}/corrections/checkout`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        checkoutTime: '17:30',
+        reason: 'Admin verified checkout.',
+      });
+    expect(checkoutCorrection.status).toBe(200);
+    expect(checkoutCorrection.body.snapshot).toMatchObject({
+      status: 'present',
+      lastCheckOut: '17:30',
+    });
+  });
+
+  it('lists past unresolved snapshots in the team attention queue', async () => {
+    const seed = await seedUsers();
+    const adminToken = await login('admin');
+    await createAttendanceSetup(adminToken, seed);
+    const staffToken = await login('staff-one');
+
+    const checkIn = await request(app)
+      .post('/api/attendance/events/check-in')
+      .set('Authorization', `Bearer ${staffToken}`)
+      .send({ timestamp: '2099-05-04T05:00:00.000Z' });
+    expect(checkIn.status).toBe(201);
+
+    const attention = await request(app)
+      .get('/api/attendance/team/daily-snapshots/attention')
+      .query({ beforeDate: '2099-05-05' })
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(attention.status).toBe(200);
+    expect(attention.body.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          employee: seed.staffId,
+          date: '2099-05-04',
+          status: 'incomplete',
+          firstCheckIn: '09:00',
+        }),
+      ])
+    );
+
+    const staffAttention = await request(app)
+      .get('/api/attendance/team/daily-snapshots/attention')
+      .query({ beforeDate: '2099-05-05' })
+      .set('Authorization', `Bearer ${staffToken}`);
+    expect(staffAttention.status).toBe(403);
+
+    const snapshotId = attention.body.items[0]._id;
+    const correction = await request(app)
+      .post(`/api/attendance/daily-snapshots/${snapshotId}/corrections/checkout`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        checkoutTime: '17:30',
+        reason: 'Admin verified checkout.',
+      });
+    expect(correction.status).toBe(200);
+
+    const afterCorrection = await request(app)
+      .get('/api/attendance/team/daily-snapshots/attention')
+      .query({ beforeDate: '2099-05-05' })
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(afterCorrection.status).toBe(200);
+    expect(afterCorrection.body.items).toEqual([]);
+  });
+
   it('stores break-related undertime when break duration exceeds the configured allowance', async () => {
     const seed = await seedUsers();
     const adminToken = await login('admin');
@@ -628,7 +1477,7 @@ describe('Attendance endpoints e2e', () => {
       .post('/api/attendance/events/check-in')
       .set('Authorization', `Bearer ${staffToken}`)
       .send({
-        timestamp: '2026-05-04T05:00:00.000Z',
+        timestamp: '2099-05-04T05:00:00.000Z',
       });
     expect(checkIn.status).toBe(201);
 
@@ -638,7 +1487,7 @@ describe('Attendance endpoints e2e', () => {
       .send({
         breakTypeId: setup.breakTypeId,
         breakSubtypeId: setup.breakSubtypeId,
-        timestamp: '2026-05-04T09:00:00.000Z',
+        timestamp: '2099-05-04T09:00:00.000Z',
       });
     expect(breakStart.status).toBe(201);
 
@@ -646,7 +1495,7 @@ describe('Attendance endpoints e2e', () => {
       .post('/api/attendance/events/break-end')
       .set('Authorization', `Bearer ${staffToken}`)
       .send({
-        timestamp: '2026-05-04T09:30:00.000Z',
+        timestamp: '2099-05-04T09:30:00.000Z',
       });
     expect(breakEnd.status).toBe(201);
 
@@ -654,7 +1503,7 @@ describe('Attendance endpoints e2e', () => {
       .post('/api/attendance/events/check-out')
       .set('Authorization', `Bearer ${staffToken}`)
       .send({
-        timestamp: '2026-05-04T13:00:00.000Z',
+        timestamp: '2099-05-04T13:00:00.000Z',
       });
 
     expect(checkout.status).toBe(201);
@@ -669,6 +1518,281 @@ describe('Attendance endpoints e2e', () => {
       expect.objectContaining({
         excessMinutes: 15,
         undertimeMinutes: 15,
+      })
+    );
+  });
+
+  it('freezes schedule calculation basis across checkout correction unless recalculation is explicit', async () => {
+    const seed = await seedUsers();
+    const adminToken = await login('admin');
+    const setup = await createAttendanceSetup(adminToken, seed);
+    const staffToken = await login('staff-one');
+
+    const checkIn = await request(app)
+      .post('/api/attendance/events/check-in')
+      .set('Authorization', `Bearer ${staffToken}`)
+      .send({ timestamp: '2099-05-04T05:00:00.000Z' });
+    expect(checkIn.status).toBe(201);
+
+    const checkout = await request(app)
+      .post('/api/attendance/events/check-out')
+      .set('Authorization', `Bearer ${staffToken}`)
+      .send({ timestamp: '2099-05-04T13:00:00.000Z' });
+    expect(checkout.status).toBe(201);
+    expect(checkout.body.snapshot).toMatchObject({
+      scheduledStart: '09:00',
+      scheduledEnd: '17:00',
+      requiredWorkMinutes: 420,
+    });
+    expect(checkout.body.snapshot.calculationBasis).toEqual(
+      expect.objectContaining({
+        source: 'branch',
+        scheduledStart: '09:00',
+        scheduledEnd: '17:00',
+        requiredWorkMinutes: 420,
+      })
+    );
+    expect(checkout.body.snapshot.calculationBasis.scheduledSegments[0]).toEqual(
+      expect.objectContaining({
+        shiftId: setup.shiftId,
+        shiftVersion: 1,
+        scheduledStart: '09:00',
+        scheduledEnd: '17:00',
+        requiredWorkMinutes: 420,
+      })
+    );
+
+    const shiftEdit = await request(app)
+      .patch(`/api/attendance/shifts/${setup.shiftId}`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        startTime: '10:00',
+        endTime: '18:00',
+        requiredWorkMinutes: 300,
+      });
+    expect(shiftEdit.status).toBe(200);
+
+    const preserved = await request(app)
+      .post(`/api/attendance/daily-snapshots/${checkout.body.snapshot._id}/corrections/checkout`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        checkoutTime: '18:00',
+        reason: 'Forgot updated checkout time',
+      });
+    expect(preserved.status).toBe(200);
+    expect(preserved.body.snapshot).toMatchObject({
+      scheduledStart: '09:00',
+      scheduledEnd: '17:00',
+      requiredWorkMinutes: 420,
+      productiveWorkMinutes: 540,
+      overtimeMinutes: 120,
+    });
+    expect(preserved.body.snapshot.calculationBasis.scheduledSegments[0]).toEqual(
+      expect.objectContaining({
+        shiftVersion: 1,
+        requiredWorkMinutes: 420,
+      })
+    );
+
+    const recalculated = await request(app)
+      .post(`/api/attendance/daily-snapshots/${checkout.body.snapshot._id}/corrections/checkout`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        checkoutTime: '19:00',
+        reason: 'Admin approved recalculation with current schedule',
+        recalculateBasis: true,
+      });
+    expect(recalculated.status).toBe(200);
+    expect(recalculated.body.snapshot).toMatchObject({
+      scheduledStart: '10:00',
+      scheduledEnd: '18:00',
+      requiredWorkMinutes: 300,
+    });
+    expect(recalculated.body.snapshot.calculationBasis.scheduledSegments[0]).toEqual(
+      expect.objectContaining({
+        shiftVersion: 2,
+        requiredWorkMinutes: 300,
+      })
+    );
+  });
+
+  it('freezes day override and break rule basis for historical corrections', async () => {
+    const seed = await seedUsers();
+    const adminToken = await login('admin');
+    const setup = await createAttendanceSetup(adminToken, seed);
+    const staffToken = await login('staff-one');
+
+    const override = await request(app)
+      .post('/api/attendance/day-overrides')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        targetType: 'employee',
+        employeeId: seed.staffId,
+        dates: ['2099-05-05'],
+        overrideType: 'hours',
+        startTime: '10:00',
+        endTime: '16:00',
+        requiredWorkMinutes: 300,
+      });
+    expect(override.status).toBe(201);
+
+    await request(app)
+      .post('/api/attendance/events/check-in')
+      .set('Authorization', `Bearer ${staffToken}`)
+      .send({ timestamp: '2099-05-05T06:00:00.000Z' });
+    await request(app)
+      .post('/api/attendance/events/break-start')
+      .set('Authorization', `Bearer ${staffToken}`)
+      .send({
+        breakTypeId: setup.breakTypeId,
+        breakSubtypeId: setup.breakSubtypeId,
+        timestamp: '2099-05-05T08:00:00.000Z',
+      });
+    await request(app)
+      .post('/api/attendance/events/break-end')
+      .set('Authorization', `Bearer ${staffToken}`)
+      .send({ timestamp: '2099-05-05T08:30:00.000Z' });
+
+    const checkout = await request(app)
+      .post('/api/attendance/events/check-out')
+      .set('Authorization', `Bearer ${staffToken}`)
+      .send({ timestamp: '2099-05-05T11:00:00.000Z' });
+    expect(checkout.status).toBe(201);
+    expect(checkout.body.snapshot).toMatchObject({
+      scheduledStart: '10:00',
+      scheduledEnd: '16:00',
+      requiredWorkMinutes: 300,
+      breakUndertimeMinutes: 15,
+    });
+    expect(checkout.body.snapshot.calculationBasis.dayOverride).toEqual(
+      expect.objectContaining({
+        overrideId: override.body.items[0]._id,
+        targetType: 'employee',
+        overrideType: 'hours',
+        requiredWorkMinutes: 300,
+      })
+    );
+    expect(checkout.body.snapshot.breakSessions[0]).toEqual(
+      expect.objectContaining({
+        breakTypeName: 'Prayer',
+        breakSubtypeName: 'Dhuhr',
+        maxMinutesPerDay: 75,
+        maxMinutesPerEvent: 15,
+        minutes: 30,
+        excessMinutes: 15,
+      })
+    );
+
+    const overrideEdit = await request(app)
+      .patch(`/api/attendance/day-overrides/${override.body.items[0]._id}`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        overrideType: 'hours',
+        startTime: '12:00',
+        endTime: '20:00',
+        requiredWorkMinutes: 480,
+      });
+    expect(overrideEdit.status).toBe(200);
+
+    const subtypeEdit = await request(app)
+      .patch(`/api/attendance/break-subtypes/${setup.breakSubtypeId}`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ maxMinutesPerEvent: 30 });
+    expect(subtypeEdit.status).toBe(200);
+
+    const preserved = await request(app)
+      .post(`/api/attendance/daily-snapshots/${checkout.body.snapshot._id}/corrections/checkout`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        checkoutTime: '16:30',
+        reason: 'Correct checkout but preserve historical rules',
+      });
+    expect(preserved.status).toBe(200);
+    expect(preserved.body.snapshot).toMatchObject({
+      scheduledStart: '10:00',
+      scheduledEnd: '16:00',
+      requiredWorkMinutes: 300,
+      breakUndertimeMinutes: 15,
+    });
+    expect(preserved.body.snapshot.breakSessions[0]).toEqual(
+      expect.objectContaining({
+        maxMinutesPerEvent: 15,
+        excessMinutes: 15,
+      })
+    );
+
+    const recalculated = await request(app)
+      .post(`/api/attendance/daily-snapshots/${checkout.body.snapshot._id}/corrections/checkout`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        checkoutTime: '17:00',
+        reason: 'Explicitly recalculate after policy update',
+        recalculateBasis: true,
+      });
+    expect(recalculated.status).toBe(200);
+    expect(recalculated.body.snapshot).toMatchObject({
+      scheduledStart: '12:00',
+      scheduledEnd: '20:00',
+      requiredWorkMinutes: 480,
+      breakUndertimeMinutes: 0,
+    });
+    expect(recalculated.body.snapshot.breakSessions[0]).toEqual(
+      expect.objectContaining({
+        maxMinutesPerEvent: 30,
+        excessMinutes: 0,
+      })
+    );
+  });
+
+  it('lazily captures a calculation basis for legacy snapshots that do not have one', async () => {
+    const seed = await seedUsers();
+    const adminToken = await login('admin');
+    const setup = await createAttendanceSetup(adminToken, seed);
+    const staffToken = await login('staff-one');
+
+    await request(app)
+      .post('/api/attendance/events/check-in')
+      .set('Authorization', `Bearer ${staffToken}`)
+      .send({ timestamp: '2099-05-04T05:00:00.000Z' });
+    const checkout = await request(app)
+      .post('/api/attendance/events/check-out')
+      .set('Authorization', `Bearer ${staffToken}`)
+      .send({ timestamp: '2099-05-04T13:00:00.000Z' });
+    expect(checkout.status).toBe(201);
+
+    await AttendanceDailySnapshot.updateOne(
+      { _id: checkout.body.snapshot._id },
+      { $unset: { calculationBasis: '' } }
+    );
+
+    const shiftEdit = await request(app)
+      .patch(`/api/attendance/shifts/${setup.shiftId}`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        startTime: '11:00',
+        endTime: '19:00',
+        requiredWorkMinutes: 240,
+      });
+    expect(shiftEdit.status).toBe(200);
+
+    const corrected = await request(app)
+      .post(`/api/attendance/daily-snapshots/${checkout.body.snapshot._id}/corrections/checkout`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        checkoutTime: '18:00',
+        reason: 'Legacy snapshot correction',
+      });
+    expect(corrected.status).toBe(200);
+    expect(corrected.body.snapshot).toMatchObject({
+      scheduledStart: '11:00',
+      scheduledEnd: '19:00',
+      requiredWorkMinutes: 240,
+    });
+    expect(corrected.body.snapshot.calculationBasis).toEqual(
+      expect.objectContaining({
+        scheduledStart: '11:00',
+        scheduledEnd: '19:00',
+        requiredWorkMinutes: 240,
       })
     );
   });
@@ -704,7 +1828,7 @@ describe('Attendance endpoints e2e', () => {
       .post('/api/attendance/events/check-in')
       .set('Authorization', `Bearer ${staffToken}`)
       .send({
-        timestamp: '2026-05-04T05:00:00.000Z',
+        timestamp: '2099-05-04T05:00:00.000Z',
       });
 
     expect(checkIn.status).toBe(201);
@@ -714,7 +1838,7 @@ describe('Attendance endpoints e2e', () => {
       .set('Authorization', `Bearer ${adminToken}`)
       .send({
         branchId: seed.branchId,
-        date: '2026-05-04',
+        date: '2099-05-04',
       });
 
     expect(finalize.status).toBe(200);
@@ -761,7 +1885,7 @@ describe('Attendance endpoints e2e', () => {
 
     const teamSnapshots = await request(app)
       .get('/api/attendance/team/daily-snapshots')
-      .query({ date: '2026-05-04' })
+      .query({ date: '2099-05-04' })
       .set('Authorization', `Bearer ${managerToken}`);
 
     expect(teamSnapshots.status).toBe(200);
@@ -784,14 +1908,14 @@ describe('Attendance endpoints e2e', () => {
 
     const ownSummary = await request(app)
       .get('/api/attendance/me/daily-snapshots')
-      .query({ date: '2026-05-04' })
+      .query({ date: '2099-05-04' })
       .set('Authorization', `Bearer ${staffToken}`);
 
     expect(ownSummary.status).toBe(200);
 
     const otherEmployeeSummary = await request(app)
       .get(`/api/attendance/employees/${seed.managerId}/daily-snapshots`)
-      .query({ date: '2026-05-04' })
+      .query({ date: '2099-05-04' })
       .set('Authorization', `Bearer ${staffToken}`);
 
     expect(otherEmployeeSummary.status).toBe(403);

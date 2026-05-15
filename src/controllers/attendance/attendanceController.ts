@@ -10,18 +10,26 @@ import AttendanceShift, {
     IAttendanceShiftWeeklyPattern,
 } from '../../models/AttendanceShift';
 import AttendanceShiftMembership from '../../models/AttendanceShiftMembership';
-import AttendanceShiftOverride from '../../models/AttendanceShiftOverride';
+import AttendanceDayOverride from '../../models/AttendanceDayOverride';
 import AttendancePrivilege from '../../models/AttendancePrivilege';
 import AttendanceBreakType, { AttendanceBreakSubtype } from '../../models/AttendanceBreak';
-import AttendanceScheduleTemplate, { AttendanceScheduleAssignment } from '../../models/AttendanceSchedule';
-import AttendanceEvent from '../../models/AttendanceEvent';
-import AttendanceDailySnapshot from '../../models/AttendanceDailySnapshot';
+import AttendanceScheduleTemplate, {
+    AttendanceScheduleAssignment,
+    AttendanceScheduleGroup,
+    AttendanceScheduleGroupMembership,
+} from '../../models/AttendanceSchedule';
+import AttendanceEvent, { IAttendanceEvent } from '../../models/AttendanceEvent';
+import AttendanceDailySnapshot, {
+    IAttendanceBreakSession,
+    IAttendanceCalculationBasis,
+} from '../../models/AttendanceDailySnapshot';
 import AttendanceMonthlySummary from '../../models/AttendanceMonthlySummary';
 
-type GeneratedBy = 'checkout' | 'scheduled_job' | 'correction' | 'manual';
+type GeneratedBy = 'event' | 'checkout' | 'scheduled_job' | 'correction' | 'manual';
 type Actor = Pick<Request, 'userId' | 'privilege'>;
 type ResolvedShift = {
     _id: Types.ObjectId;
+    name?: string;
     version?: number;
     startTime: string;
     endTime: string;
@@ -33,17 +41,18 @@ type ResolvedSchedule = {
     employeeId: string;
     branchId: string;
     branchTimezone: string;
-    source: 'branch' | 'global' | 'shift_membership' | null;
+    source: 'employee' | 'group' | 'branch' | 'global' | 'shift_membership' | null;
     assignment: { _id: Types.ObjectId } | null;
     template: { _id: Types.ObjectId } | null;
     shiftMembership?: { _id: Types.ObjectId } | null;
-    override?: { _id: Types.ObjectId; overrideType: 'hours' | 'off_day' } | null;
+    override?: { _id: Types.ObjectId; overrideType: 'hours' | 'off_day'; targetType?: string } | null;
     shifts: ResolvedShift[];
     scheduledSegments: Array<{ shift: Types.ObjectId; scheduledStart: string; scheduledEnd: string; requiredWorkMinutes: number }>;
     scheduledStart?: string;
     scheduledEnd?: string;
     requiredWorkMinutes: number;
 };
+type MyAttendanceWorkStatus = 'not_started' | 'checked_in' | 'on_break' | 'checked_out' | 'no_schedule';
 
 const timePattern = /^([01]\d|2[0-3]):[0-5]\d$/;
 const datePattern = /^\d{4}-\d{2}-\d{2}$/;
@@ -186,6 +195,10 @@ function minutesBetween(start: Date, end: Date) {
     return Math.max(0, Math.round((end.getTime() - start.getTime()) / 60000));
 }
 
+function hasWorkingSchedule(schedule: ResolvedSchedule) {
+    return schedule.requiredWorkMinutes > 0 && schedule.scheduledSegments.length > 0 && schedule.override?.overrideType !== 'off_day';
+}
+
 function timeToMinutes(time?: string) {
     if (!time) return undefined;
     const [hour, minute] = time.split(':').map(Number);
@@ -236,7 +249,10 @@ function branchLocalDateTimeToUtc(dateString: string, time: string, timezone: st
 async function getEmployeeBranch(employeeId: Types.ObjectId) {
     const branch = await Branch.findOne({
         isActive: true,
-        staffs: employeeId,
+        $or: [
+            { staffs: employeeId },
+            { manager: employeeId },
+        ],
     });
 
     if (!branch) {
@@ -244,6 +260,81 @@ async function getEmployeeBranch(employeeId: Types.ObjectId) {
     }
 
     return branch;
+}
+
+function effectiveMembershipQuery(date: Date) {
+    return {
+        isActive: true,
+        effectiveFrom: { $lte: date },
+        $or: [
+            { effectiveTo: { $exists: false } },
+            { effectiveTo: null },
+            { effectiveTo: { $gt: date } },
+        ],
+    };
+}
+
+function activeAssignmentQueryForRange(dayStart: Date, dayEnd: Date) {
+    return {
+        isActive: true,
+        supersededAt: { $exists: false },
+        effectiveFrom: { $lte: dayEnd },
+        $or: [{ expiresAt: { $exists: false } }, { expiresAt: null }, { expiresAt: { $gt: dayStart } }],
+    };
+}
+
+async function groupHasActiveScheduleAssignment(groupId: Types.ObjectId) {
+    const assignment = await AttendanceScheduleAssignment.findOne({
+        targetType: 'group',
+        group: groupId,
+        isActive: true,
+        supersededAt: { $exists: false },
+    }).lean();
+    return !!assignment;
+}
+
+async function membershipEffectiveDateForEmployees(groupId: Types.ObjectId, employeeIds: Types.ObjectId[]) {
+    if (!(await groupHasActiveScheduleAssignment(groupId)) || employeeIds.length === 0) {
+        return new Date();
+    }
+
+    const branches = await Branch.find({
+        isActive: true,
+        staffs: { $in: employeeIds },
+    }).lean();
+    const boundaries = employeeIds.map((employeeId) => {
+        const branch = branches.find((item) =>
+            (item.staffs ?? []).some((staffId) => String(staffId) === String(employeeId))
+        );
+        return nextBranchLocalDayBoundaryUtc(branch?.timezone ?? 'Asia/Dubai');
+    });
+    return new Date(Math.min(...boundaries.map((item) => item.getTime())));
+}
+
+async function scheduleGroupSummary(group: any, asOf = new Date()) {
+    const memberships = await AttendanceScheduleGroupMembership.find({
+        group: group._id,
+        ...effectiveMembershipQuery(asOf),
+    }).populate('employee', 'username isActive').lean();
+    const employeeIds = memberships.map((membership) => membership.employee?._id ?? membership.employee);
+    const branches = employeeIds.length === 0
+        ? []
+        : await Branch.find({ staffs: { $in: employeeIds } }, { name: 1 }).lean();
+    const activeAssignment = await AttendanceScheduleAssignment.findOne({
+        targetType: 'group',
+        group: group._id,
+        isActive: true,
+        supersededAt: { $exists: false },
+    }, { _id: 1 }).lean();
+
+    const groupObject = typeof group.toObject === 'function' ? group.toObject() : group;
+    return {
+        ...groupObject,
+        memberCount: memberships.length,
+        branchIds: branches.map((branch) => String(branch._id)),
+        branchNames: branches.map((branch) => branch.name),
+        hasActiveAssignment: !!activeAssignment,
+    };
 }
 
 async function assertManagerCanViewEmployee(actor: Actor, employeeId: string) {
@@ -298,38 +389,12 @@ async function resolveWorkingShiftSchedule(
     const shift = await AttendanceShift.findOne({ _id: membership.shift, isActive: true }).lean();
     if (!shift) return null;
 
-    const employeeOverride = await AttendanceShiftOverride.findOne({
-        targetType: 'employee',
-        branch: branch._id,
-        employee: employeeId,
-        date: dateString,
-        isActive: true,
-    }).sort({ version: -1, createdAt: -1 }).lean();
-
-    const shiftOverride = await AttendanceShiftOverride.findOne({
-        targetType: 'shift',
-        branch: branch._id,
-        shift: shift._id,
-        date: dateString,
-        isActive: true,
-    }).sort({ version: -1, createdAt: -1 }).lean();
-
-    const override = employeeOverride ?? shiftOverride;
     let rule = ruleFromShiftForWeekday(shift, branchLocalWeekday(dateString, branch.timezone));
-
-    if (override?.overrideType === 'off_day') {
-        rule = null;
-    } else if (override?.overrideType === 'hours') {
-        rule = {
-            startTime: override.startTime!,
-            endTime: override.endTime!,
-            requiredWorkMinutes: override.requiredWorkMinutes,
-        };
-    }
 
     const resolvedShift: ResolvedShift | null = rule
         ? {
             _id: shift._id,
+            name: shift.name,
             version: shift.version,
             startTime: rule.startTime,
             endTime: rule.endTime,
@@ -356,7 +421,7 @@ async function resolveWorkingShiftSchedule(
         assignment: null,
         template: null,
         shiftMembership: { _id: membership._id },
-        override: override ? { _id: override._id, overrideType: override.overrideType } : null,
+        override: null,
         shifts: resolvedShift ? [resolvedShift] : [],
         scheduledSegments,
         scheduledStart: scheduledSegments[0]?.scheduledStart,
@@ -365,40 +430,132 @@ async function resolveWorkingShiftSchedule(
     };
 }
 
+async function findApplicableDayOverride(
+    employeeId: Types.ObjectId,
+    branchId: Types.ObjectId,
+    dateString: string,
+    groupId?: Types.ObjectId
+) {
+    const activeQuery = {
+        date: dateString,
+        isActive: true,
+        $or: [{ supersededAt: { $exists: false } }, { supersededAt: null }],
+    };
+    const candidates: Array<Record<string, unknown>> = [
+        { targetType: 'employee', employee: employeeId },
+        ...(groupId ? [{ targetType: 'group', group: groupId }] : []),
+        { targetType: 'branch', branch: branchId },
+        { targetType: 'global' },
+    ];
+
+    for (const candidate of candidates) {
+        const override = await AttendanceDayOverride.findOne({
+            ...activeQuery,
+            ...candidate,
+        }).sort({ version: -1, createdAt: -1 }).lean();
+        if (override) return override;
+    }
+    return null;
+}
+
+async function applyDayOverride(
+    schedule: ResolvedSchedule,
+    employeeId: Types.ObjectId,
+    branchId: Types.ObjectId,
+    dateString: string,
+    groupId?: Types.ObjectId
+): Promise<ResolvedSchedule> {
+    const override = await findApplicableDayOverride(employeeId, branchId, dateString, groupId);
+    if (!override) return schedule;
+
+    if (override.overrideType === 'off_day') {
+        return {
+            ...schedule,
+            override: { _id: override._id, overrideType: override.overrideType, targetType: override.targetType },
+            shifts: [],
+            scheduledSegments: [],
+            scheduledStart: undefined,
+            scheduledEnd: undefined,
+            requiredWorkMinutes: 0,
+        };
+    }
+
+    const scheduledSegments = [{
+        shift: override._id,
+        scheduledStart: override.startTime!,
+        scheduledEnd: override.endTime!,
+        requiredWorkMinutes: override.requiredWorkMinutes,
+    }];
+    return {
+        ...schedule,
+        override: { _id: override._id, overrideType: override.overrideType, targetType: override.targetType },
+        shifts: [],
+        scheduledSegments,
+        scheduledStart: override.startTime,
+        scheduledEnd: override.endTime,
+        requiredWorkMinutes: override.requiredWorkMinutes,
+    };
+}
+
 async function resolveSchedule(employeeId: Types.ObjectId, branchId: Types.ObjectId, dateString: string): Promise<ResolvedSchedule> {
     assertDate(dateString, 'date');
     const branch = await Branch.findById(branchId).lean();
     if (!branch) throw new AppError('Branch not found', 404);
 
-    const workingShiftSchedule = await resolveWorkingShiftSchedule(employeeId, branch, dateString);
-    if (workingShiftSchedule) return workingShiftSchedule;
-
     const dayStart = new Date(`${dateString}T00:00:00.000Z`);
     const dayEnd = new Date(`${dateString}T23:59:59.999Z`);
-    const assignmentQuery = {
-        isActive: true,
-        supersededAt: { $exists: false },
-        effectiveFrom: { $lte: dayEnd },
-        $or: [{ expiresAt: { $exists: false } }, { expiresAt: null }, { expiresAt: { $gt: dayStart } }],
-    };
+    const groupMembership = await AttendanceScheduleGroupMembership.findOne({
+        employee: employeeId,
+        ...effectiveMembershipQuery(dayEnd),
+    }).sort({ effectiveFrom: -1 }).lean();
 
-    let source: 'branch' | 'global' = 'branch';
-    let assignment = await AttendanceScheduleAssignment.findOne({
-        ...assignmentQuery,
-        targetType: 'branch',
-        branch: branchId,
-    }).sort({ effectiveFrom: -1 });
-
-    if (!assignment) {
-        source = 'global';
-        assignment = await AttendanceScheduleAssignment.findOne({
-            ...assignmentQuery,
-            targetType: 'global',
-        }).sort({ effectiveFrom: -1 });
+    const workingShiftSchedule = await resolveWorkingShiftSchedule(employeeId, branch, dateString);
+    if (workingShiftSchedule) {
+        return applyDayOverride(
+            workingShiftSchedule,
+            employeeId,
+            branchId,
+            dateString,
+            groupMembership?.group
+        );
     }
 
-    if (!assignment) {
-        return {
+    const assignmentQuery = activeAssignmentQueryForRange(dayStart, dayEnd);
+
+    const candidates: Array<{
+        source: 'employee' | 'group' | 'branch' | 'global';
+        query: Record<string, unknown>;
+    }> = [
+        { source: 'employee', query: { targetType: 'employee', employee: employeeId } },
+        ...(groupMembership
+            ? [{ source: 'group' as const, query: { targetType: 'group', group: groupMembership.group } }]
+            : []),
+        { source: 'branch', query: { targetType: 'branch', branch: branchId } },
+        { source: 'global', query: { targetType: 'global' } },
+    ];
+
+    let source: 'employee' | 'group' | 'branch' | 'global' = 'global';
+    let assignment: any = null;
+    let template: any = null;
+
+    for (const candidate of candidates) {
+        const foundAssignment = await AttendanceScheduleAssignment.findOne({
+            ...assignmentQuery,
+            ...candidate.query,
+        }).sort({ effectiveFrom: -1 });
+        const foundTemplate = foundAssignment
+            ? await AttendanceScheduleTemplate.findOne({ _id: foundAssignment.template, isActive: true }).lean()
+            : null;
+        if (foundAssignment && foundTemplate) {
+            source = candidate.source;
+            assignment = foundAssignment;
+            template = foundTemplate;
+            break;
+        }
+    }
+
+    if (!assignment || !template) {
+        return applyDayOverride({
             employeeId: String(employeeId),
             branchId: String(branchId),
             branchTimezone: branch.timezone,
@@ -412,11 +569,8 @@ async function resolveSchedule(employeeId: Types.ObjectId, branchId: Types.Objec
             scheduledStart: undefined as string | undefined,
             scheduledEnd: undefined as string | undefined,
             requiredWorkMinutes: 0,
-        };
+        }, employeeId, branchId, dateString, groupMembership?.group);
     }
-
-    const template = await AttendanceScheduleTemplate.findById(assignment.template).lean();
-    if (!template) throw new AppError('Schedule template not found', 404);
 
     const weekday = branchLocalWeekday(dateString, branch.timezone);
     const shiftIds = ((template.weeklyPattern as any)?.[weekday] ?? []) as Types.ObjectId[];
@@ -430,7 +584,7 @@ async function resolveSchedule(employeeId: Types.ObjectId, branchId: Types.Objec
         requiredWorkMinutes: shift.requiredWorkMinutes,
     }));
 
-    return {
+    return applyDayOverride({
         employeeId: String(employeeId),
         branchId: String(branchId),
         branchTimezone: branch.timezone,
@@ -444,7 +598,7 @@ async function resolveSchedule(employeeId: Types.ObjectId, branchId: Types.Objec
         scheduledStart: scheduledSegments[0]?.scheduledStart,
         scheduledEnd: scheduledSegments[scheduledSegments.length - 1]?.scheduledEnd,
         requiredWorkMinutes: scheduledSegments.reduce((sum, segment) => sum + segment.requiredWorkMinutes, 0),
-    };
+    }, employeeId, branchId, dateString, groupMembership?.group);
 }
 
 async function getDayEvents(employeeId: Types.ObjectId, dateString: string) {
@@ -454,29 +608,13 @@ async function getDayEvents(employeeId: Types.ObjectId, dateString: string) {
     }).sort({ timestamp: 1 });
 }
 
-async function generateDailySnapshot(params: {
-    employeeId: Types.ObjectId;
-    branchId: Types.ObjectId;
-    dateString: string;
-    generatedBy: GeneratedBy;
-    notes?: string;
-}) {
-    const schedule = await resolveSchedule(params.employeeId, params.branchId, params.dateString);
-    const events = await getDayEvents(params.employeeId, params.dateString);
+function splitAttendanceEvents(events: Awaited<ReturnType<typeof getDayEvents>>) {
     const firstCheckIn = events.find((event) => event.type === 'check_in');
     const checkOuts = events.filter((event) => event.type === 'check_out');
     const lastCheckOut = checkOuts[checkOuts.length - 1];
-
-    let status: 'present' | 'absent' | 'off_day' | 'incomplete' | 'missing_checkout' | 'open_break';
-    let grossMinutes = 0;
-    let totalBreakMinutes = 0;
-    let productiveWorkMinutes = 0;
-    let breakOvertimeMinutes = 0;
-    let breakUndertimeMinutes = 0;
-    const breakTotals: Array<Record<string, unknown>> = [];
-
     const openBreakStack: typeof events = [];
     const breakPairs: Array<{ start: typeof events[number]; end: typeof events[number] }> = [];
+
     for (const event of events) {
         if (event.type === 'break_start') {
             openBreakStack.push(event);
@@ -486,58 +624,274 @@ async function generateDailySnapshot(params: {
         }
     }
 
-    if (!firstCheckIn && schedule.requiredWorkMinutes === 0) {
-        status = 'off_day';
-    } else if (!firstCheckIn) {
-        status = 'absent';
-    } else if (openBreakStack.length > 0) {
-        status = 'open_break';
-    } else if (!lastCheckOut) {
-        status = 'missing_checkout';
-    } else {
-        status = 'present';
-    }
+    return {
+        firstCheckIn,
+        lastCheckOut,
+        openBreak: openBreakStack[openBreakStack.length - 1],
+        openBreakCount: openBreakStack.length,
+        breakPairs,
+    };
+}
 
+function maybeObjectId(value: unknown): Types.ObjectId | undefined {
+    if (!value) return undefined;
+    if (value instanceof Types.ObjectId) return value;
+    const candidate = typeof value === 'object' && '_id' in (value as Record<string, unknown>)
+        ? (value as Record<string, unknown>)._id
+        : value;
+    const asString = String(candidate);
+    return Types.ObjectId.isValid(asString) ? new Types.ObjectId(asString) : undefined;
+}
+
+function captureCalculationBasis(schedule: ResolvedSchedule): IAttendanceCalculationBasis {
+    const shiftById = new Map(schedule.shifts.map((shift) => [String(shift._id), shift]));
+    const dayOverride = schedule.override
+        ? {
+            overrideId: schedule.override._id,
+            targetType: schedule.override.targetType ?? '',
+            overrideType: schedule.override.overrideType,
+            startTime: schedule.scheduledStart,
+            endTime: schedule.scheduledEnd,
+            requiredWorkMinutes: schedule.requiredWorkMinutes,
+        }
+        : undefined;
+
+    return {
+        schemaVersion: 1,
+        capturedAt: new Date(),
+        source: schedule.source,
+        branchTimezone: schedule.branchTimezone,
+        scheduleAssignment: schedule.assignment?._id,
+        scheduleTemplate: schedule.template?._id,
+        shiftMembership: schedule.shiftMembership?._id,
+        dayOverride,
+        scheduledSegments: schedule.scheduledSegments.map((segment) => {
+            const shift = shiftById.get(String(segment.shift));
+            return {
+                shiftId: shift?._id,
+                shiftName: shift?.name,
+                shiftVersion: shift?.version,
+                scheduledStart: segment.scheduledStart,
+                scheduledEnd: segment.scheduledEnd,
+                requiredWorkMinutes: segment.requiredWorkMinutes,
+                graceLateMinutes: shift?.graceLateMinutes ?? 0,
+                graceEarlyLeaveMinutes: shift?.graceEarlyLeaveMinutes ?? 0,
+            };
+        }),
+        scheduledStart: schedule.scheduledStart,
+        scheduledEnd: schedule.scheduledEnd,
+        requiredWorkMinutes: schedule.requiredWorkMinutes,
+    } as IAttendanceCalculationBasis;
+}
+
+function scheduleFromCalculationBasis(
+    basis: IAttendanceCalculationBasis,
+    employeeId: Types.ObjectId,
+    branchId: Types.ObjectId
+): ResolvedSchedule {
+    const fallbackSegmentId = maybeObjectId(basis.dayOverride?.overrideId);
+    const shifts = (basis.scheduledSegments ?? [])
+        .map((segment) => {
+            const shiftId = maybeObjectId(segment.shiftId);
+            return shiftId
+                ? {
+                    _id: shiftId,
+                    name: segment.shiftName,
+                    version: segment.shiftVersion,
+                    startTime: segment.scheduledStart,
+                    endTime: segment.scheduledEnd,
+                    requiredWorkMinutes: segment.requiredWorkMinutes,
+                    graceLateMinutes: segment.graceLateMinutes,
+                    graceEarlyLeaveMinutes: segment.graceEarlyLeaveMinutes,
+                }
+                : null;
+        })
+        .filter(Boolean) as ResolvedShift[];
+    const scheduledSegments = (basis.scheduledSegments ?? [])
+        .map((segment) => {
+            const shift = maybeObjectId(segment.shiftId) ?? fallbackSegmentId;
+            return shift
+                ? {
+                    shift,
+                    scheduledStart: segment.scheduledStart,
+                    scheduledEnd: segment.scheduledEnd,
+                    requiredWorkMinutes: segment.requiredWorkMinutes,
+                }
+                : null;
+        })
+        .filter(Boolean) as ResolvedSchedule['scheduledSegments'];
+
+    return {
+        employeeId: String(employeeId),
+        branchId: String(branchId),
+        branchTimezone: basis.branchTimezone,
+        source: basis.source ?? null,
+        assignment: basis.scheduleAssignment ? { _id: maybeObjectId(basis.scheduleAssignment)! } : null,
+        template: basis.scheduleTemplate ? { _id: maybeObjectId(basis.scheduleTemplate)! } : null,
+        shiftMembership: basis.shiftMembership ? { _id: maybeObjectId(basis.shiftMembership)! } : null,
+        override: basis.dayOverride
+            ? {
+                _id: maybeObjectId(basis.dayOverride.overrideId)!,
+                overrideType: basis.dayOverride.overrideType,
+                targetType: basis.dayOverride.targetType,
+            }
+            : null,
+        shifts,
+        scheduledSegments,
+        scheduledStart: basis.scheduledStart,
+        scheduledEnd: basis.scheduledEnd,
+        requiredWorkMinutes: basis.requiredWorkMinutes,
+    };
+}
+
+async function currentBreakRuleBasis(start: Awaited<ReturnType<typeof getDayEvents>>[number]) {
+    const breakType = start.breakType
+        ? await AttendanceBreakType.findById(start.breakType).lean()
+        : null;
+    const breakSubtype = start.breakSubtype
+        ? await AttendanceBreakSubtype.findById(start.breakSubtype).lean()
+        : null;
+    return {
+        breakTypeName: breakType?.name,
+        breakSubtypeName: breakSubtype?.name,
+        maxMinutesPerDay: breakType?.maxMinutesPerDay,
+        maxMinutesPerEvent: breakSubtype?.maxMinutesPerEvent,
+    };
+}
+
+async function calculateBreakSessions(
+    breakPairs: Array<{ start: Awaited<ReturnType<typeof getDayEvents>>[number]; end: Awaited<ReturnType<typeof getDayEvents>>[number] }>,
+    timezone: string,
+    existingSessions: IAttendanceBreakSession[],
+    reuseFrozenRules: boolean
+) {
+    const existingByPair = new Map(
+        (existingSessions ?? []).map((session) => [
+            `${String(session.startEventId)}:${String(session.endEventId)}`,
+            session,
+        ])
+    );
     const dailyBreakUsage = new Map<string, number>();
+    let totalBreakMinutes = 0;
+    let breakOvertimeMinutes = 0;
+    let breakUndertimeMinutes = 0;
+    const breakSessions: IAttendanceBreakSession[] = [];
+    const breakTotals: Array<Record<string, unknown>> = [];
+
     for (const pair of breakPairs) {
         const actualMinutes = minutesBetween(pair.start.timestamp, pair.end.timestamp);
         totalBreakMinutes += actualMinutes;
 
-        const breakType = pair.start.breakType
-            ? await AttendanceBreakType.findById(pair.start.breakType).lean()
-            : null;
-        const breakSubtype = pair.start.breakSubtype
-            ? await AttendanceBreakSubtype.findById(pair.start.breakSubtype).lean()
-            : null;
+        const pairKey = `${String(pair.start._id)}:${String(pair.end._id)}`;
+        const existing = reuseFrozenRules ? existingByPair.get(pairKey) : undefined;
+        const basis = existing ?? await currentBreakRuleBasis(pair.start);
         const dailyKey = String(pair.start.breakType ?? 'unknown');
         const dailyUsed = dailyBreakUsage.get(dailyKey) ?? 0;
-        const dailyLimit = breakType?.maxMinutesPerDay ?? Number.POSITIVE_INFINITY;
-        const perEventLimit = breakSubtype?.maxMinutesPerEvent ?? Number.POSITIVE_INFINITY;
+        const dailyLimit = basis.maxMinutesPerDay ?? Number.POSITIVE_INFINITY;
+        const perEventLimit = basis.maxMinutesPerEvent ?? Number.POSITIVE_INFINITY;
         const remainingDaily = Math.max(0, dailyLimit - dailyUsed);
         const allowedBudget = Math.min(perEventLimit, remainingDaily);
         const normalizedAllowedBudget = Number.isFinite(allowedBudget) ? allowedBudget : actualMinutes;
         const allowedMinutes = Math.min(actualMinutes, normalizedAllowedBudget);
         const excessMinutes = Math.max(0, actualMinutes - normalizedAllowedBudget);
         const unusedAllowedMinutes = Math.max(0, normalizedAllowedBudget - actualMinutes);
+        const startLocal = branchLocalParts(pair.start.timestamp, timezone);
+        const endLocal = branchLocalParts(pair.end.timestamp, timezone);
 
         dailyBreakUsage.set(dailyKey, dailyUsed + allowedMinutes);
         breakOvertimeMinutes += unusedAllowedMinutes;
         breakUndertimeMinutes += excessMinutes;
-        breakTotals.push({
+
+        const session = {
+            startEventId: pair.start._id,
+            endEventId: pair.end._id,
+            startAt: pair.start.timestamp,
+            endAt: pair.end.timestamp,
+            startLocalTime: startLocal.time,
+            endLocalTime: endLocal.time,
             breakType: pair.start.breakType,
+            breakTypeName: basis.breakTypeName,
             breakSubtype: pair.start.breakSubtype,
+            breakSubtypeName: basis.breakSubtypeName,
+            maxMinutesPerDay: basis.maxMinutesPerDay,
+            maxMinutesPerEvent: basis.maxMinutesPerEvent,
             minutes: actualMinutes,
             allowedMinutes,
             excessMinutes,
             unusedAllowedMinutes,
             overtimeMinutes: unusedAllowedMinutes,
             undertimeMinutes: excessMinutes,
+        } as IAttendanceBreakSession;
+        breakSessions.push(session);
+        breakTotals.push({
+            breakType: session.breakType,
+            breakSubtype: session.breakSubtype,
+            minutes: session.minutes,
+            allowedMinutes: session.allowedMinutes,
+            excessMinutes: session.excessMinutes,
+            unusedAllowedMinutes: session.unusedAllowedMinutes,
+            overtimeMinutes: session.overtimeMinutes,
+            undertimeMinutes: session.undertimeMinutes,
         });
     }
 
+    return {
+        totalBreakMinutes,
+        breakOvertimeMinutes,
+        breakUndertimeMinutes,
+        breakSessions,
+        breakTotals,
+    };
+}
+
+async function generateDailySnapshot(params: {
+    employeeId: Types.ObjectId;
+    branchId: Types.ObjectId;
+    dateString: string;
+    generatedBy: GeneratedBy;
+    notes?: string;
+    recalculateBasis?: boolean;
+}) {
+    const existing = await AttendanceDailySnapshot.findOne({
+        employee: params.employeeId,
+        date: params.dateString,
+    });
+    const shouldReuseBasis = !params.recalculateBasis && existing?.calculationBasis;
+    const schedule = shouldReuseBasis
+        ? scheduleFromCalculationBasis(existing.calculationBasis as IAttendanceCalculationBasis, params.employeeId, params.branchId)
+        : await resolveSchedule(params.employeeId, params.branchId, params.dateString);
+    const calculationBasis = shouldReuseBasis
+        ? existing.calculationBasis
+        : captureCalculationBasis(schedule);
+    const events = await getDayEvents(params.employeeId, params.dateString);
+    const { firstCheckIn, lastCheckOut, openBreakCount, breakPairs } = splitAttendanceEvents(events);
+
+    let status: 'present' | 'absent' | 'off_day' | 'incomplete' | 'missing_checkout' | 'open_break';
+    let grossMinutes = 0;
+    let productiveWorkMinutes = 0;
+
+    if (!firstCheckIn && schedule.requiredWorkMinutes === 0) {
+        status = 'off_day';
+    } else if (!firstCheckIn) {
+        status = 'absent';
+    } else if (openBreakCount > 0) {
+        status = 'open_break';
+    } else if (!lastCheckOut) {
+        status = ['scheduled_job', 'manual'].includes(params.generatedBy) ? 'missing_checkout' : 'incomplete';
+    } else {
+        status = 'present';
+    }
+
+    const breakCalculation = await calculateBreakSessions(
+        breakPairs,
+        schedule.branchTimezone,
+        existing?.breakSessions ?? [],
+        !params.recalculateBasis
+    );
+
     if (firstCheckIn && lastCheckOut) {
         grossMinutes = minutesBetween(firstCheckIn.timestamp, lastCheckOut.timestamp);
-        productiveWorkMinutes = Math.max(0, grossMinutes - totalBreakMinutes);
+        productiveWorkMinutes = Math.max(0, grossMinutes - breakCalculation.totalBreakMinutes);
     }
 
     const overtimeMinutes = Math.max(0, productiveWorkMinutes - schedule.requiredWorkMinutes);
@@ -559,11 +913,6 @@ async function generateDailySnapshot(params: {
             ? Math.max(0, scheduledEndMinutes - lastMinutes - (lastShift?.graceEarlyLeaveMinutes ?? 0))
             : 0;
 
-    const existing = await AttendanceDailySnapshot.findOne({
-        employee: params.employeeId,
-        date: params.dateString,
-    });
-
     const payload = {
         employee: params.employeeId,
         branch: params.branchId,
@@ -582,14 +931,16 @@ async function generateDailySnapshot(params: {
         lastCheckOutAt: lastCheckOut?.timestamp,
         grossMinutes,
         productiveWorkMinutes,
-        totalBreakMinutes,
-        breakOvertimeMinutes,
-        breakUndertimeMinutes,
+        totalBreakMinutes: breakCalculation.totalBreakMinutes,
+        breakOvertimeMinutes: breakCalculation.breakOvertimeMinutes,
+        breakUndertimeMinutes: breakCalculation.breakUndertimeMinutes,
         overtimeMinutes,
         undertimeMinutes,
         lateMinutes,
         earlyLeaveMinutes,
-        breakTotals,
+        breakTotals: breakCalculation.breakTotals,
+        breakSessions: breakCalculation.breakSessions,
+        calculationBasis,
         status,
         generatedFromEventIds: events.map((event) => event._id),
         generatedBy: params.generatedBy,
@@ -603,6 +954,27 @@ async function generateDailySnapshot(params: {
         { $set: payload },
         { new: true, upsert: true }
     );
+}
+
+async function generateDailySnapshotFromEvent(event: IAttendanceEvent) {
+    return generateDailySnapshot({
+        employeeId: event.employee,
+        branchId: event.branch,
+        dateString: event.branchLocalDate,
+        generatedBy: 'event',
+    });
+}
+
+function latestOpenBreakStart(events: Awaited<ReturnType<typeof getDayEvents>>) {
+    const openBreakStack: typeof events = [];
+    for (const event of events) {
+        if (event.type === 'break_start') {
+            openBreakStack.push(event);
+        } else if (event.type === 'break_end') {
+            openBreakStack.pop();
+        }
+    }
+    return openBreakStack[openBreakStack.length - 1];
 }
 
 function ok(handler: (req: Request, res: Response) => Promise<void>) {
@@ -800,95 +1172,227 @@ export const removeShiftMembership = ok(async (req, res) => {
     res.status(200).json(membership);
 });
 
-export const createShiftOverride = ok(async (req, res) => {
+type DayOverrideTargetType = 'global' | 'branch' | 'group' | 'employee';
+type DayOverrideType = 'hours' | 'off_day';
+
+function normalizeOverrideDates(body: Record<string, unknown>) {
+    const rawDates = Array.isArray(body.dates) ? body.dates : body.date ? [body.date] : [];
+    const dates = (Array.from(new Set(rawDates.map(String))) as string[]);
+    if (dates.length === 0) throw new AppError('At least one date is required', 400);
+    dates.forEach((date) => assertDate(date, 'dates'));
+    return dates;
+}
+
+async function resolveDayOverrideTarget(body: Record<string, unknown>) {
+    if (!['global', 'branch', 'group', 'employee'].includes(String(body.targetType))) {
+        throw new AppError('targetType must be global, branch, group, or employee', 400);
+    }
+    const targetType = String(body.targetType) as DayOverrideTargetType;
+    const branch = targetType === 'branch' ? toObjectId(body.branchId, 'branchId') : undefined;
+    const group = targetType === 'group' ? toObjectId(body.groupId, 'groupId') : undefined;
+    const employee = targetType === 'employee' ? toObjectId(body.employeeId, 'employeeId') : undefined;
+
+    let targetName = 'Global';
+    if (branch) {
+        const doc = await Branch.findById(branch, { name: 1, isActive: 1 }).lean();
+        if (!doc || !doc.isActive) throw new AppError('Branch not found or inactive', 404);
+        targetName = doc.name;
+    }
+    if (group) {
+        const doc = await AttendanceScheduleGroup.findById(group, { name: 1, isActive: 1 }).lean();
+        if (!doc || !doc.isActive) throw new AppError('Schedule group not found or inactive', 404);
+        targetName = doc.name;
+    }
+    if (employee) {
+        const doc = await User.findById(employee, { username: 1, isActive: 1 }).lean();
+        if (!doc || !doc.isActive) throw new AppError('Employee not found or inactive', 404);
+        targetName = doc.username;
+    }
+    return { targetType, branch, group, employee, targetName };
+}
+
+function dayOverrideConflictFilter(params: {
+    targetType: DayOverrideTargetType;
+    date: string;
+    branch?: Types.ObjectId;
+    group?: Types.ObjectId;
+    employee?: Types.ObjectId;
+}) {
+    const base: Record<string, unknown> = {
+        targetType: params.targetType,
+        date: params.date,
+        isActive: true,
+        $or: [{ supersededAt: { $exists: false } }, { supersededAt: null }],
+    };
+    if (params.branch) base.branch = params.branch;
+    if (params.group) base.group = params.group;
+    if (params.employee) base.employee = params.employee;
+    return base;
+}
+
+async function dayOverrideConflicts(body: Record<string, unknown>) {
+    const dates = normalizeOverrideDates(body);
+    const target = await resolveDayOverrideTarget(body);
+    const conflicts = [];
+    for (const date of dates) {
+        const existing = await AttendanceDayOverride.find(
+            dayOverrideConflictFilter({ ...target, date })
+        ).sort({ version: -1, createdAt: -1 }).lean();
+        conflicts.push(...existing.map((item) => ({
+            overrideId: String(item._id),
+            date,
+            targetType: target.targetType,
+            targetName: target.targetName,
+            overrideType: item.overrideType,
+        })));
+    }
+    return { dates, target, conflicts };
+}
+
+export const previewDayOverrides = ok(async (req, res) => {
+    requireAdmin(req);
+    const { conflicts } = await dayOverrideConflicts(req.body);
+    res.status(200).json({ conflicts });
+});
+
+export const createDayOverrides = ok(async (req, res) => {
     requireAdmin(req);
     const createdBy = requireUserId(req);
-    const branch = await getBranchForAssignment(toObjectId(req.body.branchId, 'branchId'));
-    assertDate(req.body.date, 'date');
-    if (!['shift', 'employee'].includes(req.body.targetType)) {
-        throw new AppError('targetType must be shift or employee', 400);
-    }
     if (!['hours', 'off_day'].includes(req.body.overrideType)) {
         throw new AppError('overrideType must be hours or off_day', 400);
     }
-
-    const targetType = req.body.targetType as 'shift' | 'employee';
-    const overrideType = req.body.overrideType as 'hours' | 'off_day';
-    const shift = targetType === 'shift' ? toObjectId(req.body.shiftId, 'shiftId') : undefined;
-    const employee = targetType === 'employee' ? toObjectId(req.body.employeeId, 'employeeId') : undefined;
-    if (employee && !branchContainsEmployee(branch, employee)) {
-        throw new AppError('Employee must belong to the selected branch', 400);
-    }
+    const overrideType = req.body.overrideType as DayOverrideType;
     if (overrideType === 'hours') {
         assertTime(req.body.startTime, 'startTime');
         assertTime(req.body.endTime, 'endTime');
     }
 
-    const conflictFilter = targetType === 'shift'
-        ? { targetType, branch: branch._id, shift, date: req.body.date, isActive: true }
-        : { targetType, branch: branch._id, employee, date: req.body.date, isActive: true };
-    const existing = await AttendanceShiftOverride.find(conflictFilter).sort({ version: -1 });
-    if (existing.length > 0 && req.body.replaceExisting !== true) {
+    const { dates, target, conflicts } = await dayOverrideConflicts(req.body);
+    if (conflicts.length > 0 && req.body.confirmConflicts !== true) {
         res.status(409).json({
-            message: 'An active override already exists for this target and date',
-            conflicts: existing.map((item) => String(item._id)),
+            message: 'One or more active day overrides already exist for this target and date',
+            conflicts,
         });
         return;
     }
-    if (existing.length > 0) {
-        await AttendanceShiftOverride.updateMany(
-            { _id: { $in: existing.map((item) => item._id) } },
-            { $set: { isActive: false, supersededAt: new Date() } }
-        );
-    }
 
-    const override = await AttendanceShiftOverride.create({
-        targetType,
-        branch: branch._id,
-        shift,
-        employee,
-        date: req.body.date,
-        overrideType,
-        startTime: overrideType === 'hours' ? req.body.startTime : undefined,
-        endTime: overrideType === 'hours' ? req.body.endTime : undefined,
-        requiredWorkMinutes: overrideType === 'hours' ? numberOrDefault(req.body.requiredWorkMinutes, 0) : 0,
-        note: req.body.note,
-        version: existing[0] ? existing[0].version + 1 : 1,
-        isActive: true,
-        createdBy,
-    });
-    res.status(201).json(override);
+    const created = [];
+    for (const date of dates) {
+        const existing = await AttendanceDayOverride.find(
+            dayOverrideConflictFilter({ ...target, date })
+        ).sort({ version: -1 });
+        if (existing.length > 0) {
+            await AttendanceDayOverride.updateMany(
+                { _id: { $in: existing.map((item) => item._id) } },
+                { $set: { isActive: false, supersededAt: new Date() } }
+            );
+        }
+        created.push(await AttendanceDayOverride.create({
+            targetType: target.targetType,
+            branch: target.branch,
+            group: target.group,
+            employee: target.employee,
+            date,
+            overrideType,
+            startTime: overrideType === 'hours' ? req.body.startTime : undefined,
+            endTime: overrideType === 'hours' ? req.body.endTime : undefined,
+            requiredWorkMinutes: overrideType === 'hours' ? numberOrDefault(req.body.requiredWorkMinutes, 0) : 0,
+            note: req.body.note,
+            version: existing[0] ? existing[0].version + 1 : 1,
+            isActive: true,
+            createdBy,
+        }));
+    }
+    res.status(201).json({ items: created, conflicts });
 });
 
-export const listShiftOverrides = ok(async (req, res) => {
+export const listDayOverrides = ok(async (req, res) => {
     requireAdmin(req);
     const query: Record<string, unknown> = {};
+    const includeHistory = ['true', '1', 'yes'].includes(String(req.query.includeHistory ?? '').toLowerCase());
     if (req.query.branchId) query.branch = toObjectId(req.query.branchId, 'branchId');
-    if (req.query.shiftId) query.shift = toObjectId(req.query.shiftId, 'shiftId');
+    if (req.query.groupId) query.group = toObjectId(req.query.groupId, 'groupId');
     if (req.query.employeeId) query.employee = toObjectId(req.query.employeeId, 'employeeId');
     if (req.query.date) {
         assertDate(req.query.date, 'date');
         query.date = String(req.query.date);
+    } else if (!includeHistory) {
+        query.date = { $gte: new Date().toISOString().slice(0, 10) };
     }
-    if (req.query.isActive !== undefined) query.isActive = String(req.query.isActive) !== 'false';
-    const items = await AttendanceShiftOverride.find(query)
-        .populate('shift', 'name version isActive')
+    if (req.query.isActive !== undefined) {
+        query.isActive = String(req.query.isActive) !== 'false';
+    } else if (!includeHistory) {
+        query.isActive = true;
+    }
+    if (!includeHistory) {
+        query.$or = [{ supersededAt: { $exists: false } }, { supersededAt: null }];
+    }
+    const items = await AttendanceDayOverride.find(query)
+        .populate('group', 'name isActive')
         .populate('employee', 'username privilege isActive')
         .populate('branch', 'name timezone isActive')
         .sort({ date: -1, createdAt: -1 });
     res.status(200).json({ items });
 });
 
-export const updateShiftOverride = ok(async (req, res) => {
+export const updateDayOverride = ok(async (req, res) => {
     requireAdmin(req);
-    const update: Record<string, unknown> = { ...req.body };
-    if (update.date) assertDate(update.date, 'date');
-    if (update.startTime) assertTime(update.startTime, 'startTime');
-    if (update.endTime) assertTime(update.endTime, 'endTime');
-    if (update.requiredWorkMinutes !== undefined) update.requiredWorkMinutes = numberOrDefault(update.requiredWorkMinutes, 0);
-    const override = await AttendanceShiftOverride.findByIdAndUpdate(req.params.id, update, { new: true, runValidators: true });
-    if (!override) throw new AppError('Shift override not found', 404);
-    res.status(200).json(override);
+    const override = await AttendanceDayOverride.findById(req.params.id);
+    if (!override) throw new AppError('Day override not found', 404);
+
+    const targetType = String(req.body.targetType ?? override.targetType) as DayOverrideTargetType;
+    const target = await resolveDayOverrideTarget({
+        targetType,
+        branchId: req.body.branchId ?? (override.branch ? String(override.branch) : undefined),
+        groupId: req.body.groupId ?? (override.group ? String(override.group) : undefined),
+        employeeId: req.body.employeeId ?? (override.employee ? String(override.employee) : undefined),
+    });
+    const date = String(req.body.date ?? override.date);
+    assertDate(date, 'date');
+    const overrideType = String(req.body.overrideType ?? override.overrideType) as DayOverrideType;
+    if (!['hours', 'off_day'].includes(overrideType)) {
+        throw new AppError('overrideType must be hours or off_day', 400);
+    }
+    const isActive = req.body.isActive === undefined ? override.isActive : req.body.isActive === true;
+    const willBeSuperseded = isActive
+        ? req.body.supersededAt ? parseDate(req.body.supersededAt, 'supersededAt') : undefined
+        : (override.supersededAt ?? new Date());
+
+    if (isActive && !willBeSuperseded) {
+        const conflict = await AttendanceDayOverride.findOne({
+            ...dayOverrideConflictFilter({ ...target, date }),
+            _id: { $ne: override._id },
+        }).lean();
+        if (conflict) {
+            throw new AppError('An active day override already exists for this target and date', 409);
+        }
+    }
+
+    override.targetType = target.targetType;
+    override.branch = target.branch;
+    override.group = target.group;
+    override.employee = target.employee;
+    override.date = date;
+    override.overrideType = overrideType;
+    override.startTime = overrideType === 'hours' ? String(req.body.startTime ?? override.startTime) : undefined;
+    override.endTime = overrideType === 'hours' ? String(req.body.endTime ?? override.endTime) : undefined;
+    if (overrideType === 'hours') {
+        assertTime(override.startTime, 'startTime');
+        assertTime(override.endTime, 'endTime');
+        override.requiredWorkMinutes = numberOrDefault(req.body.requiredWorkMinutes, override.requiredWorkMinutes);
+    } else {
+        override.requiredWorkMinutes = 0;
+    }
+    override.note = req.body.note;
+    override.isActive = isActive;
+    override.supersededAt = willBeSuperseded;
+    const saved = await override.save();
+    const populated = await saved.populate([
+        { path: 'group', select: 'name isActive' },
+        { path: 'employee', select: 'username privilege isActive' },
+        { path: 'branch', select: 'name timezone isActive' },
+    ]);
+    res.status(200).json(populated);
 });
 
 export const createPrivilege = ok(async (req, res) => {
@@ -1041,6 +1545,176 @@ export const listBreakSubtypes = ok(async (req, res) => {
     res.status(200).json({ items });
 });
 
+export const createScheduleGroup = ok(async (req, res) => {
+    requireAdmin(req);
+    const group = await AttendanceScheduleGroup.create({
+        name: req.body.name,
+        description: req.body.description,
+        isActive: req.body.isActive ?? true,
+        createdBy: requireUserId(req),
+    });
+    res.status(201).json(await scheduleGroupSummary(group));
+});
+
+export const listScheduleGroups = ok(async (req, res) => {
+    requireAdminOrManager(req);
+    const groups = await AttendanceScheduleGroup.find().sort({ name: 1 });
+    const items = await Promise.all(groups.map((group) => scheduleGroupSummary(group)));
+    res.status(200).json({ items });
+});
+
+export const updateScheduleGroup = ok(async (req, res) => {
+    requireAdmin(req);
+    const group = await AttendanceScheduleGroup.findById(req.params.id);
+    if (!group) throw new AppError('Schedule group not found', 404);
+    if (req.body.name !== undefined) group.name = req.body.name;
+    if (req.body.description !== undefined) group.description = req.body.description;
+    if (req.body.isActive !== undefined) group.isActive = req.body.isActive === true;
+    await group.save();
+    res.status(200).json(await scheduleGroupSummary(group));
+});
+
+async function scheduleGroupMembers(groupId: Types.ObjectId, asOf = new Date()) {
+    const memberships = await AttendanceScheduleGroupMembership.find({
+        group: groupId,
+        ...effectiveMembershipQuery(asOf),
+    }).populate('employee', 'username isActive privilege').sort({ effectiveFrom: -1 }).lean();
+    const employeeIds = memberships.map((membership: any) => membership.employee?._id ?? membership.employee);
+    const branches = employeeIds.length === 0
+        ? []
+        : await Branch.find({ staffs: { $in: employeeIds } }, { name: 1, staffs: 1 }).lean();
+    return memberships.map((membership: any) => {
+        const employeeId = String(membership.employee?._id ?? membership.employee);
+        const branch = branches.find((item) =>
+            (item.staffs ?? []).some((staffId) => String(staffId) === employeeId)
+        );
+        return {
+            membershipId: String(membership._id),
+            employeeId,
+            employeeName: membership.employee?.username ?? employeeId,
+            branchId: branch ? String(branch._id) : undefined,
+            branchName: branch?.name,
+            effectiveFrom: membership.effectiveFrom,
+            effectiveTo: membership.effectiveTo,
+            isActive: membership.isActive,
+        };
+    });
+}
+
+export const listScheduleGroupMembers = ok(async (req, res) => {
+    requireAdminOrManager(req);
+    const groupId = toObjectId(req.params.id, 'id');
+    const group = await AttendanceScheduleGroup.findById(groupId).lean();
+    if (!group) throw new AppError('Schedule group not found', 404);
+    res.status(200).json({ items: await scheduleGroupMembers(groupId) });
+});
+
+async function scheduleGroupTransferPreview(groupId: Types.ObjectId, employeeIds: Types.ObjectId[]) {
+    const existing = await AttendanceScheduleGroupMembership.find({
+        group: { $ne: groupId },
+        employee: { $in: employeeIds },
+        ...effectiveMembershipQuery(new Date()),
+    }).populate('group', 'name').populate('employee', 'username').lean();
+    return existing.map((membership: any) => ({
+        employeeId: String(membership.employee?._id ?? membership.employee),
+        employeeName: membership.employee?.username ?? String(membership.employee),
+        groupId: String(membership.group?._id ?? membership.group),
+        groupName: membership.group?.name ?? 'another group',
+    }));
+}
+
+export const previewScheduleGroupMembers = ok(async (req, res) => {
+    requireAdmin(req);
+    const groupId = toObjectId(req.params.id, 'id');
+    const group = await AttendanceScheduleGroup.findById(groupId).lean();
+    if (!group) throw new AppError('Schedule group not found', 404);
+    const employeeIds = Array.isArray(req.body.employeeIds)
+        ? req.body.employeeIds.map((id: string) => toObjectId(id, 'employeeIds'))
+        : [];
+    res.status(200).json({
+        transfers: await scheduleGroupTransferPreview(groupId, employeeIds),
+    });
+});
+
+export const setScheduleGroupMembers = ok(async (req, res) => {
+    requireAdmin(req);
+    const groupId = toObjectId(req.params.id, 'id');
+    const group = await AttendanceScheduleGroup.findById(groupId);
+    if (!group || !group.isActive) throw new AppError('Schedule group not found or inactive', 404);
+    const createdBy = requireUserId(req);
+    const employeeIds = Array.isArray(req.body.employeeIds)
+        ? (Array.from(new Set(req.body.employeeIds.map(String))) as string[]).map((id) => toObjectId(id, 'employeeIds'))
+        : [];
+    const transfers = await scheduleGroupTransferPreview(groupId, employeeIds);
+    if (transfers.length > 0 && req.body.confirmTransfer !== true) {
+        res.status(409).json({
+            message: 'Selected employees already belong to another schedule group',
+            transfers,
+        });
+        return;
+    }
+
+    const effectiveFrom = await membershipEffectiveDateForEmployees(groupId, employeeIds);
+    const closeImmediately = effectiveFrom.getTime() <= Date.now();
+    await AttendanceScheduleGroupMembership.updateMany({
+        group: groupId,
+        employee: { $nin: employeeIds },
+        ...effectiveMembershipQuery(new Date()),
+    }, { $set: { effectiveTo: effectiveFrom, isActive: !closeImmediately } });
+    await AttendanceScheduleGroupMembership.updateMany({
+        group: { $ne: groupId },
+        employee: { $in: employeeIds },
+        ...effectiveMembershipQuery(new Date()),
+    }, { $set: { effectiveTo: effectiveFrom, isActive: !closeImmediately } });
+
+    const existingTargetMemberships = await AttendanceScheduleGroupMembership.find({
+        group: groupId,
+        employee: { $in: employeeIds },
+        ...effectiveMembershipQuery(effectiveFrom),
+    }, { employee: 1 }).lean();
+    const existingEmployeeIds = new Set(existingTargetMemberships.map((item) => String(item.employee)));
+    const toCreate = employeeIds
+        .filter((employeeId) => !existingEmployeeIds.has(String(employeeId)))
+        .map((employeeId) => ({
+            group: groupId,
+            employee: employeeId,
+            effectiveFrom,
+            isActive: true,
+            createdBy,
+        }));
+    if (toCreate.length > 0) {
+        await AttendanceScheduleGroupMembership.insertMany(toCreate);
+    }
+
+    res.status(200).json({
+        group: await scheduleGroupSummary(group),
+        members: await scheduleGroupMembers(groupId),
+        transfers,
+    });
+});
+
+export const removeScheduleGroupMember = ok(async (req, res) => {
+    requireAdmin(req);
+    const groupId = toObjectId(req.params.id, 'id');
+    const employeeId = toObjectId(req.params.employeeId, 'employeeId');
+    const group = await AttendanceScheduleGroup.findById(groupId);
+    if (!group) throw new AppError('Schedule group not found', 404);
+    const effectiveTo = await membershipEffectiveDateForEmployees(groupId, [employeeId]);
+    const closeImmediately = effectiveTo.getTime() <= Date.now();
+    const membership = await AttendanceScheduleGroupMembership.findOneAndUpdate({
+        group: groupId,
+        employee: employeeId,
+        ...effectiveMembershipQuery(new Date()),
+    }, { $set: { effectiveTo, isActive: !closeImmediately } }, { new: true });
+    if (!membership) throw new AppError('Schedule group member not found', 404);
+    res.status(200).json({
+        removed: true,
+        effectiveTo,
+        group: await scheduleGroupSummary(group),
+        members: await scheduleGroupMembers(groupId),
+    });
+});
+
 export const createScheduleTemplate = ok(async (req, res) => {
     requireAdmin(req);
     const template = await AttendanceScheduleTemplate.create({
@@ -1068,21 +1742,29 @@ export const updateScheduleTemplate = ok(async (req, res) => {
 
 export const createScheduleAssignment = ok(async (req, res) => {
     requireAdmin(req);
-    if (!['global', 'branch'].includes(req.body.targetType)) {
-        throw new AppError('targetType must be global or branch', 400);
+    if (!['global', 'branch', 'group', 'employee'].includes(req.body.targetType)) {
+        throw new AppError('targetType must be global, branch, group, or employee', 400);
     }
     const template = toObjectId(req.body.templateId, 'templateId');
     const branch = req.body.targetType === 'branch' ? toObjectId(req.body.branchId, 'branchId') : undefined;
+    const group = req.body.targetType === 'group' ? toObjectId(req.body.groupId, 'groupId') : undefined;
+    const employee = req.body.targetType === 'employee' ? toObjectId(req.body.employeeId, 'employeeId') : undefined;
     const effectiveFrom = parseDate(req.body.effectiveFrom, 'effectiveFrom');
     if (!effectiveFrom) throw new AppError('effectiveFrom is required', 400);
     const filter = req.body.targetType === 'branch'
         ? { targetType: 'branch', branch, isActive: true, supersededAt: { $exists: false } }
-        : { targetType: 'global', isActive: true, supersededAt: { $exists: false } };
+        : req.body.targetType === 'group'
+            ? { targetType: 'group', group, isActive: true, supersededAt: { $exists: false } }
+            : req.body.targetType === 'employee'
+                ? { targetType: 'employee', employee, isActive: true, supersededAt: { $exists: false } }
+                : { targetType: 'global', isActive: true, supersededAt: { $exists: false } };
     await AttendanceScheduleAssignment.updateMany(filter, { $set: { supersededAt: new Date(), isActive: false } });
     const assignment = await AttendanceScheduleAssignment.create({
         template,
         targetType: req.body.targetType,
         branch,
+        group,
+        employee,
         effectiveFrom,
         expiresAt: parseDate(req.body.expiresAt, 'expiresAt'),
         isActive: req.body.isActive ?? true,
@@ -1092,6 +1774,8 @@ export const createScheduleAssignment = ok(async (req, res) => {
         ...assignment.toObject(),
         templateId: String(assignment.template),
         branchId: assignment.branch ? String(assignment.branch) : undefined,
+        groupId: assignment.group ? String(assignment.group) : undefined,
+        employeeId: assignment.employee ? String(assignment.employee) : undefined,
     });
 });
 
@@ -1099,6 +1783,77 @@ export const listScheduleAssignments = ok(async (req, res) => {
     requireAdmin(req);
     const items = await AttendanceScheduleAssignment.find().sort({ createdAt: -1 });
     res.status(200).json({ items });
+});
+
+export const updateScheduleAssignment = ok(async (req, res) => {
+    requireAdmin(req);
+    const assignment = await AttendanceScheduleAssignment.findById(req.params.id);
+    if (!assignment) throw new AppError('Schedule assignment not found', 404);
+
+    if (req.body.templateId !== undefined) {
+        assignment.template = toObjectId(req.body.templateId, 'templateId');
+    }
+
+    if (req.body.targetType !== undefined) {
+        if (!['global', 'branch', 'group', 'employee'].includes(req.body.targetType)) {
+            throw new AppError('targetType must be global, branch, group, or employee', 400);
+        }
+        assignment.targetType = req.body.targetType;
+    }
+
+    if (req.body.branchId !== undefined) {
+        assignment.branch = req.body.branchId === null || req.body.branchId === ''
+            ? undefined
+            : toObjectId(req.body.branchId, 'branchId');
+    } else if (assignment.targetType !== 'branch') {
+        assignment.branch = undefined;
+    }
+
+    if (req.body.groupId !== undefined) {
+        assignment.group = req.body.groupId === null || req.body.groupId === ''
+            ? undefined
+            : toObjectId(req.body.groupId, 'groupId');
+    } else if (assignment.targetType !== 'group') {
+        assignment.group = undefined;
+    }
+
+    if (req.body.employeeId !== undefined) {
+        assignment.employee = req.body.employeeId === null || req.body.employeeId === ''
+            ? undefined
+            : toObjectId(req.body.employeeId, 'employeeId');
+    } else if (assignment.targetType !== 'employee') {
+        assignment.employee = undefined;
+    }
+
+    if (req.body.effectiveFrom !== undefined) {
+        const effectiveFrom = parseDate(req.body.effectiveFrom, 'effectiveFrom');
+        if (!effectiveFrom) throw new AppError('effectiveFrom is required', 400);
+        assignment.effectiveFrom = effectiveFrom;
+    }
+
+    if (req.body.expiresAt !== undefined) {
+        assignment.expiresAt = parseDate(req.body.expiresAt, 'expiresAt');
+    }
+
+    if (req.body.supersededAt !== undefined) {
+        assignment.supersededAt = parseDate(req.body.supersededAt, 'supersededAt');
+    }
+
+    if (req.body.isActive !== undefined) {
+        assignment.isActive = req.body.isActive === true;
+        if (!assignment.isActive) {
+            assignment.supersededAt = new Date();
+        }
+    }
+
+    const updated = await assignment.save();
+    res.status(200).json({
+        ...updated.toObject(),
+        templateId: String(updated.template),
+        branchId: updated.branch ? String(updated.branch) : undefined,
+        groupId: updated.group ? String(updated.group) : undefined,
+        employeeId: updated.employee ? String(updated.employee) : undefined,
+    });
 });
 
 export const getEmployeeSchedule = ok(async (req, res) => {
@@ -1125,6 +1880,80 @@ export const getEmployeeSchedule = ok(async (req, res) => {
     });
 });
 
+export const getMyAttendanceStatus = ok(async (req, res) => {
+    const employeeId = requireUserId(req);
+    const branch = await getEmployeeBranch(employeeId);
+    const date = String(req.query.date ?? branchLocalParts(new Date(), branch.timezone).date);
+    assertDate(date, 'date');
+
+    const schedule = await resolveSchedule(employeeId, branch._id, date);
+    const events = await getDayEvents(employeeId, date);
+    const snapshot = await AttendanceDailySnapshot.findOne({ employee: employeeId, date }).lean();
+    const { firstCheckIn, lastCheckOut, openBreak, breakPairs } = splitAttendanceEvents(events);
+    const workingSchedule = hasWorkingSchedule(schedule);
+    let workStatus: MyAttendanceWorkStatus;
+
+    if (openBreak) {
+        workStatus = 'on_break';
+    } else if (lastCheckOut) {
+        workStatus = 'checked_out';
+    } else if (firstCheckIn) {
+        workStatus = 'checked_in';
+    } else if (!workingSchedule) {
+        workStatus = 'no_schedule';
+    } else {
+        workStatus = 'not_started';
+    }
+
+    let workedMinutes = snapshot?.productiveWorkMinutes ?? 0;
+    if (firstCheckIn && !lastCheckOut) {
+        const now = new Date();
+        const grossMinutes = minutesBetween(firstCheckIn.timestamp, now);
+        const completedBreakMinutes = breakPairs.reduce(
+            (sum, pair) => sum + minutesBetween(pair.start.timestamp, pair.end.timestamp),
+            0
+        );
+        const openBreakMinutes = openBreak ? minutesBetween(openBreak.timestamp, now) : 0;
+        workedMinutes = Math.max(0, grossMinutes - completedBreakMinutes - openBreakMinutes);
+    }
+
+    res.status(200).json({
+        date,
+        schedule: {
+            employeeId: schedule.employeeId,
+            branchId: schedule.branchId,
+            branchTimezone: schedule.branchTimezone,
+            source: schedule.source,
+            assignmentId: schedule.assignment?._id,
+            templateId: schedule.template?._id,
+            shiftMembershipId: schedule.shiftMembership?._id,
+            overrideId: schedule.override?._id,
+            overrideType: schedule.override?.overrideType,
+            scheduledStart: schedule.scheduledStart,
+            scheduledEnd: schedule.scheduledEnd,
+            requiredWorkMinutes: schedule.requiredWorkMinutes,
+            scheduledSegments: schedule.scheduledSegments,
+        },
+        snapshot,
+        workStatus,
+        canCheckIn: workStatus === 'not_started' && workingSchedule,
+        canStartBreak: workStatus === 'checked_in',
+        canEndBreak: workStatus === 'on_break',
+        canCheckOut: workStatus === 'checked_in',
+        workedMinutes,
+        activeBreak: openBreak
+            ? {
+                eventId: openBreak._id,
+                breakTypeId: openBreak.breakType,
+                breakSubtypeId: openBreak.breakSubtype,
+                startedAt: openBreak.timestamp,
+                branchLocalDate: openBreak.branchLocalDate,
+                branchLocalTime: openBreak.branchLocalTime,
+            }
+            : null,
+    });
+});
+
 async function createAttendanceEvent(req: Request, type: 'check_in' | 'check_out' | 'break_start' | 'break_end') {
     const employeeId = requireUserId(req);
     const branch = await getEmployeeBranch(employeeId);
@@ -1142,6 +1971,12 @@ async function createAttendanceEvent(req: Request, type: 'check_in' | 'check_out
 
     if (type === 'check_in' && hasCheckIn && !hasCheckout) {
         throw new AppError('Employee is already checked in', 409);
+    }
+    if (type === 'check_in') {
+        const schedule = await resolveSchedule(employeeId, branch._id, local.date);
+        if (!hasWorkingSchedule(schedule)) {
+            throw new AppError('No attendance schedule is available for today', 400);
+        }
     }
     if (type !== 'check_in' && !hasCheckIn) {
         throw new AppError('Employee must check in first', 409);
@@ -1211,16 +2046,19 @@ async function createAttendanceEvent(req: Request, type: 'check_in' | 'check_out
 
 export const checkIn = ok(async (req, res) => {
     const event = await createAttendanceEvent(req, 'check_in');
+    await generateDailySnapshotFromEvent(event);
     res.status(201).json(event);
 });
 
 export const breakStart = ok(async (req, res) => {
     const event = await createAttendanceEvent(req, 'break_start');
+    await generateDailySnapshotFromEvent(event);
     res.status(201).json(event);
 });
 
 export const breakEnd = ok(async (req, res) => {
     const event = await createAttendanceEvent(req, 'break_end');
+    await generateDailySnapshotFromEvent(event);
     res.status(201).json(event);
 });
 
@@ -1263,6 +2101,38 @@ export const getTeamDailySnapshots = ok(async (req, res) => {
     res.status(200).json({ items });
 });
 
+export const getTeamAttendanceAttention = ok(async (req, res) => {
+    if (req.privilege === 'staff') throw new AppError('Not authorized', 403);
+    const now = new Date();
+    const beforeDate = req.query.beforeDate ? String(req.query.beforeDate) : undefined;
+    if (beforeDate) assertDate(beforeDate, 'beforeDate');
+    const rangeEnd = beforeDate ?? now.toISOString().slice(0, 10);
+    const days = Math.min(Math.max(Number(req.query.days ?? 14) || 14, 1), 90);
+    const startDate = new Date(`${rangeEnd}T00:00:00.000Z`);
+    startDate.setUTCDate(startDate.getUTCDate() - days);
+    const fromDate = startDate.toISOString().slice(0, 10);
+    const query: Record<string, unknown> = {
+        date: beforeDate ? { $gte: fromDate, $lt: beforeDate } : { $gte: fromDate },
+        $or: [
+            { status: { $in: ['open_break', 'missing_checkout'] } },
+            {
+                status: 'incomplete',
+                firstCheckIn: { $exists: true },
+                $or: [{ lastCheckOut: { $exists: false } }, { lastCheckOut: null }, { lastCheckOut: '' }],
+            },
+        ],
+    };
+    if (req.privilege === 'manager') {
+        const staffIds = await User.find({ manager: req.userId }, { _id: 1 }).lean();
+        query.employee = { $in: staffIds.map((staff) => staff._id) };
+    }
+    const snapshots = await AttendanceDailySnapshot.find(query).sort({ date: -1, updatedAt: -1 });
+    const items = beforeDate
+        ? snapshots
+        : snapshots.filter((snapshot) => snapshot.date < branchLocalParts(now, snapshot.branchTimezone).date);
+    res.status(200).json({ items });
+});
+
 export const finalizeDailySnapshots = ok(async (req, res) => {
     requireAdmin(req);
     const branchId = toObjectId(req.body.branchId, 'branchId');
@@ -1290,7 +2160,14 @@ export const correctCheckout = ok(async (req, res) => {
     requireAdmin(req);
     const snapshot = await AttendanceDailySnapshot.findById(req.params.id);
     if (!snapshot) throw new AppError('Daily snapshot not found', 404);
+    if (typeof req.body.reason !== 'string' || req.body.reason.trim().length === 0) {
+        throw new AppError('reason is required', 400);
+    }
     assertTime(req.body.checkoutTime, 'checkoutTime');
+    const events = await getDayEvents(snapshot.employee, snapshot.date);
+    if (latestOpenBreakStart(events)) {
+        throw new AppError('Close the open break before correcting checkout', 409);
+    }
     const timestamp = branchLocalDateTimeToUtc(snapshot.date, req.body.checkoutTime, snapshot.branchTimezone);
     const local = branchLocalParts(timestamp, snapshot.branchTimezone);
     await AttendanceEvent.create({
@@ -1310,7 +2187,51 @@ export const correctCheckout = ok(async (req, res) => {
         branchId: snapshot.branch,
         dateString: snapshot.date,
         generatedBy: 'correction',
+        notes: req.body.reason.trim(),
+        recalculateBasis: req.body.recalculateBasis === true,
+    });
+    res.status(200).json({ snapshot: regenerated });
+});
+
+export const correctBreakEnd = ok(async (req, res) => {
+    requireAdmin(req);
+    const snapshot = await AttendanceDailySnapshot.findById(req.params.id);
+    if (!snapshot) throw new AppError('Daily snapshot not found', 404);
+    if (typeof req.body.reason !== 'string' || req.body.reason.trim().length === 0) {
+        throw new AppError('reason is required', 400);
+    }
+    assertTime(req.body.breakEndTime, 'breakEndTime');
+    const events = await getDayEvents(snapshot.employee, snapshot.date);
+    const openBreakStart = latestOpenBreakStart(events);
+    if (!openBreakStart) {
+        throw new AppError('No open break found for this snapshot', 409);
+    }
+    const timestamp = branchLocalDateTimeToUtc(snapshot.date, req.body.breakEndTime, snapshot.branchTimezone);
+    if (timestamp <= openBreakStart.timestamp) {
+        throw new AppError('breakEndTime must be after the open break start', 400);
+    }
+    const local = branchLocalParts(timestamp, snapshot.branchTimezone);
+    await AttendanceEvent.create({
+        employee: snapshot.employee,
+        branch: snapshot.branch,
+        type: 'break_end',
+        timestamp,
+        branchLocalDate: snapshot.date,
+        branchLocalTime: local.time,
+        branchTimezone: snapshot.branchTimezone,
+        breakType: openBreakStart.breakType,
+        breakSubtype: openBreakStart.breakSubtype,
+        source: 'admin',
+        createdBy: requireUserId(req),
         notes: req.body.reason,
+    });
+    const regenerated = await generateDailySnapshot({
+        employeeId: snapshot.employee,
+        branchId: snapshot.branch,
+        dateString: snapshot.date,
+        generatedBy: 'correction',
+        notes: req.body.reason.trim(),
+        recalculateBasis: req.body.recalculateBasis === true,
     });
     res.status(200).json({ snapshot: regenerated });
 });

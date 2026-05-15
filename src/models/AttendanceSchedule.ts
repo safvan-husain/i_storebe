@@ -1,6 +1,6 @@
 import mongoose, { Document, Types } from 'mongoose';
 
-export type AttendanceScheduleAssignmentTargetType = 'global' | 'branch';
+export type AttendanceScheduleAssignmentTargetType = 'global' | 'branch' | 'group' | 'employee';
 
 export interface IAttendanceWeeklyPattern {
     monday: Types.ObjectId[];
@@ -28,9 +28,33 @@ export interface IAttendanceScheduleAssignment extends Document {
     template: Types.ObjectId;
     targetType: AttendanceScheduleAssignmentTargetType;
     branch?: Types.ObjectId;
+    group?: Types.ObjectId;
+    employee?: Types.ObjectId;
     effectiveFrom: Date;
     expiresAt?: Date;
     supersededAt?: Date;
+    isActive: boolean;
+    createdBy: Types.ObjectId;
+    createdAt: Date;
+    updatedAt: Date;
+}
+
+export interface IAttendanceScheduleGroup extends Document {
+    _id: Types.ObjectId;
+    name: string;
+    description?: string;
+    isActive: boolean;
+    createdBy: Types.ObjectId;
+    createdAt: Date;
+    updatedAt: Date;
+}
+
+export interface IAttendanceScheduleGroupMembership extends Document {
+    _id: Types.ObjectId;
+    group: Types.ObjectId;
+    employee: Types.ObjectId;
+    effectiveFrom: Date;
+    effectiveTo?: Date;
     isActive: boolean;
     createdBy: Types.ObjectId;
     createdAt: Date;
@@ -89,12 +113,20 @@ const AttendanceScheduleAssignmentSchema = new mongoose.Schema(
         },
         targetType: {
             type: String,
-            enum: ['global', 'branch'],
+            enum: ['global', 'branch', 'group', 'employee'],
             required: true,
         },
         branch: {
             type: mongoose.Schema.Types.ObjectId,
             ref: 'Branch',
+        },
+        group: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'AttendanceScheduleGroup',
+        },
+        employee: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'User',
         },
         effectiveFrom: {
             type: Date,
@@ -122,19 +154,103 @@ const AttendanceScheduleAssignmentSchema = new mongoose.Schema(
 );
 
 AttendanceScheduleAssignmentSchema.pre('validate', function (next) {
-    if (this.targetType === 'branch' && !this.branch) {
+    const targetType = (this as unknown as IAttendanceScheduleAssignment).targetType;
+    const branch = (this as unknown as IAttendanceScheduleAssignment).branch;
+    const group = (this as unknown as IAttendanceScheduleAssignment).group;
+    const employee = (this as unknown as IAttendanceScheduleAssignment).employee;
+
+    if (targetType === 'branch' && !branch) {
         this.invalidate('branch', 'Branch is required for branch schedule assignments.');
     }
 
-    if (this.targetType === 'global' && this.branch) {
+    if (targetType === 'global' && branch) {
         this.invalidate('branch', 'Branch must be empty for global schedule assignments.');
+    }
+
+    if (targetType === 'group' && !group) {
+        this.invalidate('group', 'Group is required for group schedule assignments.');
+    }
+
+    if (targetType !== 'group' && group) {
+        this.invalidate('group', 'Group is allowed only for group schedule assignments.');
+    }
+
+    if (targetType === 'employee' && !employee) {
+        this.invalidate('employee', 'Employee is required for employee schedule assignments.');
+    }
+
+    if (targetType !== 'employee' && employee) {
+        this.invalidate('employee', 'Employee is allowed only for employee schedule assignments.');
     }
 
     next();
 });
 
+const AttendanceScheduleGroupSchema = new mongoose.Schema(
+    {
+        name: {
+            type: String,
+            required: true,
+            trim: true,
+            unique: true,
+        },
+        description: {
+            type: String,
+            trim: true,
+        },
+        isActive: {
+            type: Boolean,
+            default: true,
+        },
+        createdBy: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'User',
+            required: true,
+        },
+    },
+    {
+        timestamps: true,
+    }
+);
+
+const AttendanceScheduleGroupMembershipSchema = new mongoose.Schema(
+    {
+        group: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'AttendanceScheduleGroup',
+            required: true,
+        },
+        employee: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'User',
+            required: true,
+        },
+        effectiveFrom: {
+            type: Date,
+            required: true,
+        },
+        effectiveTo: {
+            type: Date,
+        },
+        isActive: {
+            type: Boolean,
+            default: true,
+        },
+        createdBy: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'User',
+            required: true,
+        },
+    },
+    {
+        timestamps: true,
+    }
+);
+
 AttendanceScheduleTemplateSchema.index({ isActive: 1, name: 1 });
 AttendanceScheduleAssignmentSchema.index({ targetType: 1, branch: 1, effectiveFrom: -1 });
+AttendanceScheduleAssignmentSchema.index({ targetType: 1, group: 1, effectiveFrom: -1 });
+AttendanceScheduleAssignmentSchema.index({ targetType: 1, employee: 1, effectiveFrom: -1 });
 AttendanceScheduleAssignmentSchema.index({ expiresAt: 1, supersededAt: 1, isActive: 1 });
 AttendanceScheduleAssignmentSchema.index(
     { targetType: 1 },
@@ -158,10 +274,45 @@ AttendanceScheduleAssignmentSchema.index(
         },
     }
 );
+AttendanceScheduleAssignmentSchema.index(
+    { targetType: 1, group: 1 },
+    {
+        unique: true,
+        partialFilterExpression: {
+            targetType: 'group',
+            isActive: true,
+            supersededAt: { $exists: false },
+        },
+    }
+);
+AttendanceScheduleAssignmentSchema.index(
+    { targetType: 1, employee: 1 },
+    {
+        unique: true,
+        partialFilterExpression: {
+            targetType: 'employee',
+            isActive: true,
+            supersededAt: { $exists: false },
+        },
+    }
+);
+AttendanceScheduleGroupSchema.index({ isActive: 1, name: 1 });
+AttendanceScheduleGroupMembershipSchema.index({ group: 1, employee: 1, effectiveFrom: -1 });
+AttendanceScheduleGroupMembershipSchema.index({ employee: 1, isActive: 1, effectiveFrom: -1, effectiveTo: 1 });
 
 export const AttendanceScheduleAssignment = mongoose.model<IAttendanceScheduleAssignment>(
     'AttendanceScheduleAssignment',
     AttendanceScheduleAssignmentSchema
+);
+
+export const AttendanceScheduleGroup = mongoose.model<IAttendanceScheduleGroup>(
+    'AttendanceScheduleGroup',
+    AttendanceScheduleGroupSchema
+);
+
+export const AttendanceScheduleGroupMembership = mongoose.model<IAttendanceScheduleGroupMembership>(
+    'AttendanceScheduleGroupMembership',
+    AttendanceScheduleGroupMembershipSchema
 );
 
 const AttendanceScheduleTemplate = mongoose.model<IAttendanceScheduleTemplate>(

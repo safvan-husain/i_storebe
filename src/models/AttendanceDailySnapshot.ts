@@ -26,6 +26,62 @@ export interface IAttendanceBreakTotal {
     undertimeMinutes: number;
 }
 
+export interface IAttendanceCalculationBasisSegment {
+    shiftId?: Types.ObjectId;
+    shiftName?: string;
+    shiftVersion?: number;
+    scheduledStart: string;
+    scheduledEnd: string;
+    requiredWorkMinutes: number;
+    graceLateMinutes: number;
+    graceEarlyLeaveMinutes: number;
+}
+
+export interface IAttendanceCalculationBasisDayOverride {
+    overrideId: Types.ObjectId;
+    targetType: string;
+    overrideType: 'hours' | 'off_day';
+    startTime?: string;
+    endTime?: string;
+    requiredWorkMinutes: number;
+}
+
+export interface IAttendanceCalculationBasis {
+    schemaVersion: number;
+    capturedAt: Date;
+    source?: 'employee' | 'group' | 'branch' | 'global' | 'shift_membership' | null;
+    branchTimezone: string;
+    scheduleAssignment?: Types.ObjectId;
+    scheduleTemplate?: Types.ObjectId;
+    shiftMembership?: Types.ObjectId;
+    dayOverride?: IAttendanceCalculationBasisDayOverride;
+    scheduledSegments: IAttendanceCalculationBasisSegment[];
+    scheduledStart?: string;
+    scheduledEnd?: string;
+    requiredWorkMinutes: number;
+}
+
+export interface IAttendanceBreakSession {
+    startEventId: Types.ObjectId;
+    endEventId: Types.ObjectId;
+    startAt: Date;
+    endAt: Date;
+    startLocalTime: string;
+    endLocalTime: string;
+    breakType?: Types.ObjectId;
+    breakTypeName?: string;
+    breakSubtype?: Types.ObjectId;
+    breakSubtypeName?: string;
+    maxMinutesPerDay?: number;
+    maxMinutesPerEvent?: number;
+    minutes: number;
+    allowedMinutes: number;
+    excessMinutes: number;
+    unusedAllowedMinutes: number;
+    overtimeMinutes: number;
+    undertimeMinutes: number;
+}
+
 export interface IAttendanceDailySnapshot extends Document {
     _id: Types.ObjectId;
     employee: Types.ObjectId;
@@ -53,9 +109,11 @@ export interface IAttendanceDailySnapshot extends Document {
     lateMinutes: number;
     earlyLeaveMinutes: number;
     breakTotals: IAttendanceBreakTotal[];
+    breakSessions: IAttendanceBreakSession[];
+    calculationBasis?: IAttendanceCalculationBasis;
     status: AttendanceDailyStatus;
     generatedFromEventIds: Types.ObjectId[];
-    generatedBy: 'checkout' | 'scheduled_job' | 'correction' | 'manual';
+    generatedBy: 'event' | 'checkout' | 'scheduled_job' | 'correction' | 'manual';
     generatedAt: Date;
     version: number;
     notes?: string;
@@ -101,6 +159,230 @@ const BreakTotalSchema = new mongoose.Schema(
         breakSubtype: {
             type: mongoose.Schema.Types.ObjectId,
             ref: 'AttendanceBreakSubtype',
+        },
+        minutes: {
+            type: Number,
+            default: 0,
+            min: 0,
+        },
+        allowedMinutes: {
+            type: Number,
+            default: 0,
+            min: 0,
+        },
+        excessMinutes: {
+            type: Number,
+            default: 0,
+            min: 0,
+        },
+        unusedAllowedMinutes: {
+            type: Number,
+            default: 0,
+            min: 0,
+        },
+        overtimeMinutes: {
+            type: Number,
+            default: 0,
+            min: 0,
+        },
+        undertimeMinutes: {
+            type: Number,
+            default: 0,
+            min: 0,
+        },
+    },
+    { _id: false }
+);
+
+const CalculationBasisSegmentSchema = new mongoose.Schema(
+    {
+        shiftId: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'AttendanceShift',
+        },
+        shiftName: {
+            type: String,
+            trim: true,
+        },
+        shiftVersion: {
+            type: Number,
+            min: 1,
+        },
+        scheduledStart: {
+            type: String,
+            required: true,
+            match: timePattern,
+        },
+        scheduledEnd: {
+            type: String,
+            required: true,
+            match: timePattern,
+        },
+        requiredWorkMinutes: {
+            type: Number,
+            required: true,
+            min: 0,
+        },
+        graceLateMinutes: {
+            type: Number,
+            default: 0,
+            min: 0,
+        },
+        graceEarlyLeaveMinutes: {
+            type: Number,
+            default: 0,
+            min: 0,
+        },
+    },
+    { _id: false }
+);
+
+const CalculationBasisDayOverrideSchema = new mongoose.Schema(
+    {
+        overrideId: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'AttendanceDayOverride',
+            required: true,
+        },
+        targetType: {
+            type: String,
+            required: true,
+            trim: true,
+        },
+        overrideType: {
+            type: String,
+            enum: ['hours', 'off_day'],
+            required: true,
+        },
+        startTime: {
+            type: String,
+            match: timePattern,
+        },
+        endTime: {
+            type: String,
+            match: timePattern,
+        },
+        requiredWorkMinutes: {
+            type: Number,
+            default: 0,
+            min: 0,
+        },
+    },
+    { _id: false }
+);
+
+const CalculationBasisSchema = new mongoose.Schema(
+    {
+        schemaVersion: {
+            type: Number,
+            required: true,
+            default: 1,
+            min: 1,
+        },
+        capturedAt: {
+            type: Date,
+            required: true,
+            default: Date.now,
+        },
+        source: {
+            type: String,
+            enum: ['employee', 'group', 'branch', 'global', 'shift_membership', null],
+            default: null,
+        },
+        branchTimezone: {
+            type: String,
+            required: true,
+            trim: true,
+        },
+        scheduleAssignment: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'AttendanceScheduleAssignment',
+        },
+        scheduleTemplate: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'AttendanceScheduleTemplate',
+        },
+        shiftMembership: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'AttendanceShiftMembership',
+        },
+        dayOverride: {
+            type: CalculationBasisDayOverrideSchema,
+        },
+        scheduledSegments: {
+            type: [CalculationBasisSegmentSchema],
+            default: [],
+        },
+        scheduledStart: {
+            type: String,
+            match: timePattern,
+        },
+        scheduledEnd: {
+            type: String,
+            match: timePattern,
+        },
+        requiredWorkMinutes: {
+            type: Number,
+            default: 0,
+            min: 0,
+        },
+    },
+    { _id: false }
+);
+
+const BreakSessionSchema = new mongoose.Schema(
+    {
+        startEventId: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'AttendanceEvent',
+            required: true,
+        },
+        endEventId: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'AttendanceEvent',
+            required: true,
+        },
+        startAt: {
+            type: Date,
+            required: true,
+        },
+        endAt: {
+            type: Date,
+            required: true,
+        },
+        startLocalTime: {
+            type: String,
+            required: true,
+            match: timePattern,
+        },
+        endLocalTime: {
+            type: String,
+            required: true,
+            match: timePattern,
+        },
+        breakType: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'AttendanceBreakType',
+        },
+        breakTypeName: {
+            type: String,
+            trim: true,
+        },
+        breakSubtype: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'AttendanceBreakSubtype',
+        },
+        breakSubtypeName: {
+            type: String,
+            trim: true,
+        },
+        maxMinutesPerDay: {
+            type: Number,
+            min: 0,
+        },
+        maxMinutesPerEvent: {
+            type: Number,
+            min: 0,
         },
         minutes: {
             type: Number,
@@ -250,6 +532,13 @@ const AttendanceDailySnapshotSchema = new mongoose.Schema(
             type: [BreakTotalSchema],
             default: [],
         },
+        breakSessions: {
+            type: [BreakSessionSchema],
+            default: [],
+        },
+        calculationBasis: {
+            type: CalculationBasisSchema,
+        },
         status: {
             type: String,
             enum: ['present', 'absent', 'off_day', 'incomplete', 'missing_checkout', 'open_break'],
@@ -261,7 +550,7 @@ const AttendanceDailySnapshotSchema = new mongoose.Schema(
         }],
         generatedBy: {
             type: String,
-            enum: ['checkout', 'scheduled_job', 'correction', 'manual'],
+            enum: ['event', 'checkout', 'scheduled_job', 'correction', 'manual'],
             required: true,
         },
         generatedAt: {
