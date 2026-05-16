@@ -24,6 +24,7 @@ import AttendanceDailySnapshot, {
     IAttendanceCalculationBasis,
 } from '../../models/AttendanceDailySnapshot';
 import AttendanceMonthlySummary from '../../models/AttendanceMonthlySummary';
+import { hasFaceEnrollment } from '../../services/face-enrollment-service';
 
 type GeneratedBy = 'event' | 'checkout' | 'scheduled_job' | 'correction' | 'manual';
 type Actor = Pick<Request, 'userId' | 'privilege'>;
@@ -2087,6 +2088,14 @@ export const getMyAttendanceStatus = ok(async (req, res) => {
 
 async function createAttendanceEvent(req: Request, type: 'check_in' | 'check_out' | 'break_start' | 'break_end') {
     const employeeId = requireUserId(req);
+    if (req.privilege !== 'admin' && (type === 'check_in' || type === 'break_end')) {
+        const user = await User.findById(employeeId)
+            .select('profileImageFile +faceEmbedding')
+            .lean();
+        if (!user?.profileImageFile || !hasFaceEnrollment(user)) {
+            throw new AppError('Profile photo and face enrollment are required for attendance', 400);
+        }
+    }
     const branch = await getEmployeeBranch(employeeId);
     const timestamp = req.body.timestamp ? new Date(req.body.timestamp) : new Date();
     if (Number.isNaN(timestamp.getTime())) throw new AppError('timestamp must be valid', 400);

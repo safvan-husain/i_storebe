@@ -167,6 +167,46 @@ describe('Face enrollment', () => {
     expect(response.status).toBe(403);
   });
 
+  it('allows users to read only their own face enrollment for attendance', async () => {
+    const adminToken = await login('admin');
+    const staffToken = await login('staff');
+    const staffId = await getUserId('staff');
+
+    await request(app)
+      .put(`/api/users/${staffId}/face-enrollment`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        faceEmbedding: {
+          model: 'face_embedder.tflite',
+          vector,
+        },
+      });
+
+    const response = await request(app)
+      .get('/api/users/me/face-enrollment')
+      .set('Authorization', `Bearer ${staffToken}`);
+
+    expect(response.status).toBe(200);
+    expect(response.body.userId).toBe(staffId);
+    expect(response.body.faceEnrolled).toBe(true);
+    expect(response.body.faceEmbedding).toEqual(vector);
+    expect(response.body.profileImageFile.path).toBe('uploads/users/staff.jpg');
+  });
+
+  it('returns missing enrollment state from the self endpoint', async () => {
+    const staffToken = await login('staff-no-image');
+    const response = await request(app)
+      .get('/api/users/me/face-enrollment')
+      .set('Authorization', `Bearer ${staffToken}`);
+
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      faceEnrolled: false,
+      faceEmbedding: null,
+      profileImageFile: null,
+    });
+  });
+
   it('rejects invalid embeddings and users without profile images', async () => {
     const adminToken = await login('admin');
     const staffId = await getUserId('staff');

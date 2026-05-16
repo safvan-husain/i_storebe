@@ -78,7 +78,7 @@ export const buildProfileImageFaceEnrollmentUpdate = (
 export const faceEnrollmentResponse = (user: any) => ({
     userId: String(user._id),
     faceEnrolled: hasFaceEnrollment(user),
-    faceEmbedding: user.faceEmbedding ?? null,
+    faceEmbedding: hasFaceEnrollment(user) ? user.faceEmbedding : null,
     faceEmbeddingModel: user.faceEmbeddingModel ?? null,
     faceEmbeddingUpdatedAt: user.faceEmbeddingUpdatedAt ?? null,
     profileImageFile: user.profileImageFile ?? null,
@@ -115,6 +115,23 @@ export const findManageableFaceEnrollmentUser = async (req: Request, userId: str
 export const getFaceEnrollmentForRequest = async (req: Request) => {
     const id = ObjectIdSchema.parse(req.params.id);
     const user = await findManageableFaceEnrollmentUser(req, id);
+    return faceEnrollmentResponse(user);
+};
+
+export const getMyFaceEnrollmentForRequest = async (req: Request) => {
+    if (!req.userId) {
+        throw new AppError('user id not found', 403);
+    }
+
+    const user = await User.findById(req.userId)
+        .select(faceEnrollmentSelect)
+        .populate('profileImageFile', '_id fileName path mimeType size')
+        .lean();
+
+    if (!user || user.isAccountDeleted) {
+        throw new AppError('user not found', 404);
+    }
+
     return faceEnrollmentResponse(user);
 };
 

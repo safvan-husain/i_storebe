@@ -51,13 +51,22 @@ import app from '../src/server';
 import User from '../src/models/User';
 import Branch from '../src/models/Branch';
 import AttendanceDailySnapshot from '../src/models/AttendanceDailySnapshot';
+import FileDocument from '../src/models/FileDocument';
 
 jest.setTimeout(60000);
 
 describe('Attendance endpoints e2e', () => {
   let mongo: MongoMemoryServer;
+  const faceVector = Array.from({ length: 128 }, (_, index) => index / 128);
 
   const seedUsers = async () => {
+    const staffProfileImage = await FileDocument.create({
+      fileName: 'staff-one.jpg',
+      path: 'uploads/users/staff-one.jpg',
+      mimeType: 'image/jpeg',
+      size: 123,
+    });
+
     await User.create([
       {
         username: 'admin',
@@ -82,6 +91,11 @@ describe('Attendance endpoints e2e', () => {
         secondPrivilege: 'regular',
         isActive: true,
         isAccountDeleted: false,
+        profileImageFile: staffProfileImage._id,
+        faceEmbedding: faceVector,
+        faceEmbeddingModel: 'face_embedder.tflite',
+        faceEmbeddingUpdatedAt: new Date(),
+        faceEmbeddingSourceImage: staffProfileImage._id,
       },
     ]);
 
@@ -1179,6 +1193,109 @@ describe('Attendance endpoints e2e', () => {
         undertimeMinutes: 0,
       })
     );
+  });
+
+  it('requires staff face enrollment for check-in and break-end attendance events', async () => {
+    const seed = await seedUsers();
+    const adminToken = await login('admin');
+    const setup = await createAttendanceSetup(adminToken, seed);
+    const staffToken = await login('staff-one');
+
+    await User.findByIdAndUpdate(seed.staffId, {
+      $unset: {
+        profileImageFile: '',
+        faceEmbedding: '',
+        faceEmbeddingModel: '',
+        faceEmbeddingUpdatedAt: '',
+        faceEmbeddingSourceImage: '',
+      },
+    });
+
+    const missingCheckIn = await request(app)
+      .post('/api/attendance/events/check-in')
+      .set('Authorization', `Bearer ${staffToken}`)
+      .send({
+        timestamp: '2099-05-04T04:45:00.000Z',
+      });
+
+    expect(missingCheckIn.status).toBe(400);
+    expect(missingCheckIn.body.message).toBe('Profile photo and face enrollment are required for attendance');
+
+    const profileImage = await FileDocument.create({
+      fileName: 'staff-one-updated.jpg',
+      path: 'uploads/users/staff-one-updated.jpg',
+      mimeType: 'image/jpeg',
+      size: 123,
+    });
+    await User.findByIdAndUpdate(seed.staffId, {
+      profileImageFile: profileImage._id,
+      faceEmbedding: faceVector,
+      faceEmbeddingModel: 'face_embedder.tflite',
+      faceEmbeddingUpdatedAt: new Date(),
+      faceEmbeddingSourceImage: profileImage._id,
+    });
+
+    const checkIn = await request(app)
+      .post('/api/attendance/events/check-in')
+      .set('Authorization', `Bearer ${staffToken}`)
+      .send({
+        timestamp: '2099-05-04T04:45:00.000Z',
+      });
+    expect(checkIn.status).toBe(201);
+
+    const breakStart = await request(app)
+      .post('/api/attendance/events/break-start')
+      .set('Authorization', `Bearer ${staffToken}`)
+      .send({
+        breakTypeId: setup.breakTypeId,
+        breakSubtypeId: setup.breakSubtypeId,
+        timestamp: '2099-05-04T09:00:00.000Z',
+      });
+    expect(breakStart.status).toBe(201);
+
+    await User.findByIdAndUpdate(seed.staffId, {
+      $unset: {
+        faceEmbedding: '',
+        faceEmbeddingModel: '',
+        faceEmbeddingUpdatedAt: '',
+        faceEmbeddingSourceImage: '',
+      },
+    });
+
+    const missingBreakEnd = await request(app)
+      .post('/api/attendance/events/break-end')
+      .set('Authorization', `Bearer ${staffToken}`)
+      .send({
+        timestamp: '2099-05-04T09:10:00.000Z',
+      });
+
+    expect(missingBreakEnd.status).toBe(400);
+    expect(missingBreakEnd.body.message).toBe('Profile photo and face enrollment are required for attendance');
+  });
+
+  it('allows admin attendance events without face enrollment', async () => {
+    const seed = await seedUsers();
+    const adminToken = await login('admin');
+    await Branch.findByIdAndUpdate(seed.branchId, { manager: seed.adminId });
+    await createAttendanceSetup(adminToken, seed);
+
+    const checkIn = await request(app)
+      .post('/api/attendance/events/check-in')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        timestamp: '2099-05-04T04:45:00.000Z',
+      });
+
+    expect(checkIn.status).toBe(201);
+
+    const checkout = await request(app)
+      .post('/api/attendance/events/check-out')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        timestamp: '2099-05-04T13:30:00.000Z',
+      });
+
+    expect(checkout.status).toBe(201);
   });
 
   it('allows staff to read my attendance status', async () => {

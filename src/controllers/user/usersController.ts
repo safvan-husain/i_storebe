@@ -12,6 +12,7 @@ import {changeUserPasswordRequestSchema, inActivateUserRequestSchema} from "../l
 import {
     employeeFaceEnrollmentSummary,
     getFaceEnrollmentForRequest,
+    getMyFaceEnrollmentForRequest,
     updateFaceEnrollmentForRequest,
 } from "../../services/face-enrollment-service";
 
@@ -228,6 +229,14 @@ export const queryEmployees = asyncHandler(async (req: Request, res: Response) =
 export const getFaceEnrollment = asyncHandler(async (req: Request, res: Response) => {
     try {
         res.status(200).json(await getFaceEnrollmentForRequest(req));
+    } catch (e) {
+        onCatchError(e, res);
+    }
+});
+
+export const getMyFaceEnrollment = asyncHandler(async (req: Request, res: Response) => {
+    try {
+        res.status(200).json(await getMyFaceEnrollmentForRequest(req));
     } catch (e) {
         onCatchError(e, res);
     }
