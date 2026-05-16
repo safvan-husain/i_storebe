@@ -17,7 +17,9 @@ export interface IAttendanceScheduledSegment {
 
 export interface IAttendanceBreakTotal {
     breakType?: Types.ObjectId;
+    breakTypeName?: string;
     breakSubtype?: Types.ObjectId;
+    breakSubtypeName?: string;
     minutes: number;
     allowedMinutes: number;
     excessMinutes: number;
@@ -156,9 +158,17 @@ const BreakTotalSchema = new mongoose.Schema(
             type: mongoose.Schema.Types.ObjectId,
             ref: 'AttendanceBreakType',
         },
+        breakTypeName: {
+            type: String,
+            trim: true,
+        },
         breakSubtype: {
             type: mongoose.Schema.Types.ObjectId,
             ref: 'AttendanceBreakSubtype',
+        },
+        breakSubtypeName: {
+            type: String,
+            trim: true,
         },
         minutes: {
             type: Number,

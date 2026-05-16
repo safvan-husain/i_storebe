@@ -53,6 +53,16 @@ type ResolvedSchedule = {
     requiredWorkMinutes: number;
 };
 type MyAttendanceWorkStatus = 'not_started' | 'checked_in' | 'on_break' | 'checked_out' | 'no_schedule';
+type MyBreakOption = {
+    breakTypeId: Types.ObjectId;
+    breakTypeName: string;
+    breakSubtypeId?: Types.ObjectId;
+    breakSubtypeName?: string;
+    windowStart?: string;
+    windowEnd?: string;
+    maxMinutesPerDay?: number;
+    maxMinutesPerEvent?: number;
+};
 
 const timePattern = /^([01]\d|2[0-3]):[0-5]\d$/;
 const datePattern = /^\d{4}-\d{2}-\d{2}$/;
@@ -62,17 +72,45 @@ function serializeDailySnapshot(snapshot: any) {
     const value = typeof snapshot?.toObject === 'function' ? snapshot.toObject() : snapshot;
     const employee = value?.employee;
     const branch = value?.branch;
+    const sessionsByBreakKey = new Map<string, any>();
+    for (const session of value?.breakSessions ?? []) {
+        const key = `${String(session.breakType ?? '')}:${String(session.breakSubtype ?? '')}`;
+        if (!sessionsByBreakKey.has(key)) {
+            sessionsByBreakKey.set(key, session);
+        }
+    }
+    const breakTotals = (value?.breakTotals ?? []).map((total: any) => {
+        const key = `${String(total.breakType ?? '')}:${String(total.breakSubtype ?? '')}`;
+        const session = sessionsByBreakKey.get(key);
+        return {
+            ...total,
+            breakTypeName: total.breakTypeName ?? session?.breakTypeName,
+            breakSubtypeName: total.breakSubtypeName ?? session?.breakSubtypeName,
+        };
+    });
     return {
         ...value,
         employee: employee?._id ?? employee,
         employeeName: employee?.username,
         branch: branch?._id ?? branch,
         branchName: branch?.name,
+        breakTotals,
     };
 }
 
 function serializeDailySnapshots(snapshots: any[]) {
     return snapshots.map(serializeDailySnapshot);
+}
+
+function isWithinWindow(currentMinutes: number, start?: string, end?: string) {
+    if (!start || !end) return true;
+    const startMinutes = timeToMinutes(start);
+    const endMinutes = timeToMinutes(end);
+    if (startMinutes === undefined || endMinutes === undefined) return false;
+    if (startMinutes <= endMinutes) {
+        return currentMinutes >= startMinutes && currentMinutes <= endMinutes;
+    }
+    return currentMinutes >= startMinutes || currentMinutes <= endMinutes;
 }
 
 function requireUserId(req: Request) {
@@ -776,6 +814,67 @@ async function currentBreakRuleBasis(start: Awaited<ReturnType<typeof getDayEven
     };
 }
 
+async function resolveStartableBreakOptions(employeeId: Types.ObjectId, timezone: string): Promise<MyBreakOption[]> {
+    const nowLocal = branchLocalParts(new Date(), timezone);
+    const nowMinutes = timeToMinutes(nowLocal.time);
+    if (nowMinutes === undefined) return [];
+
+    const [user, breakTypes, breakSubtypes] = await Promise.all([
+        User.findById(employeeId, { attendancePrivilegeIds: 1 }).lean(),
+        AttendanceBreakType.find({ isActive: true }).sort({ name: 1 }).lean(),
+        AttendanceBreakSubtype.find({ isActive: true }).sort({ name: 1 }).lean(),
+    ]);
+
+    const employeePrivileges = new Set((user?.attendancePrivilegeIds ?? []).map(String));
+    const subtypesByParent = new Map<string, typeof breakSubtypes>();
+    for (const subtype of breakSubtypes) {
+        const parentId = String(subtype.parentBreak);
+        subtypesByParent.set(parentId, [...(subtypesByParent.get(parentId) ?? []), subtype]);
+    }
+
+    const options: MyBreakOption[] = [];
+    for (const breakType of breakTypes) {
+        const parentPrivilegeIds = (breakType.privilegeIds ?? []).map(String);
+        const parentEligible =
+            parentPrivilegeIds.length === 0 ||
+            parentPrivilegeIds.some((id) => employeePrivileges.has(id));
+        if (!parentEligible) continue;
+
+        const subtypes = subtypesByParent.get(String(breakType._id)) ?? [];
+        if (subtypes.length === 0) {
+            options.push({
+                breakTypeId: breakType._id,
+                breakTypeName: breakType.name,
+                maxMinutesPerDay: breakType.maxMinutesPerDay,
+            });
+            continue;
+        }
+
+        for (const subtype of subtypes) {
+            const subtypePrivilegeIds = subtype.inheritsParentPrivilege
+                ? parentPrivilegeIds
+                : (subtype.privilegeIds ?? []).map(String);
+            const subtypeEligible =
+                subtypePrivilegeIds.length === 0 ||
+                subtypePrivilegeIds.some((id) => employeePrivileges.has(id));
+            if (!subtypeEligible) continue;
+            if (!isWithinWindow(nowMinutes, subtype.windowStart, subtype.windowEnd)) continue;
+
+            options.push({
+                breakTypeId: breakType._id,
+                breakTypeName: breakType.name,
+                breakSubtypeId: subtype._id,
+                breakSubtypeName: subtype.name,
+                windowStart: subtype.windowStart,
+                windowEnd: subtype.windowEnd,
+                maxMinutesPerDay: breakType.maxMinutesPerDay,
+                maxMinutesPerEvent: subtype.maxMinutesPerEvent,
+            });
+        }
+    }
+    return options;
+}
+
 async function calculateBreakSessions(
     breakPairs: Array<{ start: Awaited<ReturnType<typeof getDayEvents>>[number]; end: Awaited<ReturnType<typeof getDayEvents>>[number] }>,
     timezone: string,
@@ -842,7 +941,9 @@ async function calculateBreakSessions(
         breakSessions.push(session);
         breakTotals.push({
             breakType: session.breakType,
+            breakTypeName: session.breakTypeName,
             breakSubtype: session.breakSubtype,
+            breakSubtypeName: session.breakSubtypeName,
             minutes: session.minutes,
             allowedMinutes: session.allowedMinutes,
             excessMinutes: session.excessMinutes,
@@ -1942,6 +2043,9 @@ export const getMyAttendanceStatus = ok(async (req, res) => {
         const openBreakMinutes = openBreak ? minutesBetween(openBreak.timestamp, now) : 0;
         workedMinutes = Math.max(0, grossMinutes - completedBreakMinutes - openBreakMinutes);
     }
+    const breakOptions = workStatus === 'checked_in'
+        ? await resolveStartableBreakOptions(employeeId, schedule.branchTimezone)
+        : [];
 
     res.status(200).json({
         date,
@@ -1967,6 +2071,7 @@ export const getMyAttendanceStatus = ok(async (req, res) => {
         canEndBreak: workStatus === 'on_break',
         canCheckOut: workStatus === 'checked_in',
         workedMinutes,
+        breakOptions,
         activeBreak: openBreak
             ? {
                 eventId: openBreak._id,
@@ -2033,9 +2138,7 @@ async function createAttendanceEvent(req: Request, type: 'check_in' | 'check_out
         }
         if (subtype?.windowStart && subtype.windowEnd) {
             const nowMinutes = timeToMinutes(local.time)!;
-            const startMinutes = timeToMinutes(subtype.windowStart)!;
-            const endMinutes = timeToMinutes(subtype.windowEnd)!;
-            if (nowMinutes < startMinutes || nowMinutes > endMinutes) {
+            if (!isWithinWindow(nowMinutes, subtype.windowStart, subtype.windowEnd)) {
                 throw new AppError('Break cannot be started outside its configured window', 400);
             }
         }

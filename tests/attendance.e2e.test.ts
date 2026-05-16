@@ -1170,6 +1170,8 @@ describe('Attendance endpoints e2e', () => {
     });
     expect(checkout.body.snapshot.breakTotals[0]).toEqual(
       expect.objectContaining({
+        breakTypeName: 'Prayer',
+        breakSubtypeName: 'Dhuhr',
         minutes: 10,
         allowedMinutes: expect.any(Number),
         unusedAllowedMinutes: expect.any(Number),
@@ -1206,6 +1208,162 @@ describe('Attendance endpoints e2e', () => {
         requiredWorkMinutes: 420,
       }),
     });
+  });
+
+  it('returns only currently startable break options in my attendance status', async () => {
+    const seed = await seedUsers();
+    const adminToken = await login('admin');
+    const setup = await createAttendanceSetup(adminToken, seed);
+    const staffToken = await login('staff-one');
+
+    const openType = await request(app)
+      .post('/api/attendance/break-types')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        name: 'Open Lunch',
+        isActive: true,
+      });
+    expect(openType.status).toBe(201);
+    const openSubtype = await request(app)
+      .post(`/api/attendance/break-types/${openType.body._id}/subtypes`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        name: 'Any time',
+        isActive: true,
+      });
+    expect(openSubtype.status).toBe(201);
+    const inactiveSubtype = await request(app)
+      .post(`/api/attendance/break-types/${openType.body._id}/subtypes`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        name: 'Inactive',
+        isActive: false,
+      });
+    expect(inactiveSubtype.status).toBe(201);
+
+    const lateType = await request(app)
+      .post('/api/attendance/break-types')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        name: 'Late Window',
+        isActive: true,
+      });
+    expect(lateType.status).toBe(201);
+    const outsideWindowSubtype = await request(app)
+      .post(`/api/attendance/break-types/${lateType.body._id}/subtypes`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        name: 'Almost never',
+        windowStart: '23:59',
+        windowEnd: '23:59',
+        isActive: true,
+      });
+    expect(outsideWindowSubtype.status).toBe(201);
+
+    const restrictedPrivilege = await request(app)
+      .post('/api/attendance/privileges')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        name: 'Restricted Break',
+        isActive: true,
+      });
+    expect(restrictedPrivilege.status).toBe(201);
+    const restrictedType = await request(app)
+      .post('/api/attendance/break-types')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        name: 'Restricted',
+        privilegeIds: [restrictedPrivilege.body._id],
+        isActive: true,
+      });
+    expect(restrictedType.status).toBe(201);
+    const restrictedSubtype = await request(app)
+      .post(`/api/attendance/break-types/${restrictedType.body._id}/subtypes`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        name: 'Private',
+        inheritsParentPrivilege: true,
+        isActive: true,
+      });
+    expect(restrictedSubtype.status).toBe(201);
+
+    const checkIn = await request(app)
+      .post('/api/attendance/events/check-in')
+      .set('Authorization', `Bearer ${staffToken}`)
+      .send({ timestamp: '2099-05-04T04:45:00.000Z' });
+    expect(checkIn.status).toBe(201);
+
+    const status = await request(app)
+      .get('/api/attendance/me/status')
+      .query({ date: '2099-05-04' })
+      .set('Authorization', `Bearer ${staffToken}`);
+    expect(status.status).toBe(200);
+    expect(status.body.canStartBreak).toBe(true);
+
+    const optionSubtypeIds = (status.body.breakOptions as Array<{ breakSubtypeId?: string }>)
+      .map((option) => option.breakSubtypeId)
+      .filter(Boolean);
+    expect(status.body.breakOptions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          breakTypeId: openType.body._id,
+          breakTypeName: 'Open Lunch',
+          breakSubtypeId: openSubtype.body._id,
+          breakSubtypeName: 'Any time',
+        }),
+      ])
+    );
+    expect(optionSubtypeIds).not.toContain(inactiveSubtype.body._id);
+    expect(optionSubtypeIds).not.toContain(outsideWindowSubtype.body._id);
+    expect(optionSubtypeIds).not.toContain(restrictedSubtype.body._id);
+
+    const inactiveStart = await request(app)
+      .post('/api/attendance/events/break-start')
+      .set('Authorization', `Bearer ${staffToken}`)
+      .send({
+        breakTypeId: openType.body._id,
+        breakSubtypeId: inactiveSubtype.body._id,
+        timestamp: '2099-05-04T09:00:00.000Z',
+      });
+    expect(inactiveStart.status).toBe(400);
+    expect(inactiveStart.body.message).toBe('Break subtype not found or inactive');
+
+    const outsideWindowStart = await request(app)
+      .post('/api/attendance/events/break-start')
+      .set('Authorization', `Bearer ${staffToken}`)
+      .send({
+        breakTypeId: lateType.body._id,
+        breakSubtypeId: outsideWindowSubtype.body._id,
+        timestamp: '2099-05-04T09:00:00.000Z',
+      });
+    expect(outsideWindowStart.status).toBe(400);
+    expect(outsideWindowStart.body.message).toBe('Break cannot be started outside its configured window');
+
+    const restrictedStart = await request(app)
+      .post('/api/attendance/events/break-start')
+      .set('Authorization', `Bearer ${staffToken}`)
+      .send({
+        breakTypeId: restrictedType.body._id,
+        breakSubtypeId: restrictedSubtype.body._id,
+        timestamp: '2099-05-04T09:00:00.000Z',
+      });
+    expect(restrictedStart.status).toBe(403);
+    expect(restrictedStart.body.message).toBe('Employee is not eligible for this break');
+
+    const validStart = await request(app)
+      .post('/api/attendance/events/break-start')
+      .set('Authorization', `Bearer ${staffToken}`)
+      .send({
+        breakTypeId: openType.body._id,
+        breakSubtypeId: openSubtype.body._id,
+        timestamp: '2099-05-04T09:00:00.000Z',
+      });
+    expect(validStart.status).toBe(201);
+    expect(validStart.body).toMatchObject({
+      breakType: openType.body._id,
+      breakSubtype: openSubtype.body._id,
+    });
+    expect(setup.breakTypeId).toBeTruthy();
   });
 
   it('blocks staff check-in when no schedule exists for today', async () => {
