@@ -22,6 +22,7 @@ type MappingEntry = {
 
 type PlannedBranch = {
   branchName: string;
+  timezone: string;
   primaryManagerId?: string;
   primaryManagerUsername?: string;
   managerUsernames: string[];
@@ -40,6 +41,17 @@ type Summary = {
 };
 
 const normalizeBranchName = (name: string) => name.trim().replace(/\s+/g, ' ').toLowerCase();
+
+const BRANCH_TIMEZONE_DEFAULT = 'Asia/Kolkata';
+const BRANCH_TIMEZONE_DUBAI = 'Asia/Dubai';
+
+export const resolveMappedBranchTimezone = (branchName: string) => {
+  const normalized = normalizeBranchName(branchName);
+  if (normalized === 'dubai store') {
+    return BRANCH_TIMEZONE_DUBAI;
+  }
+  return BRANCH_TIMEZONE_DEFAULT;
+};
 
 const MAPPINGS: MappingEntry[] = [
   { username: 'AJMAL', branchName: 'Taliparamba' },
@@ -130,6 +142,7 @@ export const buildMappedBranchPlan = async (): Promise<Omit<Summary, 'mode' | 'a
     const branchName = entries[0].branchName;
     branchesToApply.push({
       branchName,
+      timezone: resolveMappedBranchTimezone(branchName),
       primaryManagerId: String(primaryManager._id),
       primaryManagerUsername: primaryManager.username,
       managerUsernames: managerDocs.map(manager => manager.username),
@@ -264,6 +277,7 @@ export const finalizeMappedManagerBranches = async ({
       branch = await Branch.create({
         name: item.branchName,
         normalizedName,
+        timezone: item.timezone,
         manager: primaryManagerId,
         staffs: staffIds,
         isActive: true,
@@ -272,6 +286,7 @@ export const finalizeMappedManagerBranches = async ({
     } else {
       branch.name = item.branchName;
       branch.normalizedName = normalizedName;
+      branch.timezone = item.timezone;
       branch.manager = primaryManagerId as any;
       branch.staffs = staffIds as any;
       branch.isActive = true;

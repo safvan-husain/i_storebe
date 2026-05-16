@@ -33,7 +33,11 @@ jest.mock('../src/services/notification-services', () => ({
 import Branch from '../src/models/Branch';
 import BranchMembership from '../src/models/BranchMembership';
 import User from '../src/models/User';
-import { buildMappedBranchPlan, finalizeMappedManagerBranches } from '../src/scripts/finalizeMappedManagerBranches';
+import {
+  buildMappedBranchPlan,
+  finalizeMappedManagerBranches,
+  resolveMappedBranchTimezone,
+} from '../src/scripts/finalizeMappedManagerBranches';
 
 jest.setTimeout(60000);
 
@@ -161,6 +165,11 @@ describe('finalizeMappedManagerBranches', () => {
     await testStaff!.save();
   });
 
+  it('resolves branch timezones for mapped branches', () => {
+    expect(resolveMappedBranchTimezone('Taliparamba')).toBe('Asia/Kolkata');
+    expect(resolveMappedBranchTimezone('Dubai Store')).toBe('Asia/Dubai');
+  });
+
   it('builds mapped branch groups with shared branch names', async () => {
     const plan = await buildMappedBranchPlan();
     expect(plan.branchNames).toEqual(expect.arrayContaining(['Accounts', 'Iritty', 'Test Branch']));
@@ -169,6 +178,7 @@ describe('finalizeMappedManagerBranches', () => {
     expect(accounts?.primaryManagerUsername).toBe('AFNAS');
     expect(accounts?.managerUsernames).toEqual(['AFNAS', 'AFNAS AV', '0987654320']);
     expect(accounts?.staffUsernames).toEqual(['accounts-staff']);
+    expect(accounts?.timezone).toBe('Asia/Kolkata');
   });
 
   it('creates mapped branches and manager memberships without rewriting staff manager links', async () => {
@@ -179,6 +189,7 @@ describe('finalizeMappedManagerBranches', () => {
     const iritty = await Branch.findOne({ normalizedName: 'iritty' }).lean();
     const testBranch = await Branch.findOne({ normalizedName: 'test branch' }).lean();
     expect(accounts).toBeTruthy();
+    expect(accounts?.timezone).toBe('Asia/Kolkata');
     expect(accounts?.manager).toBeTruthy();
     expect(accounts?.staffs).toHaveLength(1);
     expect(iritty?.staffs).toHaveLength(1);
