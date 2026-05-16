@@ -58,6 +58,15 @@ jest.setTimeout(60000);
 describe('Attendance endpoints e2e', () => {
   let mongo: MongoMemoryServer;
   const faceVector = Array.from({ length: 128 }, (_, index) => index / 128);
+  const branchLatitude = 25.2048;
+  const branchLongitude = 55.2708;
+  const validAttendanceLocation = {
+    location: {
+      latitude: branchLatitude,
+      longitude: branchLongitude,
+      accuracyMeters: 20,
+    },
+  };
 
   const seedUsers = async () => {
     const staffProfileImage = await FileDocument.create({
@@ -113,6 +122,12 @@ describe('Attendance endpoints e2e', () => {
       timezone: 'Asia/Dubai',
       manager: manager!._id,
       staffs: [staff!._id],
+      location: {
+        latitude: branchLatitude,
+        longitude: branchLongitude,
+        updatedAt: new Date(),
+        updatedBy: admin!._id,
+      },
       createdBy: admin!._id,
       isActive: true,
     });
@@ -1089,6 +1104,7 @@ describe('Attendance endpoints e2e', () => {
       .post('/api/attendance/events/check-in')
       .set('Authorization', `Bearer ${staffToken}`)
       .send({
+        ...validAttendanceLocation,
         timestamp: '2099-05-04T04:45:00.000Z',
       });
 
@@ -1125,6 +1141,7 @@ describe('Attendance endpoints e2e', () => {
       .post('/api/attendance/events/break-start')
       .set('Authorization', `Bearer ${staffToken}`)
       .send({
+        ...validAttendanceLocation,
         breakTypeId: setup.breakTypeId,
         breakSubtypeId: setup.breakSubtypeId,
         timestamp: '2099-05-04T09:00:00.000Z',
@@ -1149,6 +1166,7 @@ describe('Attendance endpoints e2e', () => {
       .post('/api/attendance/events/break-end')
       .set('Authorization', `Bearer ${staffToken}`)
       .send({
+        ...validAttendanceLocation,
         timestamp: '2099-05-04T09:10:00.000Z',
       });
 
@@ -1171,6 +1189,7 @@ describe('Attendance endpoints e2e', () => {
       .post('/api/attendance/events/check-out')
       .set('Authorization', `Bearer ${staffToken}`)
       .send({
+        ...validAttendanceLocation,
         timestamp: '2099-05-04T13:30:00.000Z',
       });
 
@@ -1215,6 +1234,7 @@ describe('Attendance endpoints e2e', () => {
       .post('/api/attendance/events/check-in')
       .set('Authorization', `Bearer ${staffToken}`)
       .send({
+        ...validAttendanceLocation,
         timestamp: '2099-05-04T04:45:00.000Z',
       });
 
@@ -1239,6 +1259,7 @@ describe('Attendance endpoints e2e', () => {
       .post('/api/attendance/events/check-in')
       .set('Authorization', `Bearer ${staffToken}`)
       .send({
+        ...validAttendanceLocation,
         timestamp: '2099-05-04T04:45:00.000Z',
       });
     expect(checkIn.status).toBe(201);
@@ -1247,6 +1268,7 @@ describe('Attendance endpoints e2e', () => {
       .post('/api/attendance/events/break-start')
       .set('Authorization', `Bearer ${staffToken}`)
       .send({
+        ...validAttendanceLocation,
         breakTypeId: setup.breakTypeId,
         breakSubtypeId: setup.breakSubtypeId,
         timestamp: '2099-05-04T09:00:00.000Z',
@@ -1266,11 +1288,76 @@ describe('Attendance endpoints e2e', () => {
       .post('/api/attendance/events/break-end')
       .set('Authorization', `Bearer ${staffToken}`)
       .send({
+        ...validAttendanceLocation,
         timestamp: '2099-05-04T09:10:00.000Z',
       });
 
     expect(missingBreakEnd.status).toBe(400);
     expect(missingBreakEnd.body.message).toBe('Profile photo and face enrollment are required for attendance');
+  });
+
+  it('requires valid branch GPS proof for non-admin attendance events', async () => {
+    const seed = await seedUsers();
+    const adminToken = await login('admin');
+    await createAttendanceSetup(adminToken, seed);
+    const staffToken = await login('staff-one');
+
+    await Branch.findByIdAndUpdate(seed.branchId, { $unset: { location: '' } });
+    const missingBranchLocation = await request(app)
+      .post('/api/attendance/events/check-in')
+      .set('Authorization', `Bearer ${staffToken}`)
+      .send({
+        ...validAttendanceLocation,
+        timestamp: '2099-05-04T04:45:00.000Z',
+      });
+    expect(missingBranchLocation.status).toBe(400);
+    expect(missingBranchLocation.body.message).toBe('Branch location is required before attendance can be recorded');
+
+    await Branch.findByIdAndUpdate(seed.branchId, {
+      location: {
+        latitude: branchLatitude,
+        longitude: branchLongitude,
+        updatedAt: new Date(),
+        updatedBy: seed.adminId,
+      },
+    });
+
+    const missingRequestLocation = await request(app)
+      .post('/api/attendance/events/check-in')
+      .set('Authorization', `Bearer ${staffToken}`)
+      .send({
+        timestamp: '2099-05-04T04:45:00.000Z',
+      });
+    expect(missingRequestLocation.status).toBe(400);
+    expect(missingRequestLocation.body.message).toBe('Current location is required for attendance');
+
+    const weakAccuracy = await request(app)
+      .post('/api/attendance/events/check-in')
+      .set('Authorization', `Bearer ${staffToken}`)
+      .send({
+        location: {
+          latitude: branchLatitude,
+          longitude: branchLongitude,
+          accuracyMeters: 150,
+        },
+        timestamp: '2099-05-04T04:45:00.000Z',
+      });
+    expect(weakAccuracy.status).toBe(400);
+    expect(weakAccuracy.body.message).toContain('GPS accuracy is too weak');
+
+    const tooFar = await request(app)
+      .post('/api/attendance/events/check-in')
+      .set('Authorization', `Bearer ${staffToken}`)
+      .send({
+        location: {
+          latitude: branchLatitude + 0.01,
+          longitude: branchLongitude,
+          accuracyMeters: 20,
+        },
+        timestamp: '2099-05-04T04:45:00.000Z',
+      });
+    expect(tooFar.status).toBe(400);
+    expect(tooFar.body.message).toBe('You are too far from the branch location to record attendance');
   });
 
   it('allows admin attendance events without face enrollment', async () => {
@@ -1283,6 +1370,7 @@ describe('Attendance endpoints e2e', () => {
       .post('/api/attendance/events/check-in')
       .set('Authorization', `Bearer ${adminToken}`)
       .send({
+        ...validAttendanceLocation,
         timestamp: '2099-05-04T04:45:00.000Z',
       });
 
@@ -1292,6 +1380,7 @@ describe('Attendance endpoints e2e', () => {
       .post('/api/attendance/events/check-out')
       .set('Authorization', `Bearer ${adminToken}`)
       .send({
+        ...validAttendanceLocation,
         timestamp: '2099-05-04T13:30:00.000Z',
       });
 
@@ -1407,7 +1496,7 @@ describe('Attendance endpoints e2e', () => {
     const checkIn = await request(app)
       .post('/api/attendance/events/check-in')
       .set('Authorization', `Bearer ${staffToken}`)
-      .send({ timestamp: '2099-05-04T04:45:00.000Z' });
+      .send({ ...validAttendanceLocation, timestamp: '2099-05-04T04:45:00.000Z' });
     expect(checkIn.status).toBe(201);
 
     const status = await request(app)
@@ -1438,6 +1527,7 @@ describe('Attendance endpoints e2e', () => {
       .post('/api/attendance/events/break-start')
       .set('Authorization', `Bearer ${staffToken}`)
       .send({
+        ...validAttendanceLocation,
         breakTypeId: openType.body._id,
         breakSubtypeId: inactiveSubtype.body._id,
         timestamp: '2099-05-04T09:00:00.000Z',
@@ -1449,6 +1539,7 @@ describe('Attendance endpoints e2e', () => {
       .post('/api/attendance/events/break-start')
       .set('Authorization', `Bearer ${staffToken}`)
       .send({
+        ...validAttendanceLocation,
         breakTypeId: lateType.body._id,
         breakSubtypeId: outsideWindowSubtype.body._id,
         timestamp: '2099-05-04T09:00:00.000Z',
@@ -1460,6 +1551,7 @@ describe('Attendance endpoints e2e', () => {
       .post('/api/attendance/events/break-start')
       .set('Authorization', `Bearer ${staffToken}`)
       .send({
+        ...validAttendanceLocation,
         breakTypeId: restrictedType.body._id,
         breakSubtypeId: restrictedSubtype.body._id,
         timestamp: '2099-05-04T09:00:00.000Z',
@@ -1471,6 +1563,7 @@ describe('Attendance endpoints e2e', () => {
       .post('/api/attendance/events/break-start')
       .set('Authorization', `Bearer ${staffToken}`)
       .send({
+        ...validAttendanceLocation,
         breakTypeId: openType.body._id,
         breakSubtypeId: openSubtype.body._id,
         timestamp: '2099-05-04T09:00:00.000Z',
@@ -1502,6 +1595,7 @@ describe('Attendance endpoints e2e', () => {
       .post('/api/attendance/events/check-in')
       .set('Authorization', `Bearer ${staffToken}`)
       .send({
+        ...validAttendanceLocation,
         timestamp: '2099-05-04T04:45:00.000Z',
       });
 
@@ -1565,6 +1659,7 @@ describe('Attendance endpoints e2e', () => {
       .post('/api/attendance/events/check-in')
       .set('Authorization', `Bearer ${staffToken}`)
       .send({
+        ...validAttendanceLocation,
         timestamp: '2099-05-04T04:45:00.000Z',
       });
     expect(checkIn.status).toBe(400);
@@ -1581,6 +1676,7 @@ describe('Attendance endpoints e2e', () => {
       .post('/api/attendance/events/check-in')
       .set('Authorization', `Bearer ${staffToken}`)
       .send({
+        ...validAttendanceLocation,
         timestamp: '2099-05-04T04:45:00.000Z',
       });
     expect(checkIn.status).toBe(201);
@@ -1589,6 +1685,7 @@ describe('Attendance endpoints e2e', () => {
       .post('/api/attendance/events/break-start')
       .set('Authorization', `Bearer ${staffToken}`)
       .send({
+        ...validAttendanceLocation,
         breakTypeId: setup.breakTypeId,
         breakSubtypeId: setup.breakSubtypeId,
         timestamp: '2099-05-04T09:00:00.000Z',
@@ -1617,6 +1714,7 @@ describe('Attendance endpoints e2e', () => {
       .post('/api/attendance/events/check-out')
       .set('Authorization', `Bearer ${staffToken}`)
       .send({
+        ...validAttendanceLocation,
         timestamp: '2099-05-04T13:30:00.000Z',
       });
     expect(checkout.status).toBe(409);
@@ -1632,11 +1730,12 @@ describe('Attendance endpoints e2e', () => {
     await request(app)
       .post('/api/attendance/events/check-in')
       .set('Authorization', `Bearer ${staffToken}`)
-      .send({ timestamp: '2099-05-04T04:45:00.000Z' });
+      .send({ ...validAttendanceLocation, timestamp: '2099-05-04T04:45:00.000Z' });
     const breakStart = await request(app)
       .post('/api/attendance/events/break-start')
       .set('Authorization', `Bearer ${staffToken}`)
       .send({
+        ...validAttendanceLocation,
         breakTypeId: setup.breakTypeId,
         breakSubtypeId: setup.breakSubtypeId,
         timestamp: '2099-05-04T09:00:00.000Z',
@@ -1706,7 +1805,7 @@ describe('Attendance endpoints e2e', () => {
     const checkIn = await request(app)
       .post('/api/attendance/events/check-in')
       .set('Authorization', `Bearer ${staffToken}`)
-      .send({ timestamp: '2099-05-04T05:00:00.000Z' });
+      .send({ ...validAttendanceLocation, timestamp: '2099-05-04T05:00:00.000Z' });
     expect(checkIn.status).toBe(201);
 
     const attention = await request(app)
@@ -1759,6 +1858,7 @@ describe('Attendance endpoints e2e', () => {
       .post('/api/attendance/events/check-in')
       .set('Authorization', `Bearer ${staffToken}`)
       .send({
+        ...validAttendanceLocation,
         timestamp: '2099-05-04T05:00:00.000Z',
       });
     expect(checkIn.status).toBe(201);
@@ -1767,6 +1867,7 @@ describe('Attendance endpoints e2e', () => {
       .post('/api/attendance/events/break-start')
       .set('Authorization', `Bearer ${staffToken}`)
       .send({
+        ...validAttendanceLocation,
         breakTypeId: setup.breakTypeId,
         breakSubtypeId: setup.breakSubtypeId,
         timestamp: '2099-05-04T09:00:00.000Z',
@@ -1777,6 +1878,7 @@ describe('Attendance endpoints e2e', () => {
       .post('/api/attendance/events/break-end')
       .set('Authorization', `Bearer ${staffToken}`)
       .send({
+        ...validAttendanceLocation,
         timestamp: '2099-05-04T09:30:00.000Z',
       });
     expect(breakEnd.status).toBe(201);
@@ -1785,6 +1887,7 @@ describe('Attendance endpoints e2e', () => {
       .post('/api/attendance/events/check-out')
       .set('Authorization', `Bearer ${staffToken}`)
       .send({
+        ...validAttendanceLocation,
         timestamp: '2099-05-04T13:00:00.000Z',
       });
 
@@ -1813,13 +1916,13 @@ describe('Attendance endpoints e2e', () => {
     const checkIn = await request(app)
       .post('/api/attendance/events/check-in')
       .set('Authorization', `Bearer ${staffToken}`)
-      .send({ timestamp: '2099-05-04T05:00:00.000Z' });
+      .send({ ...validAttendanceLocation, timestamp: '2099-05-04T05:00:00.000Z' });
     expect(checkIn.status).toBe(201);
 
     const checkout = await request(app)
       .post('/api/attendance/events/check-out')
       .set('Authorization', `Bearer ${staffToken}`)
-      .send({ timestamp: '2099-05-04T13:00:00.000Z' });
+      .send({ ...validAttendanceLocation, timestamp: '2099-05-04T13:00:00.000Z' });
     expect(checkout.status).toBe(201);
     expect(checkout.body.snapshot).toMatchObject({
       scheduledStart: '09:00',
@@ -1921,11 +2024,12 @@ describe('Attendance endpoints e2e', () => {
     await request(app)
       .post('/api/attendance/events/check-in')
       .set('Authorization', `Bearer ${staffToken}`)
-      .send({ timestamp: '2099-05-05T06:00:00.000Z' });
+      .send({ ...validAttendanceLocation, timestamp: '2099-05-05T06:00:00.000Z' });
     await request(app)
       .post('/api/attendance/events/break-start')
       .set('Authorization', `Bearer ${staffToken}`)
       .send({
+        ...validAttendanceLocation,
         breakTypeId: setup.breakTypeId,
         breakSubtypeId: setup.breakSubtypeId,
         timestamp: '2099-05-05T08:00:00.000Z',
@@ -1933,12 +2037,12 @@ describe('Attendance endpoints e2e', () => {
     await request(app)
       .post('/api/attendance/events/break-end')
       .set('Authorization', `Bearer ${staffToken}`)
-      .send({ timestamp: '2099-05-05T08:30:00.000Z' });
+      .send({ ...validAttendanceLocation, timestamp: '2099-05-05T08:30:00.000Z' });
 
     const checkout = await request(app)
       .post('/api/attendance/events/check-out')
       .set('Authorization', `Bearer ${staffToken}`)
-      .send({ timestamp: '2099-05-05T11:00:00.000Z' });
+      .send({ ...validAttendanceLocation, timestamp: '2099-05-05T11:00:00.000Z' });
     expect(checkout.status).toBe(201);
     expect(checkout.body.snapshot).toMatchObject({
       scheduledStart: '10:00',
@@ -2035,11 +2139,11 @@ describe('Attendance endpoints e2e', () => {
     await request(app)
       .post('/api/attendance/events/check-in')
       .set('Authorization', `Bearer ${staffToken}`)
-      .send({ timestamp: '2099-05-04T05:00:00.000Z' });
+      .send({ ...validAttendanceLocation, timestamp: '2099-05-04T05:00:00.000Z' });
     const checkout = await request(app)
       .post('/api/attendance/events/check-out')
       .set('Authorization', `Bearer ${staffToken}`)
-      .send({ timestamp: '2099-05-04T13:00:00.000Z' });
+      .send({ ...validAttendanceLocation, timestamp: '2099-05-04T13:00:00.000Z' });
     expect(checkout.status).toBe(201);
 
     await AttendanceDailySnapshot.updateOne(
@@ -2087,6 +2191,7 @@ describe('Attendance endpoints e2e', () => {
       .post('/api/attendance/events/break-start')
       .set('Authorization', `Bearer ${staffToken}`)
       .send({
+        ...validAttendanceLocation,
         breakTypeId: new mongoose.Types.ObjectId().toString(),
       });
 
@@ -2095,7 +2200,7 @@ describe('Attendance endpoints e2e', () => {
     const checkoutBeforeCheckIn = await request(app)
       .post('/api/attendance/events/check-out')
       .set('Authorization', `Bearer ${staffToken}`)
-      .send({});
+      .send(validAttendanceLocation);
 
     expect(checkoutBeforeCheckIn.status).toBe(409);
   });
@@ -2110,6 +2215,7 @@ describe('Attendance endpoints e2e', () => {
       .post('/api/attendance/events/check-in')
       .set('Authorization', `Bearer ${staffToken}`)
       .send({
+        ...validAttendanceLocation,
         timestamp: '2099-05-04T05:00:00.000Z',
       });
 

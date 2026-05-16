@@ -17,6 +17,13 @@ export interface IAttendanceEvent extends Document {
     source: AttendanceEventSource;
     createdBy?: Types.ObjectId;
     deviceId?: string;
+    location?: {
+        latitude: number;
+        longitude: number;
+        accuracyMeters: number;
+        distanceMeters: number;
+        allowedRadiusMeters: number;
+    };
     notes?: string;
     createdAt: Date;
     updatedAt: Date;
@@ -83,6 +90,13 @@ const AttendanceEventSchema = new mongoose.Schema(
         deviceId: {
             type: String,
             trim: true,
+        },
+        location: {
+            latitude: { type: Number },
+            longitude: { type: Number },
+            accuracyMeters: { type: Number },
+            distanceMeters: { type: Number },
+            allowedRadiusMeters: { type: Number },
         },
         notes: {
             type: String,

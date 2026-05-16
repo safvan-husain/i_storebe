@@ -13,6 +13,7 @@
     "seed": "ts-node src/scripts/seedAdmin.ts",
     "seed:custom-reports": "ts-node src/scripts/seedCustomReports.ts",
     "change-password": "ts-node src/scripts/changePassword.ts",
+    "reset-passwords": "ts-node src/scripts/resetAllPasswords.ts",
     "backfill:branch-snapshots": "ts-node src/scripts/backfillBranchSnapshots.ts",
     "provision:branches": "ts-node src/scripts/provisionBranchesFromManagers.ts",
     "finalize:mapped-branches": "ts-node src/scripts/finalizeMappedManagerBranches.ts"
