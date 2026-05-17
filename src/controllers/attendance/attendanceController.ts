@@ -253,32 +253,31 @@ function normalizeDayRule(value: unknown, fieldName: string): IAttendanceShiftDa
     };
 }
 
+function emptyShiftWeeklyPattern(): IAttendanceShiftWeeklyPattern {
+    return weekdays.reduce((pattern, weekday) => {
+        pattern[weekday] = null;
+        return pattern;
+    }, {} as IAttendanceShiftWeeklyPattern);
+}
+
+function hasExplicitWeeklyPattern(body: Record<string, unknown>) {
+    return body.weeklyPattern !== undefined && body.weeklyPattern !== null;
+}
+
 function normalizeWeeklyPattern(body: Record<string, unknown>): IAttendanceShiftWeeklyPattern {
-    if (body.weeklyPattern && typeof body.weeklyPattern === 'object' && !Array.isArray(body.weeklyPattern)) {
-        const source = body.weeklyPattern as Record<string, unknown>;
-        return weekdays.reduce((pattern, weekday) => {
-            pattern[weekday] = normalizeDayRule(source[weekday], `weeklyPattern.${weekday}`);
-            return pattern;
-        }, {} as IAttendanceShiftWeeklyPattern);
+    if (!hasExplicitWeeklyPattern(body)) {
+        return emptyShiftWeeklyPattern();
     }
 
-    assertTime(body.startTime, 'startTime');
-    assertTime(body.endTime, 'endTime');
-    const weekdayRule = {
-        startTime: String(body.startTime),
-        endTime: String(body.endTime),
-        requiredWorkMinutes: numberOrDefault(body.requiredWorkMinutes, 0),
-    };
+    if (typeof body.weeklyPattern !== 'object' || Array.isArray(body.weeklyPattern)) {
+        throw new AppError('weeklyPattern must be an object', 400);
+    }
 
-    return {
-        monday: weekdayRule,
-        tuesday: weekdayRule,
-        wednesday: weekdayRule,
-        thursday: weekdayRule,
-        friday: weekdayRule,
-        saturday: null,
-        sunday: null,
-    };
+    const source = body.weeklyPattern as Record<string, unknown>;
+    return weekdays.reduce((pattern, weekday) => {
+        pattern[weekday] = normalizeDayRule(source[weekday], `weeklyPattern.${weekday}`);
+        return pattern;
+    }, {} as IAttendanceShiftWeeklyPattern);
 }
 
 function firstWorkingRule(pattern: IAttendanceShiftWeeklyPattern) {
@@ -1178,14 +1177,22 @@ function ok(handler: (req: Request, res: Response) => Promise<void>) {
 export const createShift = ok(async (req, res) => {
     requireAdmin(req);
     const createdBy = requireUserId(req);
+    const hasWeeklyPattern = hasExplicitWeeklyPattern(req.body);
     const weeklyPattern = normalizeWeeklyPattern(req.body);
     const firstRule = firstWorkingRule(weeklyPattern);
-    if (!firstRule) throw new AppError('At least one working day is required', 400);
+    if (hasWeeklyPattern && !firstRule) throw new AppError('At least one working day is required', 400);
+    if (!hasWeeklyPattern) {
+        assertTime(req.body.startTime, 'startTime');
+        assertTime(req.body.endTime, 'endTime');
+    }
+    const requiredWorkMinutes = hasWeeklyPattern
+        ? req.body.requiredWorkMinutes ?? firstRule!.requiredWorkMinutes
+        : numberOrDefault(req.body.requiredWorkMinutes, 0);
     const shift = await AttendanceShift.create({
         name: req.body.name,
-        startTime: req.body.startTime ?? firstRule.startTime,
-        endTime: req.body.endTime ?? firstRule.endTime,
-        requiredWorkMinutes: req.body.requiredWorkMinutes ?? firstRule.requiredWorkMinutes,
+        startTime: req.body.startTime ?? firstRule!.startTime,
+        endTime: req.body.endTime ?? firstRule!.endTime,
+        requiredWorkMinutes,
         weeklyPattern,
         version: 1,
         graceLateMinutes: numberOrDefault(req.body.graceLateMinutes, 0),
@@ -1208,12 +1215,13 @@ export const updateShift = ok(async (req, res) => {
     if (!existing) throw new AppError('Shift not found', 404);
 
     const update: Record<string, unknown> = { ...req.body };
-    if (req.body.weeklyPattern || req.body.startTime || req.body.endTime || req.body.requiredWorkMinutes !== undefined) {
+    const hasWeeklyPattern = hasExplicitWeeklyPattern(req.body);
+    if (hasWeeklyPattern) {
         const bodyForPattern = {
             startTime: req.body.startTime ?? existing.startTime,
             endTime: req.body.endTime ?? existing.endTime,
             requiredWorkMinutes: req.body.requiredWorkMinutes ?? existing.requiredWorkMinutes,
-            weeklyPattern: req.body.weeklyPattern ?? existing.weeklyPattern,
+            weeklyPattern: req.body.weeklyPattern,
         };
         const weeklyPattern = normalizeWeeklyPattern(bodyForPattern);
         const firstRule = firstWorkingRule(weeklyPattern);
@@ -1222,6 +1230,18 @@ export const updateShift = ok(async (req, res) => {
         update.startTime = req.body.startTime ?? firstRule.startTime;
         update.endTime = req.body.endTime ?? firstRule.endTime;
         update.requiredWorkMinutes = req.body.requiredWorkMinutes ?? firstRule.requiredWorkMinutes;
+    } else if (req.body.startTime || req.body.endTime || req.body.requiredWorkMinutes !== undefined) {
+        const startTime = req.body.startTime ?? existing.startTime;
+        const endTime = req.body.endTime ?? existing.endTime;
+        assertTime(startTime, 'startTime');
+        assertTime(endTime, 'endTime');
+        update.startTime = startTime;
+        update.endTime = endTime;
+        update.requiredWorkMinutes = numberOrDefault(
+            req.body.requiredWorkMinutes ?? existing.requiredWorkMinutes,
+            0
+        );
+        update.weeklyPattern = emptyShiftWeeklyPattern();
     }
     if (update.graceLateMinutes !== undefined) update.graceLateMinutes = numberOrDefault(update.graceLateMinutes, 0);
     if (update.graceEarlyLeaveMinutes !== undefined) update.graceEarlyLeaveMinutes = numberOrDefault(update.graceEarlyLeaveMinutes, 0);
