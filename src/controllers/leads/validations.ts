@@ -23,17 +23,24 @@ const LeadStatus = z.object({
     type: Type.default('fresh')
 });
 
+const CreateLeadStatus = z.object({
+    source: EnquireSource.optional().default('walkin'),
+    enquireStatus: EnquireStatus.optional().default('new'),
+    purpose: Purpose.optional().default('inquiry'),
+    callStatus: callStatusSchema.optional(),
+});
+
 const LeadData = z.object({
     phone: z.string().min(1, { message: 'Phone is required' }),
     name: z.string().min(1, { message: 'Name is required' }),
     email: z.string().email({ message: 'Invalid email format' }).optional(),
-    product: z.string().min(1, { message: 'Purpose is required' }),
+    product: z.string().min(1, { message: 'Product is required' }),
     address: z.string().optional().default(''),
     type: Type,
     manager: ObjectIdSchema.optional(),
     //this would be IST since getting from client
     dob: z.number().optional().transform(val => val ? new Date(val) : undefined),
-    nearestStore: z.string().optional()
+    nearestStore: z.string().min(1, { message: 'Nearest store is required' })
 })
 
 export const updateLeadStatusSchema = z.object({
@@ -48,7 +55,7 @@ export const updateLeadStatusSchema = z.object({
 export type UpdateLeadStatus = z.infer<typeof updateLeadStatusSchema>
 
 // Lead validation schemas
-export const crateLeadSchema = z.object({}).merge(LeadStatus).merge(LeadData);
+export const crateLeadSchema = z.object({}).merge(CreateLeadStatus).merge(LeadData);
 
 export type UpdateLeadStatusData = z.infer<typeof updateLeadStatusSchema>;
 
@@ -114,4 +121,3 @@ export const LeadExcelReportFilterSchema = z.object({
 });
 
 export type LeadExcelReportFilter = z.infer<typeof LeadExcelReportFilterSchema>;
-
