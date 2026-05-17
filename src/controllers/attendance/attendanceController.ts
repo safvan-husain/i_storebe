@@ -2128,6 +2128,13 @@ export const getMyAttendanceStatus = ok(async (req, res) => {
             requiredWorkMinutes: schedule.requiredWorkMinutes,
             scheduledSegments: schedule.scheduledSegments,
         },
+        branchLocation: branch.location?.latitude !== undefined && branch.location?.longitude !== undefined
+            ? {
+                latitude: branch.location.latitude,
+                longitude: branch.location.longitude,
+                allowedRadiusMeters: attendanceLocationRadiusMeters,
+            }
+            : null,
         snapshot: snapshot ? serializeDailySnapshot(snapshot) : null,
         workStatus,
         canCheckIn: workStatus === 'not_started' && workingSchedule,
