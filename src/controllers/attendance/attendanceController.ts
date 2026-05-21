@@ -69,6 +69,7 @@ const timePattern = /^([01]\d|2[0-3]):[0-5]\d$/;
 const datePattern = /^\d{4}-\d{2}-\d{2}$/;
 const weekdays: AttendanceWeekday[] = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
 const attendanceLocationRadiusMeters = 100;
+const attendanceGateStrictBranchNormalizedName = '19th mile';
 
 type AttendanceLocationProof = {
     latitude: number;
@@ -77,6 +78,17 @@ type AttendanceLocationProof = {
     distanceMeters: number;
     allowedRadiusMeters: number;
 };
+
+function normalizedBranchName(branch: { normalizedName?: string; name?: string }) {
+    return String(branch.normalizedName ?? branch.name ?? '')
+        .trim()
+        .replace(/\s+/g, ' ')
+        .toLowerCase();
+}
+
+function shouldBypassAttendanceGate(branch: { normalizedName?: string; name?: string }) {
+    return normalizedBranchName(branch) !== attendanceGateStrictBranchNormalizedName;
+}
 
 function serializeDailySnapshot(snapshot: any) {
     const value = typeof snapshot?.toObject === 'function' ? snapshot.toObject() : snapshot;
@@ -2093,6 +2105,31 @@ export const getMyAttendanceStatus = ok(async (req, res) => {
     const branch = await getEmployeeBranch(employeeId);
     const date = String(req.query.date ?? branchLocalParts(new Date(), branch.timezone).date);
     assertDate(date, 'date');
+
+    if (shouldBypassAttendanceGate(branch)) {
+        res.status(200).json({
+            date,
+            schedule: null,
+            branchLocation: branch.location?.latitude !== undefined && branch.location?.longitude !== undefined
+                ? {
+                    latitude: branch.location.latitude,
+                    longitude: branch.location.longitude,
+                    allowedRadiusMeters: attendanceLocationRadiusMeters,
+                }
+                : null,
+            snapshot: null,
+            workStatus: 'checked_out',
+            canCheckIn: false,
+            canStartBreak: false,
+            canEndBreak: false,
+            canCheckOut: false,
+            workedMinutes: 0,
+            breakOptions: [],
+            activeBreak: null,
+            attendanceGateBypassed: true,
+        });
+        return;
+    }
 
     const schedule = await resolveSchedule(employeeId, branch._id, date);
     const events = await getDayEvents(employeeId, date);
