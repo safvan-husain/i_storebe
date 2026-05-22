@@ -15,6 +15,7 @@ import {
     getMyFaceEnrollmentForRequest,
     updateFaceEnrollmentForRequest,
 } from "../../services/face-enrollment-service";
+import { getBranchMapForUsers } from '../../services/user-branch-map';
 
 const escapeRegex = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
@@ -25,31 +26,6 @@ const getBranchMemberIds = async (branchId: string) => {
         ...(branch.manager ? [branch.manager] : []),
         ...(branch.staffs ?? []),
     ].map(id => Types.ObjectId.createFromHexString(String(id)));
-};
-
-const getBranchMapForUsers = async (userIds: string[]) => {
-    if (userIds.length === 0) return new Map<string, { _id: string, name: string }>();
-    const objectIds = userIds.map(id => Types.ObjectId.createFromHexString(id));
-    const branches = await Branch.find({
-        $or: [
-            { manager: { $in: objectIds } },
-            { staffs: { $in: objectIds } },
-        ],
-    }, { name: true, manager: true, staffs: true }).lean();
-
-    const branchMap = new Map<string, { _id: string, name: string }>();
-    for (const branch of branches) {
-        const value = { _id: String(branch._id), name: branch.name };
-        if (branch.manager && userIds.includes(String(branch.manager))) {
-            branchMap.set(String(branch.manager), value);
-        }
-        for (const staffId of branch.staffs ?? []) {
-            if (userIds.includes(String(staffId))) {
-                branchMap.set(String(staffId), value);
-            }
-        }
-    }
-    return branchMap;
 };
 
 export const getStaffs = asyncHandler(async (req: Request, res: Response) => {

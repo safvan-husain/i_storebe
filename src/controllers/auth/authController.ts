@@ -11,6 +11,7 @@ import {ObjectIdSchema, SecondUserPrivilege, UserPrivilege, UserPrivilegeSchema}
 import {TypedResponse} from "../../common/interface";
 import {z} from "zod";
 import {ManagerWithStaffs, managerWithStaffsSchema} from "../leads/validations";
+import {getBranchMapForUsers} from "../../services/user-branch-map";
 import {runtimeValidation} from "../../utils/validation";
 import fs from 'fs/promises';
 import path from 'path';
@@ -391,36 +392,33 @@ export const updateUserV2 = asyncHandler(async (req: Request, res: TypedResponse
     }
 });
 
-export const getUsers = asyncHandler(async (req: Request, res: TypedResponse<ManagerWithStaffs[]>) => {
-    try {
-        if (!req.userId) {
-            res.status(401).json({message: "requested user not found"});
-            return;
+async function getManagerStaffUsers(req: Request) {
+    if (!req.userId) {
+        throw new AppError('requested user not found', 401);
+    }
+    let filter = z.object({
+        type: UserPrivilegeSchema.exclude(['admin']).optional()
+    }).parse(req.query);
+    let managerId: Types.ObjectId | undefined;
+    if (req.privilege === "staff") {
+        let requester = await User.findById(req.userId, {manager: true}).lean();
+        if (!requester) {
+            throw new AppError('User not found', 401);
         }
-        let filter = z.object({
-            type: UserPrivilegeSchema.exclude(['admin']).optional()
-        }).parse(req.query);
-        let managerId: Types.ObjectId | undefined;
-        if (req.privilege === "staff") {
-            let requester = await User.findById(req.userId, {manager: true}).lean();
-            if (!requester) {
-                res.status(401).json({message: "User not found"});
-                return;
-            }
-            managerId = requester.manager;
-        } else if (req.privilege === 'manager') {
-            managerId = Types.ObjectId.createFromHexString(req.userId);
-        }
-        let query: FilterQuery<IUser> = { isAccountDeleted: { $ne: true } }
-        if (managerId && req.secondPrivilege !== 'call-center') {
-            query.$or = [{manager: managerId}, {_id: managerId}]
-        }
-        query.privilege = {$ne: 'admin'}
-        if (filter.type) {
-            query.privilege = filter.type;
-        }
+        managerId = requester.manager;
+    } else if (req.privilege === 'manager') {
+        managerId = Types.ObjectId.createFromHexString(req.userId);
+    }
+    let query: FilterQuery<IUser> = { isAccountDeleted: { $ne: true } }
+    if (managerId && req.secondPrivilege !== 'call-center') {
+        query.$or = [{manager: managerId}, {_id: managerId}]
+    }
+    query.privilege = {$ne: 'admin'}
+    if (filter.type) {
+        query.privilege = filter.type;
+    }
 
-        const users: ManagerWithStaffs[] = await User.aggregate([
+    return User.aggregate<ManagerWithStaffs>([
             {
                 $match: query
             },
@@ -504,21 +502,36 @@ export const getUsers = asyncHandler(async (req: Request, res: TypedResponse<Man
 
             // Final projection
             { $replaceRoot: { newRoot: "$managerData" }}
-        ]);
-        // const managers = users.find(e => e._id == null)?.staffs;
-        // users.splice(users.findIndex(e => e._id == null), 1);
-        // if (managers && managers.length > 0) {
-        //     let managersMap = new Map(managers.map(e => [e._id.toString(), e]));
-        //     users.forEach(e => {
-        //         managersMap.delete(e._id.toString());
-        //     })
-        //     let remainingManagers = Array.from(managersMap.values())
-        //     if(remainingManagers.length > 0 ) {
-        //         users.push(...(remainingManagers.map(e => ({...e, staffs: []}))))
-        //     }
-        // }
+    ]);
+}
 
+export const getUsers = asyncHandler(async (req: Request, res: TypedResponse<ManagerWithStaffs[]>) => {
+    try {
+        const users = await getManagerStaffUsers(req);
         res.status(200).json(runtimeValidation(managerWithStaffsSchema, users as any));
+    } catch (e) {
+        onCatchError(e, res);
+    }
+});
+
+export const getUsersWithBranches = asyncHandler(async (req: Request, res: TypedResponse<ManagerWithStaffs[]>) => {
+    try {
+        const users = await getManagerStaffUsers(req);
+        const userIds = users.flatMap(manager => [
+            String(manager._id),
+            ...manager.staffs.map(staff => String(staff._id)),
+        ]);
+        const branchMap = await getBranchMapForUsers(userIds);
+        const usersWithBranches = users.map(manager => ({
+            ...manager,
+            branch: branchMap.get(String(manager._id)) ?? null,
+            staffs: manager.staffs.map(staff => ({
+                ...staff,
+                branch: branchMap.get(String(staff._id)) ?? null,
+            })),
+        }));
+
+        res.status(200).json(runtimeValidation(managerWithStaffsSchema, usersWithBranches as any));
     } catch (e) {
         onCatchError(e, res);
     }

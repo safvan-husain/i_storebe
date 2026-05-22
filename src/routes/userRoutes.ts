@@ -1,5 +1,5 @@
 import express from 'express';
-import {createUser, createUserV2, getUsers, getUserById, updateFcmToken, deleteAccount, updateUserImageV2, updateUserV2} from '../controllers/auth/authController';
+import {createUser, createUserV2, getUsers, getUsersWithBranches, getUserById, updateFcmToken, deleteAccount, updateUserImageV2, updateUserV2} from '../controllers/auth/authController';
 import { protect } from '../middleware/auth';
 import {changeUserPassword, getManagers, getStaffs, updateActiveStatus, getActiveStaffsForManager, queryEmployees, getFaceEnrollment, getMyFaceEnrollment, updateFaceEnrollment} from "../controllers/user/usersController";
 import {getNotifications} from "../services/notification-services";
@@ -14,6 +14,8 @@ router
 router.route('/v2').post(protect, createUserV2);
 router.route('/v2/:id').put(protect, updateUserV2);
 router.route('/v2/:id/image').put(protect, updateUserImageV2);
+// TODO: Remove this compatibility endpoint after May 2026 once all clients can rely on the stable users contract.
+router.route('/with-branches').get(protect, getUsersWithBranches);
 router.route('/manager').get(protect, getManagers);
 router.route('/staff').get(protect, getStaffs);
 router.route('/employees/query').post(protect, queryEmployees);
