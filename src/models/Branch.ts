@@ -14,6 +14,7 @@ export interface IBranch extends Document {
         updatedBy: Types.ObjectId;
     };
     isActive: boolean;
+    attendanceEnabled: boolean;
     createdBy: Types.ObjectId;
     createdAt: Date;
     updatedAt: Date;
@@ -56,6 +57,10 @@ const BranchSchema = new mongoose.Schema(
         isActive: {
             type: Boolean,
             default: true,
+        },
+        attendanceEnabled: {
+            type: Boolean,
+            default: false,
         },
         createdBy: {
             type: mongoose.Schema.Types.ObjectId,

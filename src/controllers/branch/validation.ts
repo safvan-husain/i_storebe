@@ -10,6 +10,7 @@ export const createBranchSchema = z.object({
         longitude: z.number().min(-180).max(180),
     }).optional(),
     isActive: z.boolean().optional().default(true),
+    attendanceEnabled: z.boolean().optional().default(true),
     confirmMove: z.boolean().optional().default(false),
 });
 
@@ -22,6 +23,7 @@ export const updateBranchSchema = z.object({
         longitude: z.number().min(-180).max(180),
     }).nullable().optional(),
     isActive: z.boolean().optional(),
+    attendanceEnabled: z.boolean().optional(),
     confirmMove: z.boolean().optional().default(false),
 }).refine(v => Object.keys(v).some(key => key !== 'confirmMove'), {
     message: 'At least one branch field is required',

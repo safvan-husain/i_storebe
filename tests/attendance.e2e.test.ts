@@ -130,6 +130,7 @@ describe('Attendance endpoints e2e', () => {
       },
       createdBy: admin!._id,
       isActive: true,
+      attendanceEnabled: true,
     });
 
     await User.findByIdAndUpdate(staff!._id, { manager: manager!._id });
@@ -596,6 +597,7 @@ describe('Attendance endpoints e2e', () => {
       staffs: [staffTwo._id],
       createdBy: seed.adminId,
       isActive: true,
+      attendanceEnabled: true,
     });
 
     const earlyGroup = await request(app)
@@ -2364,5 +2366,50 @@ describe('Attendance endpoints e2e', () => {
       .set('Authorization', `Bearer ${staffToken}`);
 
     expect(otherEmployeeSummary.status).toBe(403);
+  });
+
+  it('bypasses the attendance gate when branch attendanceEnabled is false', async () => {
+    const seed = await seedUsers();
+    await Branch.findByIdAndUpdate(seed.branchId, { attendanceEnabled: false });
+    const staffToken = await login('staff-one');
+
+    const response = await request(app)
+      .get('/api/attendance/me/status')
+      .set('Authorization', `Bearer ${staffToken}`);
+
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      workStatus: 'checked_out',
+      canCheckIn: false,
+      canStartBreak: false,
+      canEndBreak: false,
+      canCheckOut: false,
+      workedMinutes: 0,
+      attendanceGateBypassed: true,
+      schedule: null,
+      snapshot: null,
+    });
+  });
+
+  it('enforces the attendance gate when branch attendanceEnabled is true', async () => {
+    const seed = await seedUsers();
+    const adminToken = await login('admin');
+    await createAttendanceSetup(adminToken, seed);
+    const staffToken = await login('staff-one');
+
+    const response = await request(app)
+      .get('/api/attendance/me/status')
+      .query({ date: '2099-05-04' })
+      .set('Authorization', `Bearer ${staffToken}`);
+
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      workStatus: 'not_started',
+      canCheckIn: true,
+    });
+    expect(response.body.attendanceGateBypassed).toBeUndefined();
+    expect(response.body.schedule).toEqual(expect.objectContaining({
+      source: 'branch',
+    }));
   });
 });

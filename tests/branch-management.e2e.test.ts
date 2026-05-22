@@ -391,4 +391,56 @@ describe('Branch management e2e', () => {
     expect(branchTarget?.total).toBe(25);
     expect(legacyTarget).toBeNull();
   });
+
+  it('defaults attendanceEnabled to true when creating a branch', async () => {
+    const adminToken = await login('admin');
+
+    const response = await request(app)
+      .post('/api/branches')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        name: 'Attendance Default Branch',
+        managerId: await getUserId('manager-a'),
+      });
+
+    expect(response.status).toBe(201);
+    expect(response.body.attendanceEnabled).toBe(true);
+  });
+
+  it('allows toggling attendanceEnabled from branch details', async () => {
+    const adminToken = await login('admin');
+
+    const createResponse = await request(app)
+      .post('/api/branches')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        name: 'Toggle Attendance Branch',
+        managerId: await getUserId('manager-a'),
+      });
+
+    expect(createResponse.status).toBe(201);
+    expect(createResponse.body.attendanceEnabled).toBe(true);
+
+    const branchId = createResponse.body._id as string;
+
+    const disableResponse = await request(app)
+      .patch(`/api/branches/${branchId}`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        attendanceEnabled: false,
+      });
+
+    expect(disableResponse.status).toBe(200);
+    expect(disableResponse.body.attendanceEnabled).toBe(false);
+
+    const enableResponse = await request(app)
+      .patch(`/api/branches/${branchId}`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        attendanceEnabled: true,
+      });
+
+    expect(enableResponse.status).toBe(200);
+    expect(enableResponse.body.attendanceEnabled).toBe(true);
+  });
 });

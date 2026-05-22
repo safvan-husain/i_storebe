@@ -69,7 +69,6 @@ const timePattern = /^([01]\d|2[0-3]):[0-5]\d$/;
 const datePattern = /^\d{4}-\d{2}-\d{2}$/;
 const weekdays: AttendanceWeekday[] = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
 const attendanceLocationRadiusMeters = 100;
-const attendanceGateStrictBranchNormalizedName = '19th mile';
 
 type AttendanceLocationProof = {
     latitude: number;
@@ -79,15 +78,8 @@ type AttendanceLocationProof = {
     allowedRadiusMeters: number;
 };
 
-function normalizedBranchName(branch: { normalizedName?: string; name?: string }) {
-    return String(branch.normalizedName ?? branch.name ?? '')
-        .trim()
-        .replace(/\s+/g, ' ')
-        .toLowerCase();
-}
-
-function shouldBypassAttendanceGate(branch: { normalizedName?: string; name?: string }) {
-    return normalizedBranchName(branch) !== attendanceGateStrictBranchNormalizedName;
+function shouldBypassAttendanceGate(branch: { attendanceEnabled?: boolean }) {
+    return branch.attendanceEnabled !== true;
 }
 
 function serializeDailySnapshot(snapshot: any) {

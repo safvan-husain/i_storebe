@@ -10,7 +10,8 @@ export const activityTypeSchema = z.enum(
         'lead_transfer', 'call_status_updated', 'dialed',
         'branch_created', 'branch_updated', 'branch_staff_added',
         'branch_staff_removed', 'branch_staff_transferred',
-        'branch_location_updated', 'branch_activated', 'branch_inactivated'
+        'branch_location_updated', 'branch_activated', 'branch_inactivated',
+        'branch_attendance_enabled', 'branch_attendance_disabled'
     ]);
 
 export type ActivityType = z.infer<typeof activityTypeSchema>;

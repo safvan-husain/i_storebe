@@ -120,6 +120,12 @@ activitySchema.statics.createActivity = async function (activityData) {
             case 'branch_inactivated':
                 activityData.action = `${activatorName} inactivated a branch`;
                 break;
+            case 'branch_attendance_enabled':
+                activityData.action = `${activatorName} enabled branch attendance`;
+                break;
+            case 'branch_attendance_disabled':
+                activityData.action = `${activatorName} disabled branch attendance`;
+                break;
             default:
                 activityData.action = `${activatorName} performed an action`;
         }

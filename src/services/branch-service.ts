@@ -21,7 +21,9 @@ type BranchActivityType =
     | 'branch_staff_transferred'
     | 'branch_location_updated'
     | 'branch_activated'
-    | 'branch_inactivated';
+    | 'branch_inactivated'
+    | 'branch_attendance_enabled'
+    | 'branch_attendance_disabled';
 
 type Actor = {
     userId?: string;
@@ -225,6 +227,7 @@ export const branchService = {
                 updatedBy: toObjectId(actor.userId),
             } : undefined,
             isActive: data.isActive,
+            attendanceEnabled: data.attendanceEnabled,
             createdBy: toObjectId(actor.userId),
         });
 
@@ -293,6 +296,7 @@ export const branchService = {
         const oldName = branch.name;
         const oldManager = branch.manager ? String(branch.manager) : undefined;
         const oldIsActive = branch.isActive;
+        const oldAttendanceEnabled = branch.attendanceEnabled;
         const oldLocation = branch.location
             ? { latitude: branch.location.latitude, longitude: branch.location.longitude }
             : undefined;
@@ -351,6 +355,9 @@ export const branchService = {
         branch.manager = nextManager;
         branch.staffs = nextStaffs;
         branch.isActive = nextIsActive;
+        if (typeof data.attendanceEnabled !== 'undefined') {
+            branch.attendanceEnabled = data.attendanceEnabled;
+        }
         await branch.save();
 
         await syncStaffManagers(nextStaffs, nextManager);
@@ -409,6 +416,14 @@ export const branchService = {
                 type: data.isActive ? 'branch_activated' : 'branch_inactivated',
                 branchName: branch.name,
                 message: `${data.isActive ? 'made active' : 'made inactive'} branch "${branch.name}"`,
+            });
+        }
+        if (typeof data.attendanceEnabled !== 'undefined' && data.attendanceEnabled !== oldAttendanceEnabled) {
+            await logBranchActivity({
+                actor,
+                type: data.attendanceEnabled ? 'branch_attendance_enabled' : 'branch_attendance_disabled',
+                branchName: branch.name,
+                message: `${data.attendanceEnabled ? 'enabled' : 'disabled'} attendance for branch "${branch.name}"`,
             });
         }
         if (data.location && (!oldLocation ||
