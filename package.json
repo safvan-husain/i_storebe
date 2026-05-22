@@ -16,6 +16,7 @@
     "reset-passwords": "ts-node src/scripts/resetAllPasswords.ts",
     "backfill:branch-snapshots": "ts-node src/scripts/backfillBranchSnapshots.ts",
     "backfill:branch-attendance-enabled": "ts-node src/scripts/backfillBranchAttendanceEnabled.ts",
+    "backfill:schedule-group-branches": "ts-node src/scripts/backfillScheduleGroupBranches.ts",
     "provision:branches": "ts-node src/scripts/provisionBranchesFromManagers.ts",
     "finalize:mapped-branches": "ts-node src/scripts/finalizeMappedManagerBranches.ts"
   },

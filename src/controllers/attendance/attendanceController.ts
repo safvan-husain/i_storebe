@@ -25,6 +25,7 @@ import AttendanceDailySnapshot, {
 } from '../../models/AttendanceDailySnapshot';
 import AttendanceMonthlySummary from '../../models/AttendanceMonthlySummary';
 import { hasFaceEnrollment } from '../../services/face-enrollment-service';
+import { getCurrentBranchIdForUser } from '../../services/branch-context';
 
 type GeneratedBy = 'event' | 'checkout' | 'scheduled_job' | 'correction' | 'manual';
 type Actor = Pick<Request, 'userId' | 'privilege'>;
@@ -151,6 +152,132 @@ function requireAdminOrManager(req: Request) {
     if (!['admin', 'manager'].includes(req.privilege)) {
         throw new AppError('Admin or manager privilege required', 403);
     }
+}
+
+async function getActorBranchId(req: Request) {
+    if (req.privilege === 'admin') return undefined;
+    if (req.privilege !== 'manager') {
+        throw new AppError('Admin or manager privilege required', 403);
+    }
+    const branchId = await getCurrentBranchIdForUser(req.userId);
+    if (!branchId) {
+        throw new AppError('Manager branch not found', 403);
+    }
+    return branchId;
+}
+
+async function assertManagerBranch(req: Request) {
+    const branchId = await getActorBranchId(req);
+    if (!branchId) {
+        throw new AppError('Manager branch not found', 403);
+    }
+    return branchId;
+}
+
+async function assertCanManageGroup(req: Request, group: { branch?: Types.ObjectId | string | null }) {
+    if (req.privilege === 'admin') return;
+    const actorBranchId = await assertManagerBranch(req);
+    if (!group.branch || String(group.branch) !== String(actorBranchId)) {
+        throw new AppError('Not authorized to manage this schedule group', 403);
+    }
+}
+
+async function assertEmployeesInBranch(employeeIds: Types.ObjectId[], branchId: Types.ObjectId) {
+    for (const employeeId of employeeIds) {
+        const branch = await Branch.findOne({
+            _id: branchId,
+            $or: [
+                { manager: employeeId },
+                { staffs: employeeId },
+            ],
+        }, { _id: 1 }).lean();
+        if (!branch) {
+            throw new AppError('All selected employees must belong to the schedule group branch', 400);
+        }
+    }
+}
+
+async function assertEmployeesMatchGroupBranch(
+    employeeIds: Types.ObjectId[],
+    branchId?: Types.ObjectId | null,
+) {
+    if (!branchId) return;
+    await assertEmployeesInBranch(employeeIds, branchId);
+}
+
+async function assertCanManageTemplate(req: Request, template: { branch?: Types.ObjectId | string | null }) {
+    if (req.privilege === 'admin') return;
+    const actorBranchId = await assertManagerBranch(req);
+    if (!template.branch || String(template.branch) !== String(actorBranchId)) {
+        throw new AppError('Not authorized to manage this schedule template', 403);
+    }
+}
+
+async function assertCanManageAssignment(req: Request, assignment: {
+    targetType: string;
+    branch?: Types.ObjectId | string | null;
+    group?: Types.ObjectId | string | null;
+}) {
+    if (req.privilege === 'admin') return;
+    const actorBranchId = await assertManagerBranch(req);
+    if (assignment.targetType === 'branch') {
+        if (!assignment.branch || String(assignment.branch) !== String(actorBranchId)) {
+            throw new AppError('Not authorized to manage this schedule assignment', 403);
+        }
+        return;
+    }
+    if (assignment.targetType === 'group') {
+        const group = await AttendanceScheduleGroup.findById(assignment.group, { branch: 1 }).lean();
+        if (!group || String(group.branch) !== String(actorBranchId)) {
+            throw new AppError('Not authorized to manage this schedule assignment', 403);
+        }
+        return;
+    }
+    throw new AppError('Managers can only manage branch or group schedule assignments', 403);
+}
+
+async function assertManagerAssignmentPayload(req: Request, payload: {
+    targetType: string;
+    branchId?: string;
+    groupId?: string;
+}) {
+    if (req.privilege !== 'manager') return;
+    const actorBranchId = await assertManagerBranch(req);
+    if (payload.targetType === 'global' || payload.targetType === 'employee') {
+        throw new AppError('Managers can only create branch or group schedule assignments', 403);
+    }
+    if (payload.targetType === 'branch') {
+        const branchId = toObjectId(payload.branchId, 'branchId');
+        if (String(branchId) !== String(actorBranchId)) {
+            throw new AppError('Managers can only assign schedules to their own branch', 403);
+        }
+    }
+    if (payload.targetType === 'group') {
+        const groupId = toObjectId(payload.groupId, 'groupId');
+        const group = await AttendanceScheduleGroup.findById(groupId, { branch: 1 }).lean();
+        if (!group || String(group.branch) !== String(actorBranchId)) {
+            throw new AppError('Managers can only assign schedules to groups in their branch', 403);
+        }
+    }
+}
+
+function serializeScheduleTemplate(template: any) {
+    const object = typeof template.toObject === 'function' ? template.toObject() : template;
+    return {
+        ...object,
+        branchId: object.branch ? String(object.branch) : undefined,
+    };
+}
+
+function serializeScheduleAssignment(assignment: any) {
+    const object = typeof assignment.toObject === 'function' ? assignment.toObject() : assignment;
+    return {
+        ...object,
+        templateId: String(object.template),
+        branchId: object.branch ? String(object.branch) : undefined,
+        groupId: object.group ? String(object.group) : undefined,
+        employeeId: object.employee ? String(object.employee) : undefined,
+    };
 }
 
 async function getAttendancePrivilegeIds(userId: Types.ObjectId) {
@@ -472,7 +599,7 @@ async function scheduleGroupSummary(group: any, asOf = new Date(), managementVie
             : effectiveMembershipQuery(asOf)),
     }).populate('employee', 'username isActive').lean();
     const employeeIds = memberships.map((membership) => membership.employee?._id ?? membership.employee);
-    const branches = await branchesForEmployees(employeeIds);
+    const memberBranches = await branchesForEmployees(employeeIds);
     const activeAssignment = await AttendanceScheduleAssignment.findOne({
         targetType: 'group',
         group: group._id,
@@ -481,11 +608,24 @@ async function scheduleGroupSummary(group: any, asOf = new Date(), managementVie
     }, { _id: 1 }).lean();
 
     const groupObject = typeof group.toObject === 'function' ? group.toObject() : group;
+    const storedBranchId = groupObject.branch ? String(groupObject.branch) : undefined;
+    const storedBranch = storedBranchId
+        ? await Branch.findById(storedBranchId, { name: 1 }).lean()
+        : null;
+    const branchIds = storedBranchId
+        ? [storedBranchId]
+        : memberBranches.map((branch) => String(branch._id));
+    const branchNames = storedBranch
+        ? [storedBranch.name]
+        : memberBranches.map((branch) => branch.name);
+
     return {
         ...groupObject,
+        branchId: storedBranchId,
+        branchName: storedBranch?.name,
         memberCount: memberships.length,
-        branchIds: branches.map((branch) => String(branch._id)),
-        branchNames: branches.map((branch) => branch.name),
+        branchIds,
+        branchNames,
         hasActiveAssignment: !!activeAssignment,
     };
 }
@@ -1790,9 +1930,16 @@ export const listBreakSubtypes = ok(async (req, res) => {
 
 export const createScheduleGroup = ok(async (req, res) => {
     requireAdmin(req);
+    let branch: Types.ObjectId | undefined;
+    if (req.body.branchId !== undefined && req.body.branchId !== null && req.body.branchId !== '') {
+        branch = toObjectId(req.body.branchId, 'branchId');
+        const branchDoc = await Branch.findById(branch, { _id: 1 }).lean();
+        if (!branchDoc) throw new AppError('Branch not found', 404);
+    }
     const group = await AttendanceScheduleGroup.create({
         name: req.body.name,
         description: req.body.description,
+        ...(branch ? { branch } : {}),
         isActive: req.body.isActive ?? true,
         createdBy: requireUserId(req),
     });
@@ -1801,7 +1948,11 @@ export const createScheduleGroup = ok(async (req, res) => {
 
 export const listScheduleGroups = ok(async (req, res) => {
     requireAdminOrManager(req);
-    const groups = await AttendanceScheduleGroup.find().sort({ name: 1 });
+    const actorBranchId = await getActorBranchId(req);
+    const query = actorBranchId
+        ? { branch: { $eq: actorBranchId, $exists: true, $ne: null } }
+        : {};
+    const groups = await AttendanceScheduleGroup.find(query).sort({ name: 1 });
     const items = await Promise.all(groups.map((group) => scheduleGroupSummary(group)));
     res.status(200).json({ items });
 });
@@ -1883,27 +2034,31 @@ async function scheduleGroupTransferPreview(groupId: Types.ObjectId, employeeIds
 }
 
 export const previewScheduleGroupMembers = ok(async (req, res) => {
-    requireAdmin(req);
+    requireAdminOrManager(req);
     const groupId = toObjectId(req.params.id, 'id');
     const group = await AttendanceScheduleGroup.findById(groupId).lean();
     if (!group) throw new AppError('Schedule group not found', 404);
+    await assertCanManageGroup(req, group);
     const employeeIds = Array.isArray(req.body.employeeIds)
         ? req.body.employeeIds.map((id: string) => toObjectId(id, 'employeeIds'))
         : [];
+    await assertEmployeesMatchGroupBranch(employeeIds, group.branch);
     res.status(200).json({
         transfers: await scheduleGroupTransferPreview(groupId, employeeIds),
     });
 });
 
 export const setScheduleGroupMembers = ok(async (req, res) => {
-    requireAdmin(req);
+    requireAdminOrManager(req);
     const groupId = toObjectId(req.params.id, 'id');
     const group = await AttendanceScheduleGroup.findById(groupId);
     if (!group || !group.isActive) throw new AppError('Schedule group not found or inactive', 404);
+    await assertCanManageGroup(req, group);
     const createdBy = requireUserId(req);
     const employeeIds = Array.isArray(req.body.employeeIds)
         ? (Array.from(new Set(req.body.employeeIds.map(String))) as string[]).map((id) => toObjectId(id, 'employeeIds'))
         : [];
+    await assertEmployeesMatchGroupBranch(employeeIds, group.branch);
     const transfers = await scheduleGroupTransferPreview(groupId, employeeIds);
     if (transfers.length > 0 && req.body.confirmTransfer !== true) {
         res.status(409).json({
@@ -1953,11 +2108,12 @@ export const setScheduleGroupMembers = ok(async (req, res) => {
 });
 
 export const removeScheduleGroupMember = ok(async (req, res) => {
-    requireAdmin(req);
+    requireAdminOrManager(req);
     const groupId = toObjectId(req.params.id, 'id');
     const employeeId = toObjectId(req.params.employeeId, 'employeeId');
     const group = await AttendanceScheduleGroup.findById(groupId);
     if (!group) throw new AppError('Schedule group not found', 404);
+    await assertCanManageGroup(req, group);
     const effectiveTo = await membershipEffectiveDateForEmployees(groupId, [employeeId]);
     const closeImmediately = effectiveTo.getTime() <= Date.now();
     const membership = await AttendanceScheduleGroupMembership.findOneAndUpdate({
@@ -1975,35 +2131,55 @@ export const removeScheduleGroupMember = ok(async (req, res) => {
 });
 
 export const createScheduleTemplate = ok(async (req, res) => {
-    requireAdmin(req);
+    requireAdminOrManager(req);
+    let branch: Types.ObjectId | undefined;
+    if (req.privilege === 'manager') {
+        branch = await assertManagerBranch(req);
+    } else if (req.body.branchId !== undefined && req.body.branchId !== null && req.body.branchId !== '') {
+        branch = toObjectId(req.body.branchId, 'branchId');
+        const branchDoc = await Branch.findById(branch, { _id: 1 }).lean();
+        if (!branchDoc) throw new AppError('Branch not found', 404);
+    }
     const template = await AttendanceScheduleTemplate.create({
         name: req.body.name,
         type: 'weekly',
         weeklyPattern: req.body.weeklyPattern,
+        branch,
         isActive: req.body.isActive ?? true,
         createdBy: requireUserId(req),
     });
-    res.status(201).json(template);
+    res.status(201).json(serializeScheduleTemplate(template));
 });
 
 export const listScheduleTemplates = ok(async (req, res) => {
     requireAdminOrManager(req);
-    const items = await AttendanceScheduleTemplate.find().sort({ name: 1 });
-    res.status(200).json({ items });
+    const actorBranchId = await getActorBranchId(req);
+    const query = actorBranchId
+        ? { $or: [{ branch: actorBranchId }, { branch: { $exists: false } }, { branch: null }] }
+        : {};
+    const items = await AttendanceScheduleTemplate.find(query).sort({ name: 1 });
+    res.status(200).json({ items: items.map(serializeScheduleTemplate) });
 });
 
 export const updateScheduleTemplate = ok(async (req, res) => {
-    requireAdmin(req);
+    requireAdminOrManager(req);
+    const existing = await AttendanceScheduleTemplate.findById(req.params.id);
+    if (!existing) throw new AppError('Schedule template not found', 404);
+    await assertCanManageTemplate(req, existing);
+    if (req.privilege === 'manager' && req.body.branchId !== undefined) {
+        throw new AppError('Managers cannot change template branch scope', 403);
+    }
     const template = await AttendanceScheduleTemplate.findByIdAndUpdate(req.params.id, req.body, { new: true, runValidators: true });
     if (!template) throw new AppError('Schedule template not found', 404);
-    res.status(200).json(template);
+    res.status(200).json(serializeScheduleTemplate(template));
 });
 
 export const createScheduleAssignment = ok(async (req, res) => {
-    requireAdmin(req);
+    requireAdminOrManager(req);
     if (!['global', 'branch', 'group', 'employee'].includes(req.body.targetType)) {
         throw new AppError('targetType must be global, branch, group, or employee', 400);
     }
+    await assertManagerAssignmentPayload(req, req.body);
     const template = toObjectId(req.body.templateId, 'templateId');
     const branch = req.body.targetType === 'branch' ? toObjectId(req.body.branchId, 'branchId') : undefined;
     const group = req.body.targetType === 'group' ? toObjectId(req.body.groupId, 'groupId') : undefined;
@@ -2029,25 +2205,36 @@ export const createScheduleAssignment = ok(async (req, res) => {
         isActive: req.body.isActive ?? true,
         createdBy: requireUserId(req),
     });
-    res.status(201).json({
-        ...assignment.toObject(),
-        templateId: String(assignment.template),
-        branchId: assignment.branch ? String(assignment.branch) : undefined,
-        groupId: assignment.group ? String(assignment.group) : undefined,
-        employeeId: assignment.employee ? String(assignment.employee) : undefined,
-    });
+    res.status(201).json(serializeScheduleAssignment(assignment));
 });
 
 export const listScheduleAssignments = ok(async (req, res) => {
-    requireAdmin(req);
-    const items = await AttendanceScheduleAssignment.find().sort({ createdAt: -1 });
-    res.status(200).json({ items });
+    requireAdminOrManager(req);
+    const actorBranchId = await getActorBranchId(req);
+    if (!actorBranchId) {
+        const items = await AttendanceScheduleAssignment.find().sort({ createdAt: -1 });
+        res.status(200).json({ items: items.map(serializeScheduleAssignment) });
+        return;
+    }
+
+    const branchGroups = await AttendanceScheduleGroup.find({
+        branch: { $eq: actorBranchId, $exists: true, $ne: null },
+    }, { _id: 1 }).lean();
+    const groupIds = branchGroups.map((item) => item._id);
+    const items = await AttendanceScheduleAssignment.find({
+        $or: [
+            { targetType: 'branch', branch: actorBranchId },
+            { targetType: 'group', group: { $in: groupIds } },
+        ],
+    }).sort({ createdAt: -1 });
+    res.status(200).json({ items: items.map(serializeScheduleAssignment) });
 });
 
 export const updateScheduleAssignment = ok(async (req, res) => {
-    requireAdmin(req);
+    requireAdminOrManager(req);
     const assignment = await AttendanceScheduleAssignment.findById(req.params.id);
     if (!assignment) throw new AppError('Schedule assignment not found', 404);
+    await assertCanManageAssignment(req, assignment);
 
     if (req.body.templateId !== undefined) {
         assignment.template = toObjectId(req.body.templateId, 'templateId');
@@ -2059,6 +2246,12 @@ export const updateScheduleAssignment = ok(async (req, res) => {
         }
         assignment.targetType = req.body.targetType;
     }
+
+    await assertManagerAssignmentPayload(req, {
+        targetType: assignment.targetType,
+        branchId: req.body.branchId ?? (assignment.branch ? String(assignment.branch) : undefined),
+        groupId: req.body.groupId ?? (assignment.group ? String(assignment.group) : undefined),
+    });
 
     if (req.body.branchId !== undefined) {
         assignment.branch = req.body.branchId === null || req.body.branchId === ''
@@ -2106,13 +2299,7 @@ export const updateScheduleAssignment = ok(async (req, res) => {
     }
 
     const updated = await assignment.save();
-    res.status(200).json({
-        ...updated.toObject(),
-        templateId: String(updated.template),
-        branchId: updated.branch ? String(updated.branch) : undefined,
-        groupId: updated.group ? String(updated.group) : undefined,
-        employeeId: updated.employee ? String(updated.employee) : undefined,
-    });
+    res.status(200).json(serializeScheduleAssignment(updated));
 });
 
 export const getEmployeeSchedule = ok(async (req, res) => {

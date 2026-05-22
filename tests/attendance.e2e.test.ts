@@ -397,6 +397,17 @@ describe('Attendance endpoints e2e', () => {
 
     expect(managerShiftAttempt.status).toBe(403);
 
+    const managerGroupAttempt = await request(app)
+      .post('/api/attendance/schedule-groups')
+      .set('Authorization', `Bearer ${managerToken}`)
+      .send({
+        name: 'Manager Group',
+        branchId: new mongoose.Types.ObjectId().toString(),
+        isActive: true,
+      });
+
+    expect(managerGroupAttempt.status).toBe(403);
+
     const staffAssignmentAttempt = await request(app)
       .post('/api/attendance/schedule-assignments')
       .set('Authorization', `Bearer ${staffToken}`)
@@ -464,17 +475,29 @@ describe('Attendance endpoints e2e', () => {
     expect(resolved.body.requiredWorkMinutes).toBe(0);
   });
 
-  it('blocks manager and staff from updating schedule assignments', async () => {
-    await seedUsers();
+  it('blocks staff from updating schedule assignments and blocks manager from global assignments', async () => {
+    const seed = await seedUsers();
     const managerToken = await login('manager-a');
     const staffToken = await login('staff-one');
-    const assignmentId = new mongoose.Types.ObjectId().toString();
+    const adminToken = await login('admin');
+    const setup = await createAttendanceSetup(adminToken, seed);
+    const assignmentId = setup.branchAssignmentId;
+
+    const managerGlobalAttempt = await request(app)
+      .post('/api/attendance/schedule-assignments')
+      .set('Authorization', `Bearer ${managerToken}`)
+      .send({
+        templateId: setup.templateId,
+        targetType: 'global',
+        effectiveFrom: '2099-05-01',
+      });
+    expect(managerGlobalAttempt.status).toBe(403);
 
     const managerAttempt = await request(app)
       .patch(`/api/attendance/schedule-assignments/${assignmentId}`)
       .set('Authorization', `Bearer ${managerToken}`)
       .send({ isActive: false });
-    expect(managerAttempt.status).toBe(403);
+    expect(managerAttempt.status).toBe(200);
 
     const staffAttempt = await request(app)
       .patch(`/api/attendance/schedule-assignments/${assignmentId}`)
@@ -578,7 +601,7 @@ describe('Attendance endpoints e2e', () => {
     });
   });
 
-  it('supports cross-branch schedule groups and transfer previews', async () => {
+  it('rejects cross-branch schedule group members', async () => {
     const seed = await seedUsers();
     const adminToken = await login('admin');
 
@@ -603,60 +626,173 @@ describe('Attendance endpoints e2e', () => {
     const earlyGroup = await request(app)
       .post('/api/attendance/schedule-groups')
       .set('Authorization', `Bearer ${adminToken}`)
-      .send({ name: 'Morning Team', isActive: true });
+      .send({ name: 'Morning Team', branchId: seed.branchId, isActive: true });
     expect(earlyGroup.status).toBe(201);
+    expect(earlyGroup.body.branchId).toBe(seed.branchId);
 
-    const members = await request(app)
+    const blockedMembers = await request(app)
       .put(`/api/attendance/schedule-groups/${earlyGroup.body._id}/members`)
       .set('Authorization', `Bearer ${adminToken}`)
       .send({ employeeIds: [seed.managerId, seed.staffId, String(staffTwo._id)] });
-    expect(members.status).toBe(200);
-    expect(members.body.members).toHaveLength(3);
-    expect(members.body.members).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          employeeId: seed.managerId,
-          branchId: seed.branchId,
-          branchName: 'Dubai Main',
-        }),
-      ]),
-    );
+    expect(blockedMembers.status).toBe(400);
 
-    const groups = await request(app)
+    const allowedMembers = await request(app)
+      .put(`/api/attendance/schedule-groups/${earlyGroup.body._id}/members`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ employeeIds: [seed.managerId, seed.staffId] });
+    expect(allowedMembers.status).toBe(200);
+    expect(allowedMembers.body.members).toHaveLength(2);
+
+    const branchTwoGroup = await request(app)
+      .post('/api/attendance/schedule-groups')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ name: 'Second Branch Team', branchId: String(branchTwo._id), isActive: true });
+    expect(branchTwoGroup.status).toBe(201);
+
+    const branchTwoMembers = await request(app)
+      .put(`/api/attendance/schedule-groups/${branchTwoGroup.body._id}/members`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ employeeIds: [String(staffTwo._id)] });
+    expect(branchTwoMembers.status).toBe(200);
+
+    const managerToken = await login('manager-a');
+    const managerGroups = await request(app)
       .get('/api/attendance/schedule-groups')
-      .set('Authorization', `Bearer ${adminToken}`);
-    expect(groups.status).toBe(200);
-    const group = groups.body.items.find((item: any) => item._id === earlyGroup.body._id);
-    expect(group.memberCount).toBe(3);
-    expect(group.branchIds).toEqual(expect.arrayContaining([seed.branchId, String(branchTwo._id)]));
+      .set('Authorization', `Bearer ${managerToken}`);
+    expect(managerGroups.status).toBe(200);
+    expect(managerGroups.body.items).toHaveLength(1);
+    expect(managerGroups.body.items[0]._id).toBe(earlyGroup.body._id);
+  });
+
+  it('allows manager to manage branch templates, assignments, and group members', async () => {
+    const seed = await seedUsers();
+    const adminToken = await login('admin');
+    const managerToken = await login('manager-a');
+
+    const earlyShift = await request(app)
+      .post('/api/attendance/shifts')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        name: 'Early Shift',
+        startTime: '08:00',
+        endTime: '16:00',
+        requiredWorkMinutes: 420,
+      });
+    expect(earlyShift.status).toBe(201);
+
+    const lateShift = await request(app)
+      .post('/api/attendance/shifts')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        name: 'Late Shift',
+        startTime: '12:00',
+        endTime: '20:00',
+        requiredWorkMinutes: 420,
+      });
+    expect(lateShift.status).toBe(201);
+
+    const earlyGroup = await request(app)
+      .post('/api/attendance/schedule-groups')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ name: 'Early Team', branchId: seed.branchId, isActive: true });
+    expect(earlyGroup.status).toBe(201);
 
     const lateGroup = await request(app)
       .post('/api/attendance/schedule-groups')
       .set('Authorization', `Bearer ${adminToken}`)
-      .send({ name: 'Late Team', isActive: true });
+      .send({ name: 'Late Team', branchId: seed.branchId, isActive: true });
     expect(lateGroup.status).toBe(201);
 
-    const blockedMove = await request(app)
-      .put(`/api/attendance/schedule-groups/${lateGroup.body._id}/members`)
-      .set('Authorization', `Bearer ${adminToken}`)
-      .send({ employeeIds: [seed.staffId] });
-    expect(blockedMove.status).toBe(409);
-    expect(blockedMove.body.transfers).toEqual([
-      expect.objectContaining({
-        employeeId: seed.staffId,
-        groupName: 'Morning Team',
-      }),
-    ]);
+    const managerMembers = await request(app)
+      .put(`/api/attendance/schedule-groups/${earlyGroup.body._id}/members`)
+      .set('Authorization', `Bearer ${managerToken}`)
+      .send({ employeeIds: [seed.managerId, seed.staffId] });
+    expect(managerMembers.status).toBe(200);
 
-    const confirmedMove = await request(app)
-      .put(`/api/attendance/schedule-groups/${lateGroup.body._id}/members`)
-      .set('Authorization', `Bearer ${adminToken}`)
-      .send({ employeeIds: [seed.staffId], confirmTransfer: true });
-    expect(confirmedMove.status).toBe(200);
-    expect(confirmedMove.body.members).toHaveLength(1);
-    expect(confirmedMove.body.members[0]).toMatchObject({
-      employeeId: seed.staffId,
+    const earlyTemplate = await request(app)
+      .post('/api/attendance/schedule-templates')
+      .set('Authorization', `Bearer ${managerToken}`)
+      .send({
+        name: 'Early Week',
+        weeklyPattern: {
+          monday: [earlyShift.body._id],
+          tuesday: [earlyShift.body._id],
+          wednesday: [earlyShift.body._id],
+          thursday: [earlyShift.body._id],
+          friday: [earlyShift.body._id],
+          saturday: [],
+          sunday: [],
+        },
+        isActive: true,
+      });
+    expect(earlyTemplate.status).toBe(201);
+    expect(earlyTemplate.body.branchId).toBe(seed.branchId);
+
+    const lateTemplate = await request(app)
+      .post('/api/attendance/schedule-templates')
+      .set('Authorization', `Bearer ${managerToken}`)
+      .send({
+        name: 'Late Week',
+        weeklyPattern: {
+          monday: [lateShift.body._id],
+          tuesday: [lateShift.body._id],
+          wednesday: [lateShift.body._id],
+          thursday: [lateShift.body._id],
+          friday: [lateShift.body._id],
+          saturday: [],
+          sunday: [],
+        },
+        isActive: true,
+      });
+    expect(lateTemplate.status).toBe(201);
+
+    const earlyAssignment = await request(app)
+      .post('/api/attendance/schedule-assignments')
+      .set('Authorization', `Bearer ${managerToken}`)
+      .send({
+        templateId: earlyTemplate.body._id,
+        targetType: 'group',
+        groupId: earlyGroup.body._id,
+        effectiveFrom: '2099-05-01',
+      });
+    expect(earlyAssignment.status).toBe(201);
+
+    const lateAssignment = await request(app)
+      .post('/api/attendance/schedule-assignments')
+      .set('Authorization', `Bearer ${managerToken}`)
+      .send({
+        templateId: lateTemplate.body._id,
+        targetType: 'group',
+        groupId: lateGroup.body._id,
+        effectiveFrom: '2099-05-01',
+      });
+    expect(lateAssignment.status).toBe(201);
+
+    const managerAssignments = await request(app)
+      .get('/api/attendance/schedule-assignments')
+      .set('Authorization', `Bearer ${managerToken}`);
+    expect(managerAssignments.status).toBe(200);
+    expect(managerAssignments.body.items).toHaveLength(2);
+
+    const resolved = await request(app)
+      .get(`/api/attendance/employees/${seed.staffId}/schedule`)
+      .query({ date: '2099-05-04' })
+      .set('Authorization', `Bearer ${managerToken}`);
+    expect(resolved.status).toBe(200);
+    expect(resolved.body).toMatchObject({
+      source: 'group',
+      scheduledStart: '08:00',
+      scheduledEnd: '16:00',
     });
+
+    const swapped = await request(app)
+      .patch(`/api/attendance/schedule-assignments/${earlyAssignment.body._id}`)
+      .set('Authorization', `Bearer ${managerToken}`)
+      .send({
+        templateId: lateTemplate.body._id,
+        effectiveFrom: '2099-05-08',
+      });
+    expect(swapped.status).toBe(200);
   });
 
   it('returns pending group members in management responses when a group has an active assignment', async () => {
@@ -667,7 +803,7 @@ describe('Attendance endpoints e2e', () => {
     const group = await request(app)
       .post('/api/attendance/schedule-groups')
       .set('Authorization', `Bearer ${adminToken}`)
-      .send({ name: 'Assigned Group', isActive: true });
+      .send({ name: 'Assigned Group', branchId: seed.branchId, isActive: true });
     expect(group.status).toBe(201);
 
     const assignment = await request(app)
@@ -770,7 +906,7 @@ describe('Attendance endpoints e2e', () => {
     const group = await request(app)
       .post('/api/attendance/schedule-groups')
       .set('Authorization', `Bearer ${adminToken}`)
-      .send({ name: 'Late Group', isActive: true });
+      .send({ name: 'Late Group', branchId: seed.branchId, isActive: true });
     expect(group.status).toBe(201);
 
     const groupMembers = await request(app)
@@ -867,7 +1003,7 @@ describe('Attendance endpoints e2e', () => {
     const group = await request(app)
       .post('/api/attendance/schedule-groups')
       .set('Authorization', `Bearer ${adminToken}`)
-      .send({ name: 'Morning Crew', isActive: true });
+      .send({ name: 'Morning Crew', branchId: seed.branchId, isActive: true });
     expect(group.status).toBe(201);
 
     const members = await request(app)

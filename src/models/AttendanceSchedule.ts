@@ -17,6 +17,7 @@ export interface IAttendanceScheduleTemplate extends Document {
     name: string;
     type: 'weekly';
     weeklyPattern: IAttendanceWeeklyPattern;
+    branch?: Types.ObjectId;
     isActive: boolean;
     createdBy: Types.ObjectId;
     createdAt: Date;
@@ -43,6 +44,7 @@ export interface IAttendanceScheduleGroup extends Document {
     _id: Types.ObjectId;
     name: string;
     description?: string;
+    branch?: Types.ObjectId;
     isActive: boolean;
     createdBy: Types.ObjectId;
     createdAt: Date;
@@ -72,13 +74,16 @@ const AttendanceScheduleTemplateSchema = new mongoose.Schema(
             type: String,
             required: true,
             trim: true,
-            unique: true,
         },
         type: {
             type: String,
             enum: ['weekly'],
             default: 'weekly',
             required: true,
+        },
+        branch: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'Branch',
         },
         weeklyPattern: {
             monday: dayShiftRefs,
@@ -192,11 +197,14 @@ const AttendanceScheduleGroupSchema = new mongoose.Schema(
             type: String,
             required: true,
             trim: true,
-            unique: true,
         },
         description: {
             type: String,
             trim: true,
+        },
+        branch: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'Branch',
         },
         isActive: {
             type: Boolean,
@@ -247,7 +255,8 @@ const AttendanceScheduleGroupMembershipSchema = new mongoose.Schema(
     }
 );
 
-AttendanceScheduleTemplateSchema.index({ isActive: 1, name: 1 });
+AttendanceScheduleTemplateSchema.index({ branch: 1, name: 1 }, { unique: true });
+AttendanceScheduleTemplateSchema.index({ isActive: 1, branch: 1, name: 1 });
 AttendanceScheduleAssignmentSchema.index({ targetType: 1, branch: 1, effectiveFrom: -1 });
 AttendanceScheduleAssignmentSchema.index({ targetType: 1, group: 1, effectiveFrom: -1 });
 AttendanceScheduleAssignmentSchema.index({ targetType: 1, employee: 1, effectiveFrom: -1 });
@@ -296,7 +305,8 @@ AttendanceScheduleAssignmentSchema.index(
         },
     }
 );
-AttendanceScheduleGroupSchema.index({ isActive: 1, name: 1 });
+AttendanceScheduleGroupSchema.index({ branch: 1, name: 1 }, { unique: true });
+AttendanceScheduleGroupSchema.index({ isActive: 1, branch: 1, name: 1 });
 AttendanceScheduleGroupMembershipSchema.index({ group: 1, employee: 1, effectiveFrom: -1 });
 AttendanceScheduleGroupMembershipSchema.index({ employee: 1, isActive: 1, effectiveFrom: -1, effectiveTo: 1 });
 
