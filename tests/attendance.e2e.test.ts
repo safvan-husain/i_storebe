@@ -607,16 +607,25 @@ describe('Attendance endpoints e2e', () => {
     const members = await request(app)
       .put(`/api/attendance/schedule-groups/${earlyGroup.body._id}/members`)
       .set('Authorization', `Bearer ${adminToken}`)
-      .send({ employeeIds: [seed.staffId, String(staffTwo._id)] });
+      .send({ employeeIds: [seed.managerId, seed.staffId, String(staffTwo._id)] });
     expect(members.status).toBe(200);
-    expect(members.body.members).toHaveLength(2);
+    expect(members.body.members).toHaveLength(3);
+    expect(members.body.members).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          employeeId: seed.managerId,
+          branchId: seed.branchId,
+          branchName: 'Dubai Main',
+        }),
+      ]),
+    );
 
     const groups = await request(app)
       .get('/api/attendance/schedule-groups')
       .set('Authorization', `Bearer ${adminToken}`);
     expect(groups.status).toBe(200);
     const group = groups.body.items.find((item: any) => item._id === earlyGroup.body._id);
-    expect(group.memberCount).toBe(2);
+    expect(group.memberCount).toBe(3);
     expect(group.branchIds).toEqual(expect.arrayContaining([seed.branchId, String(branchTwo._id)]));
 
     const lateGroup = await request(app)
@@ -646,6 +655,52 @@ describe('Attendance endpoints e2e', () => {
     expect(confirmedMove.body.members[0]).toMatchObject({
       employeeId: seed.staffId,
     });
+  });
+
+  it('returns pending group members in management responses when a group has an active assignment', async () => {
+    const seed = await seedUsers();
+    const adminToken = await login('admin');
+    const setup = await createAttendanceSetup(adminToken, seed);
+
+    const group = await request(app)
+      .post('/api/attendance/schedule-groups')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ name: 'Assigned Group', isActive: true });
+    expect(group.status).toBe(201);
+
+    const assignment = await request(app)
+      .post('/api/attendance/schedule-assignments')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        templateId: setup.templateId,
+        targetType: 'group',
+        groupId: group.body._id,
+        effectiveFrom: '2020-01-01',
+      });
+    expect(assignment.status).toBe(201);
+
+    const updatedMembers = await request(app)
+      .put(`/api/attendance/schedule-groups/${group.body._id}/members`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ employeeIds: [seed.managerId] });
+    expect(updatedMembers.status).toBe(200);
+    expect(updatedMembers.body.members).toEqual([
+      expect.objectContaining({
+        employeeId: seed.managerId,
+      }),
+    ]);
+    expect(new Date(updatedMembers.body.members[0].effectiveFrom).getTime()).toBeGreaterThan(Date.now());
+    expect(updatedMembers.body.group.memberCount).toBe(1);
+
+    const listedMembers = await request(app)
+      .get(`/api/attendance/schedule-groups/${group.body._id}/members`)
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(listedMembers.status).toBe(200);
+    expect(listedMembers.body.items).toEqual([
+      expect.objectContaining({
+        employeeId: seed.managerId,
+      }),
+    ]);
   });
 
   it('resolves employee, group, branch, and global schedule assignment priority', async () => {

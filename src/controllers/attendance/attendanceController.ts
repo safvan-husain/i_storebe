@@ -404,6 +404,17 @@ function effectiveMembershipQuery(date: Date) {
     };
 }
 
+function managedGroupMembershipQuery(asOf = new Date()) {
+    return {
+        isActive: true,
+        $or: [
+            { effectiveTo: { $exists: false } },
+            { effectiveTo: null },
+            { effectiveTo: { $gt: asOf } },
+        ],
+    };
+}
+
 function activeAssignmentQueryForRange(dayStart: Date, dayEnd: Date) {
     return {
         isActive: true,
@@ -430,26 +441,46 @@ async function membershipEffectiveDateForEmployees(groupId: Types.ObjectId, empl
 
     const branches = await Branch.find({
         isActive: true,
-        staffs: { $in: employeeIds },
+        $or: [
+            { manager: { $in: employeeIds } },
+            { staffs: { $in: employeeIds } },
+        ],
     }).lean();
     const boundaries = employeeIds.map((employeeId) => {
-        const branch = branches.find((item) =>
-            (item.staffs ?? []).some((staffId) => String(staffId) === String(employeeId))
-        );
+        const branch = branches.find((item) => branchContainsEmployeeOrManager(item, employeeId));
         return nextBranchLocalDayBoundaryUtc(branch?.timezone ?? 'Asia/Dubai');
     });
     return new Date(Math.min(...boundaries.map((item) => item.getTime())));
 }
 
-async function scheduleGroupSummary(group: any, asOf = new Date()) {
+function branchContainsEmployeeOrManager(
+    branch: { manager?: Types.ObjectId | null; staffs?: Types.ObjectId[] },
+    employeeId: Types.ObjectId | string
+) {
+    const id = String(employeeId);
+    return String(branch.manager ?? '') === id ||
+        (branch.staffs ?? []).some((staffId) => String(staffId) === id);
+}
+
+async function branchesForEmployees(employeeIds: Array<Types.ObjectId | string>) {
+    if (employeeIds.length === 0) return [];
+    return Branch.find({
+        $or: [
+            { manager: { $in: employeeIds } },
+            { staffs: { $in: employeeIds } },
+        ],
+    }, { name: 1, manager: 1, staffs: 1 }).lean();
+}
+
+async function scheduleGroupSummary(group: any, asOf = new Date(), managementView = true) {
     const memberships = await AttendanceScheduleGroupMembership.find({
         group: group._id,
-        ...effectiveMembershipQuery(asOf),
+        ...(managementView
+            ? managedGroupMembershipQuery(asOf)
+            : effectiveMembershipQuery(asOf)),
     }).populate('employee', 'username isActive').lean();
     const employeeIds = memberships.map((membership) => membership.employee?._id ?? membership.employee);
-    const branches = employeeIds.length === 0
-        ? []
-        : await Branch.find({ staffs: { $in: employeeIds } }, { name: 1 }).lean();
+    const branches = await branchesForEmployees(employeeIds);
     const activeAssignment = await AttendanceScheduleAssignment.findOne({
         targetType: 'group',
         group: group._id,
@@ -1794,20 +1825,18 @@ export const updateScheduleGroup = ok(async (req, res) => {
     res.status(200).json(await scheduleGroupSummary(group));
 });
 
-async function scheduleGroupMembers(groupId: Types.ObjectId, asOf = new Date()) {
+async function scheduleGroupMembers(groupId: Types.ObjectId, asOf = new Date(), managementView = true) {
     const memberships = await AttendanceScheduleGroupMembership.find({
         group: groupId,
-        ...effectiveMembershipQuery(asOf),
+        ...(managementView
+            ? managedGroupMembershipQuery(asOf)
+            : effectiveMembershipQuery(asOf)),
     }).populate('employee', 'username isActive privilege').sort({ effectiveFrom: -1 }).lean();
     const employeeIds = memberships.map((membership: any) => membership.employee?._id ?? membership.employee);
-    const branches = employeeIds.length === 0
-        ? []
-        : await Branch.find({ staffs: { $in: employeeIds } }, { name: 1, staffs: 1 }).lean();
-    return memberships.map((membership: any) => {
+    const branches = await branchesForEmployees(employeeIds);
+    const items = memberships.map((membership: any) => {
         const employeeId = String(membership.employee?._id ?? membership.employee);
-        const branch = branches.find((item) =>
-            (item.staffs ?? []).some((staffId) => String(staffId) === employeeId)
-        );
+        const branch = branches.find((item) => branchContainsEmployeeOrManager(item, employeeId));
         return {
             membershipId: String(membership._id),
             employeeId,
@@ -1819,6 +1848,23 @@ async function scheduleGroupMembers(groupId: Types.ObjectId, asOf = new Date()) 
             isActive: membership.isActive,
         };
     });
+    if (!managementView) return items;
+
+    const latestByEmployee = new Map<string, (typeof items)[number]>();
+    for (const item of items) {
+        const existing = latestByEmployee.get(item.employeeId);
+        if (!existing) {
+            latestByEmployee.set(item.employeeId, item);
+            continue;
+        }
+        const existingFrom = new Date(existing.effectiveFrom).getTime();
+        const nextFrom = new Date(item.effectiveFrom).getTime();
+        if (nextFrom >= existingFrom) {
+            latestByEmployee.set(item.employeeId, item);
+        }
+    }
+    return Array.from(latestByEmployee.values()).sort((a, b) =>
+        a.employeeName.localeCompare(b.employeeName));
 }
 
 export const listScheduleGroupMembers = ok(async (req, res) => {
@@ -1826,7 +1872,8 @@ export const listScheduleGroupMembers = ok(async (req, res) => {
     const groupId = toObjectId(req.params.id, 'id');
     const group = await AttendanceScheduleGroup.findById(groupId).lean();
     if (!group) throw new AppError('Schedule group not found', 404);
-    res.status(200).json({ items: await scheduleGroupMembers(groupId) });
+    const managementView = req.query.managementView !== 'false';
+    res.status(200).json({ items: await scheduleGroupMembers(groupId, new Date(), managementView) });
 });
 
 async function scheduleGroupTransferPreview(groupId: Types.ObjectId, employeeIds: Types.ObjectId[]) {
