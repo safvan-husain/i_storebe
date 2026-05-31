@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import asyncHandler from 'express-async-handler';
-import { onCatchError } from "../../middleware/error";
+import { AppError, onCatchError } from "../../middleware/error";
 import { activityFilterSchema, createNoteSchema, statsSchema } from "./validation";
 import Activity, { IActivity } from '../../models/Activity';
 import { FilterQuery, PipelineStage, Types } from "mongoose";
@@ -14,6 +14,7 @@ import Lead, { ILead } from "../../models/Lead";
 import Target, { ITarget } from "../../models/Target";
 import { runtimeValidation } from "../../utils/validation";
 import BranchMembership from "../../models/BranchMembership";
+import Branch from "../../models/Branch";
 
 export const getActivity = asyncHandler(
     async (req: Request, res: Response) => {
@@ -131,17 +132,65 @@ export const createNote = asyncHandler(
     }
 )
 
-const requestSchema = z.object({
+const rawRequestSchema = z.object({
     manager: ObjectIdSchema.optional(),
     branch: ObjectIdSchema.optional(),
     staff: ObjectIdSchema.optional()
-}).merge(dateFiltersSchema.partial()).refine(e => {
+}).merge(dateFiltersSchema.partial());
+
+const adminRequestSchema = rawRequestSchema.refine(e => {
     return [e.manager, e.branch, e.staff].filter(Boolean).length <= 1;
 }, { message: "Pass only one of manager, branch, or staff" })
 
+const getCurrentManagerBranch = async (managerId: string) => {
+    const managerObjectId = Types.ObjectId.createFromHexString(managerId);
+    const directBranch = await Branch.findOne({
+        manager: managerObjectId,
+        isActive: true,
+    }, { _id: true }).lean();
+    if (directBranch?._id) return directBranch._id;
+
+    const membership = await BranchMembership.findOne({
+        user: managerObjectId,
+        role: 'manager',
+        endedAt: { $exists: false },
+    }, { branch: true }).lean();
+    if (!membership?.branch) return null;
+
+    const activeBranch = await Branch.findOne({
+        _id: membership.branch,
+        isActive: true,
+    }, { _id: true }).lean();
+    return activeBranch?._id ?? null;
+};
+
 export const getStaffReport = async (req: Request, res: TypedResponse<any>) => {
     try {
-        const query = requestSchema.parse(req.query);
+        const parsedQuery = rawRequestSchema.parse(req.query);
+        let managerBranchId: Types.ObjectId | null = null;
+        if (req.privilege === 'staff') {
+            throw new AppError('Staff cannot export activity reports', 403);
+        }
+        if (req.privilege === 'manager') {
+            if (!req.userId) {
+                throw new AppError('User id not found', 401);
+            }
+            managerBranchId = await getCurrentManagerBranch(req.userId);
+            if (!managerBranchId) {
+                throw new AppError('No active branch found for this manager', 404);
+            }
+            if (parsedQuery.branch && String(parsedQuery.branch) !== String(managerBranchId)) {
+                throw new AppError('Managers can only export their own branch activity report', 403);
+            }
+        }
+
+        const query = req.privilege === 'manager'
+            ? {
+                startDate: parsedQuery.startDate,
+                endDate: parsedQuery.endDate,
+                branch: String(managerBranchId),
+            }
+            : adminRequestSchema.parse(parsedQuery);
 
         const adminIds = await User
             .find({ privilege: 'admin' }, { _id: true })

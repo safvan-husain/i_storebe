@@ -5,6 +5,6 @@ const router = express.Router();
 
 router.route('/').post(protect, getActivity);
 router.route('/note').post(protect, createNote);
-router.route('/statics').get(getStaffReport)
+router.route('/statics').get(protect, getStaffReport)
 
 export { router as activityRoutes }
