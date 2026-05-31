@@ -2010,6 +2010,72 @@ async function scheduleGroupMembers(groupId: Types.ObjectId, asOf = new Date(), 
         a.employeeName.localeCompare(b.employeeName));
 }
 
+export const listScheduleGroupMemberOptions = ok(async (req, res) => {
+    requireAdminOrManager(req);
+    const groupId = toObjectId(req.params.id, 'id');
+    const group = await AttendanceScheduleGroup.findById(groupId).lean();
+    if (!group) throw new AppError('Schedule group not found', 404);
+    await assertCanManageGroup(req, group);
+
+    const members = await scheduleGroupMembers(groupId);
+    const branchQuery = group.branch
+        ? { _id: group.branch }
+        : { isActive: true };
+    const branches = await Branch.find(branchQuery, { name: 1, manager: 1, staffs: 1 })
+        .populate('manager', 'username privilege isActive')
+        .populate('staffs', 'username privilege isActive')
+        .sort({ name: 1 })
+        .lean();
+    const optionsByEmployeeId = new Map<string, {
+        employeeId: string;
+        employeeName: string;
+        privilege: string;
+        branchId?: string;
+        branchName?: string;
+        isActive: boolean;
+    }>();
+
+    for (const branch of branches as any[]) {
+        const addEmployee = (employee: any) => {
+            if (!employee || !['manager', 'staff'].includes(employee.privilege)) return;
+            const employeeId = String(employee._id ?? employee);
+            const isSelected = members.some((member) => member.employeeId === employeeId);
+            if (employee.isActive !== true && !isSelected) return;
+            if (optionsByEmployeeId.has(employeeId)) return;
+            optionsByEmployeeId.set(employeeId, {
+                employeeId,
+                employeeName: employee.username ?? employeeId,
+                privilege: employee.privilege,
+                branchId: String(branch._id),
+                branchName: branch.name,
+                isActive: employee.isActive === true,
+            });
+        };
+        addEmployee(branch.manager);
+        for (const staff of branch.staffs ?? []) addEmployee(staff);
+    }
+
+    for (const member of members) {
+        if (optionsByEmployeeId.has(member.employeeId)) continue;
+        optionsByEmployeeId.set(member.employeeId, {
+            employeeId: member.employeeId,
+            employeeName: member.employeeName,
+            privilege: 'staff',
+            branchId: member.branchId,
+            branchName: member.branchName,
+            isActive: false,
+        });
+    }
+
+    const items = Array.from(optionsByEmployeeId.values()).sort((a, b) => {
+        const branchCompare = (a.branchName ?? '').localeCompare(b.branchName ?? '');
+        if (branchCompare !== 0) return branchCompare;
+        if (a.privilege !== b.privilege) return a.privilege === 'manager' ? -1 : 1;
+        return a.employeeName.localeCompare(b.employeeName);
+    });
+    res.status(200).json({ items });
+});
+
 export const listScheduleGroupMembers = ok(async (req, res) => {
     requireAdminOrManager(req);
     const groupId = toObjectId(req.params.id, 'id');
@@ -2223,6 +2289,7 @@ export const listScheduleAssignments = ok(async (req, res) => {
     const groupIds = branchGroups.map((item) => item._id);
     const items = await AttendanceScheduleAssignment.find({
         $or: [
+            { targetType: 'global' },
             { targetType: 'branch', branch: actorBranchId },
             { targetType: 'group', group: { $in: groupIds } },
         ],

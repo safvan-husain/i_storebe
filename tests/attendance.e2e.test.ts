@@ -709,6 +709,23 @@ describe('Attendance endpoints e2e', () => {
       .send({ employeeIds: [seed.managerId, seed.staffId] });
     expect(managerMembers.status).toBe(200);
 
+    const memberOptions = await request(app)
+      .get(`/api/attendance/schedule-groups/${earlyGroup.body._id}/member-options`)
+      .set('Authorization', `Bearer ${managerToken}`);
+    expect(memberOptions.status).toBe(200);
+    expect(memberOptions.body.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          employeeId: seed.managerId,
+          privilege: 'manager',
+        }),
+        expect.objectContaining({
+          employeeId: seed.staffId,
+          privilege: 'staff',
+        }),
+      ]),
+    );
+
     const earlyTemplate = await request(app)
       .post('/api/attendance/schedule-templates')
       .set('Authorization', `Bearer ${managerToken}`)
@@ -746,6 +763,34 @@ describe('Attendance endpoints e2e', () => {
       });
     expect(lateTemplate.status).toBe(201);
 
+    const globalTemplate = await request(app)
+      .post('/api/attendance/schedule-templates')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        name: 'Global Week',
+        weeklyPattern: {
+          monday: [earlyShift.body._id],
+          tuesday: [earlyShift.body._id],
+          wednesday: [earlyShift.body._id],
+          thursday: [earlyShift.body._id],
+          friday: [earlyShift.body._id],
+          saturday: [],
+          sunday: [],
+        },
+        isActive: true,
+      });
+    expect(globalTemplate.status).toBe(201);
+
+    const globalAssignment = await request(app)
+      .post('/api/attendance/schedule-assignments')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        templateId: globalTemplate.body._id,
+        targetType: 'global',
+        effectiveFrom: '2099-05-01',
+      });
+    expect(globalAssignment.status).toBe(201);
+
     const earlyAssignment = await request(app)
       .post('/api/attendance/schedule-assignments')
       .set('Authorization', `Bearer ${managerToken}`)
@@ -772,7 +817,15 @@ describe('Attendance endpoints e2e', () => {
       .get('/api/attendance/schedule-assignments')
       .set('Authorization', `Bearer ${managerToken}`);
     expect(managerAssignments.status).toBe(200);
-    expect(managerAssignments.body.items).toHaveLength(2);
+    expect(managerAssignments.body.items).toHaveLength(3);
+    expect(managerAssignments.body.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          _id: globalAssignment.body._id,
+          targetType: 'global',
+        }),
+      ]),
+    );
 
     const resolved = await request(app)
       .get(`/api/attendance/employees/${seed.staffId}/schedule`)

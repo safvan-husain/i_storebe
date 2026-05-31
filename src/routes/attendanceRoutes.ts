@@ -30,6 +30,7 @@ import {
     listDayOverrides,
     listPrivileges,
     listScheduleAssignments,
+    listScheduleGroupMemberOptions,
     listScheduleGroupMembers,
     listScheduleGroups,
     listScheduleTemplates,
@@ -121,6 +122,9 @@ router.route('/schedule-groups/:id')
 router.route('/schedule-groups/:id/members')
     .get(listScheduleGroupMembers)
     .put(setScheduleGroupMembers);
+
+router.route('/schedule-groups/:id/member-options')
+    .get(listScheduleGroupMemberOptions);
 
 router.route('/schedule-groups/:id/members/preview')
     .post(previewScheduleGroupMembers);
