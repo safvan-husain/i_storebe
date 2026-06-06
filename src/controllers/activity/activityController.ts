@@ -138,9 +138,13 @@ const rawRequestSchema = z.object({
     staff: ObjectIdSchema.optional()
 }).merge(dateFiltersSchema.partial());
 
-const adminRequestSchema = rawRequestSchema.refine(e => {
+const hasOneReportScopeFilter = (e: {
+    manager?: string;
+    branch?: string;
+    staff?: string;
+}) => {
     return [e.manager, e.branch, e.staff].filter(Boolean).length <= 1;
-}, { message: "Pass only one of manager, branch, or staff" })
+};
 
 const getCurrentManagerBranch = async (managerId: string) => {
     const managerObjectId = Types.ObjectId.createFromHexString(managerId);
@@ -182,6 +186,8 @@ export const getStaffReport = async (req: Request, res: TypedResponse<any>) => {
             if (parsedQuery.branch && String(parsedQuery.branch) !== String(managerBranchId)) {
                 throw new AppError('Managers can only export their own branch activity report', 403);
             }
+        } else if (!hasOneReportScopeFilter(parsedQuery)) {
+            throw new AppError('Pass only one of manager, branch, or staff', 400);
         }
 
         const query = req.privilege === 'manager'
@@ -190,7 +196,7 @@ export const getStaffReport = async (req: Request, res: TypedResponse<any>) => {
                 endDate: parsedQuery.endDate,
                 branch: String(managerBranchId),
             }
-            : adminRequestSchema.parse(parsedQuery);
+            : parsedQuery;
 
         const adminIds = await User
             .find({ privilege: 'admin' }, { _id: true })

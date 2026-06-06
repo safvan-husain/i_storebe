@@ -250,6 +250,24 @@ describe('Activity report export access', () => {
     expect(mockPdfHtml).not.toContain('staff-b');
   });
 
+  it('allows admins to export a manager report with date filters', async () => {
+    const token = await login('admin');
+
+    const response = await request(app)
+      .get('/api/activity/statics')
+      .query({
+        manager: String(seeded.managerA._id),
+        startDate: String(new Date('2026-05-01T00:00:00.000Z').getTime()),
+        endDate: String(new Date('2026-05-01T00:00:00.000Z').getTime()),
+      })
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(response.status).toBe(200);
+    expect(response.headers['content-type']).toBe('application/pdf');
+    expect(mockPdfHtml).toContain('staff-a');
+    expect(mockPdfHtml).not.toContain('staff-b');
+  });
+
   it('forces managers to their own branch even when manager or staff filters are supplied', async () => {
     const token = await login('manager-a');
 
