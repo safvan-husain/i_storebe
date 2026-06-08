@@ -25,6 +25,8 @@ import {
     getMyDailySnapshots,
     getTeamAttendanceAttention,
     getTeamDailySnapshots,
+    getRemoteWorkers,
+    listRemoteWorkerMemberOptions,
     listBreakSubtypes,
     listBreakTypes,
     listDayOverrides,
@@ -41,6 +43,7 @@ import {
     removeScheduleGroupMember,
     removeShiftMembership,
     setEmployeePrivileges,
+    setRemoteWorkerMembers,
     setScheduleGroupMembers,
     updateBreakSubtype,
     updateBreakType,
@@ -131,6 +134,15 @@ router.route('/schedule-groups/:id/members/preview')
 
 router.route('/schedule-groups/:id/members/:employeeId')
     .delete(removeScheduleGroupMember);
+
+router.route('/remote-workers')
+    .get(getRemoteWorkers);
+
+router.route('/remote-workers/member-options')
+    .get(listRemoteWorkerMemberOptions);
+
+router.route('/remote-workers/members')
+    .put(setRemoteWorkerMembers);
 
 router.route('/schedule-assignments')
     .post(createScheduleAssignment)

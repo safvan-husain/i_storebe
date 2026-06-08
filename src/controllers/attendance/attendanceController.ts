@@ -19,6 +19,7 @@ import AttendanceScheduleTemplate, {
     AttendanceScheduleGroupMembership,
 } from '../../models/AttendanceSchedule';
 import AttendanceEvent, { IAttendanceEvent } from '../../models/AttendanceEvent';
+import AttendanceRemoteWorker from '../../models/AttendanceRemoteWorker';
 import AttendanceDailySnapshot, {
     IAttendanceBreakSession,
     IAttendanceCalculationBasis,
@@ -81,6 +82,11 @@ type AttendanceLocationProof = {
 
 function shouldBypassAttendanceGate(branch: { attendanceEnabled?: boolean }) {
     return branch.attendanceEnabled !== true;
+}
+
+async function isAttendanceRemoteWorker(employeeId: Types.ObjectId | string) {
+    const remoteWorker = await AttendanceRemoteWorker.exists({ employee: employeeId });
+    return remoteWorker !== null;
 }
 
 function serializeDailySnapshot(snapshot: any) {
@@ -2196,6 +2202,121 @@ export const removeScheduleGroupMember = ok(async (req, res) => {
     });
 });
 
+async function remoteWorkerMembers() {
+    const memberships = await AttendanceRemoteWorker.find()
+        .populate('employee', 'username privilege isActive')
+        .sort({ createdAt: -1 })
+        .lean();
+    const employeeIds = memberships.map((membership: any) => membership.employee?._id ?? membership.employee);
+    const branches = await branchesForEmployees(employeeIds);
+    return memberships.map((membership: any) => {
+        const employeeId = String(membership.employee?._id ?? membership.employee);
+        const branch = branches.find((item) => branchContainsEmployeeOrManager(item, employeeId));
+        return {
+            membershipId: String(membership._id),
+            employeeId,
+            employeeName: membership.employee?.username ?? employeeId,
+            privilege: membership.employee?.privilege ?? 'staff',
+            branchId: branch ? String(branch._id) : undefined,
+            branchName: branch?.name,
+            isActive: membership.employee?.isActive === true,
+            createdAt: membership.createdAt,
+        };
+    }).sort((a, b) => a.employeeName.localeCompare(b.employeeName));
+}
+
+async function remoteWorkerMemberOptions() {
+    const existingMemberships = await AttendanceRemoteWorker.find({}, { employee: 1 }).lean();
+    const existingIds = new Set(existingMemberships.map((item) => String(item.employee)));
+    const branches = await Branch.find({ isActive: true }, { name: 1, manager: 1, staffs: 1 })
+        .populate('manager', 'username privilege isActive')
+        .populate('staffs', 'username privilege isActive')
+        .sort({ name: 1 })
+        .lean();
+    const optionsByEmployeeId = new Map<string, {
+        employeeId: string;
+        employeeName: string;
+        privilege: string;
+        branchId?: string;
+        branchName?: string;
+        isActive: boolean;
+    }>();
+
+    for (const branch of branches as any[]) {
+        const addEmployee = (employee: any) => {
+            if (!employee || !['manager', 'staff'].includes(employee.privilege)) return;
+            if (employee.isActive !== true) return;
+            const employeeId = String(employee._id ?? employee);
+            if (existingIds.has(employeeId)) return;
+            if (optionsByEmployeeId.has(employeeId)) return;
+            optionsByEmployeeId.set(employeeId, {
+                employeeId,
+                employeeName: employee.username ?? employeeId,
+                privilege: employee.privilege,
+                branchId: String(branch._id),
+                branchName: branch.name,
+                isActive: true,
+            });
+        };
+        addEmployee(branch.manager);
+        for (const staff of branch.staffs ?? []) addEmployee(staff);
+    }
+
+    return Array.from(optionsByEmployeeId.values()).sort((a, b) => {
+        const branchCompare = (a.branchName ?? '').localeCompare(b.branchName ?? '');
+        if (branchCompare !== 0) return branchCompare;
+        if (a.privilege !== b.privilege) return a.privilege === 'manager' ? -1 : 1;
+        return a.employeeName.localeCompare(b.employeeName);
+    });
+}
+
+export const getRemoteWorkers = ok(async (req, res) => {
+    requireAdmin(req);
+    res.status(200).json({
+        members: await remoteWorkerMembers(),
+    });
+});
+
+export const listRemoteWorkerMemberOptions = ok(async (req, res) => {
+    requireAdmin(req);
+    res.status(200).json({
+        items: await remoteWorkerMemberOptions(),
+    });
+});
+
+export const setRemoteWorkerMembers = ok(async (req, res) => {
+    requireAdmin(req);
+    const employeeIds = Array.isArray(req.body.employeeIds)
+        ? (Array.from(new Set(req.body.employeeIds.map(String))) as string[]).map((id) => toObjectId(id, 'employeeIds'))
+        : [];
+
+    if (employeeIds.length > 0) {
+        const count = await User.countDocuments({
+            _id: { $in: employeeIds },
+            privilege: { $in: ['manager', 'staff'] },
+            isAccountDeleted: { $ne: true },
+        });
+        if (count !== employeeIds.length) {
+            throw new AppError('Remote workers must be active staff or managers', 400);
+        }
+    }
+
+    const createdBy = requireUserId(req);
+    await AttendanceRemoteWorker.deleteMany({ employee: { $nin: employeeIds } });
+    const existing = await AttendanceRemoteWorker.find({ employee: { $in: employeeIds } }, { employee: 1 }).lean();
+    const existingIds = new Set(existing.map((item) => String(item.employee)));
+    const toCreate = employeeIds
+        .filter((employeeId) => !existingIds.has(String(employeeId)))
+        .map((employee) => ({ employee, createdBy }));
+    if (toCreate.length > 0) {
+        await AttendanceRemoteWorker.insertMany(toCreate);
+    }
+
+    res.status(200).json({
+        members: await remoteWorkerMembers(),
+    });
+});
+
 export const createScheduleTemplate = ok(async (req, res) => {
     requireAdminOrManager(req);
     let branch: Types.ObjectId | undefined;
@@ -2420,11 +2541,13 @@ export const getMyAttendanceStatus = ok(async (req, res) => {
             breakOptions: [],
             activeBreak: null,
             attendanceGateBypassed: true,
+            isRemoteWorker: false,
         });
         return;
     }
 
     const schedule = await resolveSchedule(employeeId, branch._id, date);
+    const remoteWorker = await isAttendanceRemoteWorker(employeeId);
     const events = await getDayEvents(employeeId, date);
     const snapshot = await AttendanceDailySnapshot.findOne({ employee: employeeId, date })
         .populate('employee', 'username')
@@ -2503,6 +2626,7 @@ export const getMyAttendanceStatus = ok(async (req, res) => {
                 branchLocalTime: openBreak.branchLocalTime,
             }
             : null,
+        isRemoteWorker: remoteWorker,
     });
 });
 
@@ -2510,6 +2634,9 @@ async function createAttendanceEvent(req: Request, type: 'check_in' | 'check_out
     const employeeId = requireUserId(req);
     const branch = await getEmployeeBranch(employeeId);
     const isAdminAttendance = req.privilege === 'admin';
+    const remoteWorker = !isAdminAttendance
+        ? await isAttendanceRemoteWorker(employeeId)
+        : false;
     let locationProof: AttendanceLocationProof | undefined;
     if (!isAdminAttendance) {
         const user = await User.findById(employeeId)
@@ -2518,7 +2645,9 @@ async function createAttendanceEvent(req: Request, type: 'check_in' | 'check_out
         if (!user?.profileImageFile || !hasFaceEnrollment(user)) {
             throw new AppError('Profile photo and face enrollment are required for attendance', 400);
         }
-        locationProof = buildAttendanceLocationProof(req, branch);
+        if (!remoteWorker) {
+            locationProof = buildAttendanceLocationProof(req, branch);
+        }
     }
     const timestamp = req.body.timestamp ? new Date(req.body.timestamp) : new Date();
     if (Number.isNaN(timestamp.getTime())) throw new AppError('timestamp must be valid', 400);

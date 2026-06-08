@@ -1606,6 +1606,130 @@ describe('Attendance endpoints e2e', () => {
     expect(tooFar.body.message).toBe('You are too far from the branch location to record attendance');
   });
 
+  it('manages remote workers for admins only and exposes addable member options', async () => {
+    const seed = await seedUsers();
+    const adminToken = await login('admin');
+    const managerToken = await login('manager-a');
+    const staffToken = await login('staff-one');
+
+    const managerDenied = await request(app)
+      .get('/api/attendance/remote-workers')
+      .set('Authorization', `Bearer ${managerToken}`);
+    expect(managerDenied.status).toBe(403);
+
+    const emptyList = await request(app)
+      .get('/api/attendance/remote-workers')
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(emptyList.status).toBe(200);
+    expect(emptyList.body.members).toEqual([]);
+
+    const memberOptions = await request(app)
+      .get('/api/attendance/remote-workers/member-options')
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(memberOptions.status).toBe(200);
+    expect(memberOptions.body.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          employeeId: seed.managerId,
+          privilege: 'manager',
+          isActive: true,
+        }),
+        expect.objectContaining({
+          employeeId: seed.staffId,
+          privilege: 'staff',
+          isActive: true,
+        }),
+      ]),
+    );
+    expect(
+      memberOptions.body.items.some(
+        (item: { employeeId: string }) => item.employeeId === seed.adminId,
+      ),
+    ).toBe(false);
+
+    const updated = await request(app)
+      .put('/api/attendance/remote-workers/members')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ employeeIds: [seed.staffId] });
+    expect(updated.status).toBe(200);
+    expect(updated.body.members).toEqual([
+      expect.objectContaining({
+        employeeId: seed.staffId,
+        employeeName: 'staff-one',
+        isActive: true,
+      }),
+    ]);
+
+    const optionsAfterAdd = await request(app)
+      .get('/api/attendance/remote-workers/member-options')
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(optionsAfterAdd.status).toBe(200);
+    expect(
+      optionsAfterAdd.body.items.some(
+        (item: { employeeId: string }) => item.employeeId === seed.staffId,
+      ),
+    ).toBe(false);
+    expect(
+      optionsAfterAdd.body.items.some(
+        (item: { employeeId: string }) => item.employeeId === seed.managerId,
+      ),
+    ).toBe(true);
+
+    const managerUpdateDenied = await request(app)
+      .put('/api/attendance/remote-workers/members')
+      .set('Authorization', `Bearer ${managerToken}`)
+      .send({ employeeIds: [seed.managerId] });
+    expect(managerUpdateDenied.status).toBe(403);
+  });
+
+  it('allows remote workers to check in without location but still requires face enrollment', async () => {
+    const seed = await seedUsers();
+    const adminToken = await login('admin');
+    await createAttendanceSetup(adminToken, seed);
+    const staffToken = await login('staff-one');
+
+    const addRemoteWorker = await request(app)
+      .put('/api/attendance/remote-workers/members')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ employeeIds: [seed.staffId] });
+    expect(addRemoteWorker.status).toBe(200);
+
+    const status = await request(app)
+      .get('/api/attendance/me/status')
+      .query({ date: '2099-05-04' })
+      .set('Authorization', `Bearer ${staffToken}`);
+    expect(status.status).toBe(200);
+    expect(status.body.isRemoteWorker).toBe(true);
+
+    await User.findByIdAndUpdate(seed.staffId, {
+      $unset: {
+        faceEmbedding: '',
+        faceEmbeddingModel: '',
+        faceEmbeddingUpdatedAt: '',
+        faceEmbeddingSourceImage: '',
+      },
+    });
+
+    const missingFace = await request(app)
+      .post('/api/attendance/events/check-in')
+      .set('Authorization', `Bearer ${staffToken}`)
+      .send({ timestamp: '2099-05-04T04:45:00.000Z' });
+    expect(missingFace.status).toBe(400);
+    expect(missingFace.body.message).toBe('Profile photo and face enrollment are required for attendance');
+
+    await User.findByIdAndUpdate(seed.staffId, {
+      faceEmbedding: faceVector,
+      faceEmbeddingModel: 'face_embedder.tflite',
+      faceEmbeddingUpdatedAt: new Date(),
+    });
+
+    const checkInWithoutLocation = await request(app)
+      .post('/api/attendance/events/check-in')
+      .set('Authorization', `Bearer ${staffToken}`)
+      .send({ timestamp: '2099-05-04T04:45:00.000Z' });
+    expect(checkInWithoutLocation.status).toBe(201);
+  });
+
   it('allows admin attendance events without face enrollment', async () => {
     const seed = await seedUsers();
     const adminToken = await login('admin');
