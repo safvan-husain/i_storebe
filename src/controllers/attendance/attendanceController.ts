@@ -2354,7 +2354,14 @@ export const updateScheduleTemplate = ok(async (req, res) => {
     if (!existing) throw new AppError('Schedule template not found', 404);
     await assertCanManageTemplate(req, existing);
     if (req.privilege === 'manager' && req.body.branchId !== undefined) {
-        throw new AppError('Managers cannot change template branch scope', 403);
+        const existingBranchId = existing.branch ? String(existing.branch) : undefined;
+        const requestedBranchId = req.body.branchId === null || req.body.branchId === ''
+            ? undefined
+            : String(req.body.branchId);
+        if (requestedBranchId !== existingBranchId) {
+            throw new AppError('Managers cannot change template branch scope', 403);
+        }
+        delete req.body.branchId;
     }
     const template = await AttendanceScheduleTemplate.findByIdAndUpdate(req.params.id, req.body, { new: true, runValidators: true });
     if (!template) throw new AppError('Schedule template not found', 404);

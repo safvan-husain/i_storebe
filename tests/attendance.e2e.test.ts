@@ -875,6 +875,30 @@ describe('Attendance endpoints e2e', () => {
         effectiveFrom: '2099-05-08',
       });
     expect(swapped.status).toBe(200);
+
+    const deactivated = await request(app)
+      .patch(`/api/attendance/schedule-templates/${lateTemplate.body._id}`)
+      .set('Authorization', `Bearer ${managerToken}`)
+      .send({
+        name: lateTemplate.body.name,
+        weeklyPattern: lateTemplate.body.weeklyPattern,
+        branchId: seed.branchId,
+        isActive: false,
+      });
+    expect(deactivated.status).toBe(200);
+    expect(deactivated.body.isActive).toBe(false);
+    expect(deactivated.body.branchId).toBe(seed.branchId);
+
+    const scopeChange = await request(app)
+      .patch(`/api/attendance/schedule-templates/${earlyTemplate.body._id}`)
+      .set('Authorization', `Bearer ${managerToken}`)
+      .send({
+        name: earlyTemplate.body.name,
+        weeklyPattern: earlyTemplate.body.weeklyPattern,
+        branchId: new mongoose.Types.ObjectId().toString(),
+        isActive: true,
+      });
+    expect(scopeChange.status).toBe(403);
   });
 
   it('returns pending group members in management responses when a group has an active assignment', async () => {
