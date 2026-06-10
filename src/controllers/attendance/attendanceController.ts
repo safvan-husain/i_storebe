@@ -2342,7 +2342,7 @@ export const listScheduleTemplates = ok(async (req, res) => {
     requireAdminOrManager(req);
     const actorBranchId = await getActorBranchId(req);
     const query = actorBranchId
-        ? { $or: [{ branch: actorBranchId }, { branch: { $exists: false } }, { branch: null }] }
+        ? { branch: actorBranchId }
         : {};
     const items = await AttendanceScheduleTemplate.find(query).sort({ name: 1 });
     res.status(200).json({ items: items.map(serializeScheduleTemplate) });
@@ -2410,7 +2410,6 @@ export const listScheduleAssignments = ok(async (req, res) => {
     const groupIds = branchGroups.map((item) => item._id);
     const items = await AttendanceScheduleAssignment.find({
         $or: [
-            { targetType: 'global' },
             { targetType: 'branch', branch: actorBranchId },
             { targetType: 'group', group: { $in: groupIds } },
         ],

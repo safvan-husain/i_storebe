@@ -813,12 +813,41 @@ describe('Attendance endpoints e2e', () => {
       });
     expect(lateAssignment.status).toBe(201);
 
+    const managerTemplates = await request(app)
+      .get('/api/attendance/schedule-templates')
+      .set('Authorization', `Bearer ${managerToken}`);
+    expect(managerTemplates.status).toBe(200);
+    expect(managerTemplates.body.items).toHaveLength(2);
+    expect(managerTemplates.body.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ _id: earlyTemplate.body._id }),
+        expect.objectContaining({ _id: lateTemplate.body._id }),
+      ]),
+    );
+    expect(managerTemplates.body.items).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ _id: globalTemplate.body._id }),
+      ]),
+    );
+
     const managerAssignments = await request(app)
       .get('/api/attendance/schedule-assignments')
       .set('Authorization', `Bearer ${managerToken}`);
     expect(managerAssignments.status).toBe(200);
-    expect(managerAssignments.body.items).toHaveLength(3);
+    expect(managerAssignments.body.items).toHaveLength(2);
     expect(managerAssignments.body.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          _id: earlyAssignment.body._id,
+          targetType: 'group',
+        }),
+        expect.objectContaining({
+          _id: lateAssignment.body._id,
+          targetType: 'group',
+        }),
+      ]),
+    );
+    expect(managerAssignments.body.items).not.toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           _id: globalAssignment.body._id,
