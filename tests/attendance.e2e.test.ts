@@ -901,6 +901,146 @@ describe('Attendance endpoints e2e', () => {
     expect(scopeChange.status).toBe(403);
   });
 
+  it('moves staff between schedule groups in the same branch when confirmTransfer is true', async () => {
+    const seed = await seedUsers();
+    const adminToken = await login('admin');
+    const managerToken = await login('manager-a');
+
+    const earlyGroup = await request(app)
+      .post('/api/attendance/schedule-groups')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ name: 'Early Team', branchId: seed.branchId, isActive: true });
+    expect(earlyGroup.status).toBe(201);
+
+    const lateGroup = await request(app)
+      .post('/api/attendance/schedule-groups')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ name: 'Late Team', branchId: seed.branchId, isActive: true });
+    expect(lateGroup.status).toBe(201);
+
+    const initialMembers = await request(app)
+      .put(`/api/attendance/schedule-groups/${earlyGroup.body._id}/members`)
+      .set('Authorization', `Bearer ${managerToken}`)
+      .send({ employeeIds: [seed.staffId] });
+    expect(initialMembers.status).toBe(200);
+
+    const preview = await request(app)
+      .post(`/api/attendance/schedule-groups/${lateGroup.body._id}/members/preview`)
+      .set('Authorization', `Bearer ${managerToken}`)
+      .send({ employeeIds: [seed.staffId] });
+    expect(preview.status).toBe(200);
+    expect(preview.body.transfers).toEqual([
+      expect.objectContaining({
+        employeeId: seed.staffId,
+        groupId: earlyGroup.body._id,
+      }),
+    ]);
+
+    const blockedMove = await request(app)
+      .put(`/api/attendance/schedule-groups/${lateGroup.body._id}/members`)
+      .set('Authorization', `Bearer ${managerToken}`)
+      .send({ employeeIds: [seed.staffId] });
+    expect(blockedMove.status).toBe(409);
+
+    const moved = await request(app)
+      .put(`/api/attendance/schedule-groups/${lateGroup.body._id}/members`)
+      .set('Authorization', `Bearer ${managerToken}`)
+      .send({ employeeIds: [seed.staffId], confirmTransfer: true });
+    expect(moved.status).toBe(200);
+    expect(moved.body.members).toEqual([
+      expect.objectContaining({ employeeId: seed.staffId }),
+    ]);
+
+    const earlyMembers = await request(app)
+      .get(`/api/attendance/schedule-groups/${earlyGroup.body._id}/members`)
+      .set('Authorization', `Bearer ${managerToken}`)
+      .query({ managementView: true });
+    expect(earlyMembers.status).toBe(200);
+    expect(earlyMembers.body.items).toEqual([]);
+
+    const lateMembers = await request(app)
+      .get(`/api/attendance/schedule-groups/${lateGroup.body._id}/members`)
+      .set('Authorization', `Bearer ${managerToken}`)
+      .query({ managementView: true });
+    expect(lateMembers.status).toBe(200);
+    expect(lateMembers.body.items).toEqual([
+      expect.objectContaining({ employeeId: seed.staffId }),
+    ]);
+  });
+
+  it('moves staff between assigned schedule groups without leaving pending memberships behind', async () => {
+    const seed = await seedUsers();
+    const adminToken = await login('admin');
+    const managerToken = await login('manager-a');
+    const setup = await createAttendanceSetup(adminToken, seed);
+
+    const earlyGroup = await request(app)
+      .post('/api/attendance/schedule-groups')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ name: 'Early Team', branchId: seed.branchId, isActive: true });
+    expect(earlyGroup.status).toBe(201);
+
+    const lateGroup = await request(app)
+      .post('/api/attendance/schedule-groups')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ name: 'Late Team', branchId: seed.branchId, isActive: true });
+    expect(lateGroup.status).toBe(201);
+
+    for (const groupId of [earlyGroup.body._id, lateGroup.body._id]) {
+      const assignment = await request(app)
+        .post('/api/attendance/schedule-assignments')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          templateId: setup.templateId,
+          targetType: 'group',
+          groupId,
+          effectiveFrom: '2020-01-01',
+        });
+      expect(assignment.status).toBe(201);
+    }
+
+    const initialMembers = await request(app)
+      .put(`/api/attendance/schedule-groups/${earlyGroup.body._id}/members`)
+      .set('Authorization', `Bearer ${managerToken}`)
+      .send({ employeeIds: [seed.staffId] });
+    expect(initialMembers.status).toBe(200);
+    expect(new Date(initialMembers.body.members[0].effectiveFrom).getTime()).toBeGreaterThan(Date.now());
+
+    const preview = await request(app)
+      .post(`/api/attendance/schedule-groups/${lateGroup.body._id}/members/preview`)
+      .set('Authorization', `Bearer ${managerToken}`)
+      .send({ employeeIds: [seed.staffId] });
+    expect(preview.status).toBe(200);
+    expect(preview.body.transfers).toEqual([
+      expect.objectContaining({
+        employeeId: seed.staffId,
+        groupId: earlyGroup.body._id,
+      }),
+    ]);
+
+    const moved = await request(app)
+      .put(`/api/attendance/schedule-groups/${lateGroup.body._id}/members`)
+      .set('Authorization', `Bearer ${managerToken}`)
+      .send({ employeeIds: [seed.staffId], confirmTransfer: true });
+    expect(moved.status).toBe(200);
+
+    const earlyMembers = await request(app)
+      .get(`/api/attendance/schedule-groups/${earlyGroup.body._id}/members`)
+      .set('Authorization', `Bearer ${managerToken}`)
+      .query({ managementView: true });
+    expect(earlyMembers.status).toBe(200);
+    expect(earlyMembers.body.items).toEqual([]);
+
+    const lateMembers = await request(app)
+      .get(`/api/attendance/schedule-groups/${lateGroup.body._id}/members`)
+      .set('Authorization', `Bearer ${managerToken}`)
+      .query({ managementView: true });
+    expect(lateMembers.status).toBe(200);
+    expect(lateMembers.body.items).toEqual([
+      expect.objectContaining({ employeeId: seed.staffId }),
+    ]);
+  });
+
   it('returns pending group members in management responses when a group has an active assignment', async () => {
     const seed = await seedUsers();
     const adminToken = await login('admin');

@@ -529,13 +529,12 @@ function effectiveMembershipQuery(date: Date) {
     };
 }
 
-function managedGroupMembershipQuery(asOf = new Date()) {
+function managedGroupMembershipQuery(_asOf = new Date()) {
     return {
         isActive: true,
         $or: [
             { effectiveTo: { $exists: false } },
             { effectiveTo: null },
-            { effectiveTo: { $gt: asOf } },
         ],
     };
 }
@@ -2095,7 +2094,7 @@ async function scheduleGroupTransferPreview(groupId: Types.ObjectId, employeeIds
     const existing = await AttendanceScheduleGroupMembership.find({
         group: { $ne: groupId },
         employee: { $in: employeeIds },
-        ...effectiveMembershipQuery(new Date()),
+        ...managedGroupMembershipQuery(new Date()),
     }).populate('group', 'name').populate('employee', 'username').lean();
     return existing.map((membership: any) => ({
         employeeId: String(membership.employee?._id ?? membership.employee),
@@ -2145,12 +2144,12 @@ export const setScheduleGroupMembers = ok(async (req, res) => {
     await AttendanceScheduleGroupMembership.updateMany({
         group: groupId,
         employee: { $nin: employeeIds },
-        ...effectiveMembershipQuery(new Date()),
+        ...managedGroupMembershipQuery(new Date()),
     }, { $set: { effectiveTo: effectiveFrom, isActive: !closeImmediately } });
     await AttendanceScheduleGroupMembership.updateMany({
         group: { $ne: groupId },
         employee: { $in: employeeIds },
-        ...effectiveMembershipQuery(new Date()),
+        ...managedGroupMembershipQuery(new Date()),
     }, { $set: { effectiveTo: effectiveFrom, isActive: !closeImmediately } });
 
     const existingTargetMemberships = await AttendanceScheduleGroupMembership.find({
