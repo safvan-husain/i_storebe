@@ -17,6 +17,7 @@
     "backfill:branch-snapshots": "ts-node src/scripts/backfillBranchSnapshots.ts",
     "backfill:branch-attendance-enabled": "ts-node src/scripts/backfillBranchAttendanceEnabled.ts",
     "backfill:schedule-group-branches": "ts-node src/scripts/backfillScheduleGroupBranches.ts",
+    "snapshot:activity-report": "ts-node src/scripts/snapshotActivityReportRows.ts",
     "provision:branches": "ts-node src/scripts/provisionBranchesFromManagers.ts",
     "finalize:mapped-branches": "ts-node src/scripts/finalizeMappedManagerBranches.ts"
   },
