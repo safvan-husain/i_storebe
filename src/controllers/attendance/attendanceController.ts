@@ -2793,14 +2793,45 @@ export const getEmployeeDailySnapshots = ok(async (req, res) => {
     res.status(200).json({ items: serializeDailySnapshots(items) });
 });
 
-export const getTeamDailySnapshots = ok(async (req, res) => {
-    if (req.privilege === 'staff') throw new AppError('Not authorized', 403);
+async function buildTeamAttendanceScopeQuery(
+    req: Request,
+    branchIdParam?: string,
+): Promise<Record<string, unknown>> {
     const query: Record<string, unknown> = {};
-    if (req.query.date) query.date = String(req.query.date);
-    if (req.privilege === 'manager') {
+    const branchId = branchIdParam?.trim();
+
+    if (branchId) {
+        const branchObjectId = toObjectId(branchId, 'branchId');
+        query.branch = branchObjectId;
+
+        if (req.privilege === 'manager') {
+            const branch = await Branch.findById(branchObjectId).select('staffs').lean();
+            if (!branch) throw new AppError('Branch not found', 404);
+            const reportIds = new Set(
+                (await User.find({ manager: req.userId }, { _id: 1 }).lean()).map((staff) =>
+                    String(staff._id),
+                ),
+            );
+            const scopedStaffIds = (branch.staffs ?? []).filter((staffId) =>
+                reportIds.has(String(staffId)),
+            );
+            query.employee = { $in: scopedStaffIds };
+        }
+    } else if (req.privilege === 'manager') {
         const staffIds = await User.find({ manager: req.userId }, { _id: 1 }).lean();
         query.employee = { $in: staffIds.map((staff) => staff._id) };
     }
+
+    return query;
+}
+
+export const getTeamDailySnapshots = ok(async (req, res) => {
+    if (req.privilege === 'staff') throw new AppError('Not authorized', 403);
+    const query = await buildTeamAttendanceScopeQuery(
+        req,
+        req.query.branchId ? String(req.query.branchId) : undefined,
+    );
+    if (req.query.date) query.date = String(req.query.date);
     const items = await AttendanceDailySnapshot.find(query)
         .populate('employee', 'username')
         .populate('branch', 'name')
@@ -2820,6 +2851,10 @@ export const getTeamAttendanceAttention = ok(async (req, res) => {
     startDate.setUTCDate(startDate.getUTCDate() - days);
     const fromDate = startDate.toISOString().slice(0, 10);
     const query: Record<string, unknown> = {
+        ...(await buildTeamAttendanceScopeQuery(
+            req,
+            req.query.branchId ? String(req.query.branchId) : undefined,
+        )),
         date: beforeDate ? { $gte: fromDate, $lt: beforeDate } : { $gte: fromDate },
         $or: [
             { status: { $in: ['open_break', 'missing_checkout'] } },
@@ -2830,10 +2865,6 @@ export const getTeamAttendanceAttention = ok(async (req, res) => {
             },
         ],
     };
-    if (req.privilege === 'manager') {
-        const staffIds = await User.find({ manager: req.userId }, { _id: 1 }).lean();
-        query.employee = { $in: staffIds.map((staff) => staff._id) };
-    }
     const snapshots = await AttendanceDailySnapshot.find(query)
         .populate('employee', 'username')
         .populate('branch', 'name')

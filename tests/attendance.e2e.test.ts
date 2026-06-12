@@ -2855,6 +2855,77 @@ describe('Attendance endpoints e2e', () => {
     expect(correctionAttempt.status).toBe(403);
   });
 
+  it('filters team daily snapshots and attention queue by branchId', async () => {
+    const seed = await seedUsers();
+    const adminToken = await login('admin');
+    await createAttendanceSetup(adminToken, seed);
+    const staffToken = await login('staff-one');
+
+    const checkIn = await request(app)
+      .post('/api/attendance/events/check-in')
+      .set('Authorization', `Bearer ${staffToken}`)
+      .send({ ...validAttendanceLocation, timestamp: '2099-05-04T05:00:00.000Z' });
+    expect(checkIn.status).toBe(201);
+
+    const allSnapshots = await request(app)
+      .get('/api/attendance/team/daily-snapshots')
+      .query({ date: '2099-05-04' })
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(allSnapshots.status).toBe(200);
+    expect(allSnapshots.body.items).toHaveLength(1);
+    expect(allSnapshots.body.items[0]).toMatchObject({
+      employee: seed.staffId,
+      branch: seed.branchId,
+      status: 'incomplete',
+    });
+
+    const branchSnapshots = await request(app)
+      .get('/api/attendance/team/daily-snapshots')
+      .query({ date: '2099-05-04', branchId: seed.branchId })
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(branchSnapshots.status).toBe(200);
+    expect(branchSnapshots.body.items).toHaveLength(1);
+    expect(branchSnapshots.body.items[0].branch).toBe(seed.branchId);
+
+    const otherBranchId = new mongoose.Types.ObjectId().toString();
+    const emptyBranchSnapshots = await request(app)
+      .get('/api/attendance/team/daily-snapshots')
+      .query({ date: '2099-05-04', branchId: otherBranchId })
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(emptyBranchSnapshots.status).toBe(200);
+    expect(emptyBranchSnapshots.body.items).toEqual([]);
+
+    const attention = await request(app)
+      .get('/api/attendance/team/daily-snapshots/attention')
+      .query({ beforeDate: '2099-05-05', branchId: seed.branchId })
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(attention.status).toBe(200);
+    expect(attention.body.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          employee: seed.staffId,
+          date: '2099-05-04',
+          branch: seed.branchId,
+        }),
+      ]),
+    );
+
+    const managerToken = await login('manager-a');
+    const managerBranchSnapshots = await request(app)
+      .get('/api/attendance/team/daily-snapshots')
+      .query({ date: '2099-05-04', branchId: seed.branchId })
+      .set('Authorization', `Bearer ${managerToken}`);
+    expect(managerBranchSnapshots.status).toBe(200);
+    expect(managerBranchSnapshots.body.items).toHaveLength(1);
+    expect(managerBranchSnapshots.body.items[0].employee).toBe(seed.staffId);
+
+    const managerOtherBranchSnapshots = await request(app)
+      .get('/api/attendance/team/daily-snapshots')
+      .query({ date: '2099-05-04', branchId: otherBranchId })
+      .set('Authorization', `Bearer ${managerToken}`);
+    expect(managerOtherBranchSnapshots.status).toBe(404);
+  });
+
   it('allows staff to view only their own daily summary', async () => {
     const seed = await seedUsers();
     const staffToken = await login('staff-one');
