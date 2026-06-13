@@ -5,7 +5,7 @@ import Branch from '../models/Branch';
 import AttendanceEvent from '../models/AttendanceEvent';
 import AttendanceDailySnapshot from '../models/AttendanceDailySnapshot';
 import AttendanceMonthlySummary from '../models/AttendanceMonthlySummary';
-import { regenerateAttendanceDailySnapshot } from '../controllers/attendance/attendanceController';
+import { regenerateAttendanceDailySnapshot } from '../services/attendance-snapshot-maintenance';
 import { branchLocalParts, isValidTimezone } from '../utils/branch_timezone';
 
 type Args = {

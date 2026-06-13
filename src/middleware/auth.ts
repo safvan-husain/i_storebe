@@ -4,19 +4,6 @@ import {SecondUserPrivilege, UserPrivilege} from '../common/types';
 import User from "../models/User";
 import {Types} from "mongoose";
 
-// // Extend Express Request type to include user
-declare global {
-    namespace Express {
-        interface Request {
-            userId?: string;
-            privilege: UserPrivilege;
-            secondPrivilege: SecondUserPrivilege;
-            manager?: Types.ObjectId;
-            username?: string;
-        }
-    }
-}
-
 export const protect = async (req: Request, res: Response, next: NextFunction) => {
     try {
         let token;
