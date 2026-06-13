@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 import mongoose, { FilterQuery, Types } from 'mongoose';
 import connectDb from '../config/db';
@@ -55,13 +56,17 @@ Usage:
 
 Notes:
   - Dates are interpreted as Asia/Kolkata calendar days.
-  - This script is read-only. It always writes JSON to logs/activity-report-snapshots/ unless --out is passed.
+  - This script is read-only on MongoDB. It writes JSON to ~/activity-report-snapshots/ unless --out is passed.
   - PM2 stdout only gets a short summary; use the written file for the full snapshot.
 `);
 };
 
-const defaultSnapshotDir = () =>
-  path.join(process.env.LOG_DIR ?? path.join(process.cwd(), 'logs'), 'activity-report-snapshots');
+const defaultSnapshotDir = () => {
+  if (process.env.ACTIVITY_REPORT_SNAPSHOT_DIR) {
+    return path.resolve(process.env.ACTIVITY_REPORT_SNAPSHOT_DIR);
+  }
+  return path.join(process.env.HOME ?? os.homedir(), 'activity-report-snapshots');
+};
 
 const formatDateSlug = (date: Date) => {
   const parts = new Intl.DateTimeFormat('en-CA', {
