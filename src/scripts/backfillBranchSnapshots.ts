@@ -5,11 +5,98 @@ import Branch from '../models/Branch';
 import Lead from '../models/Lead';
 import Activity from '../models/Activity';
 import BranchMembership from '../models/BranchMembership';
+import User from '../models/User';
 
 type Args = {
   dryRun: boolean;
   apply: boolean;
   force: boolean;
+};
+
+export type MembershipStartedAtUpdate = {
+  membershipId: string;
+  username?: string;
+  branchName?: string;
+  previousStartedAt: Date;
+  nextStartedAt: Date;
+};
+
+export const computeMembershipStartedAt = async (options: {
+  userId: Types.ObjectId;
+  branchId: Types.ObjectId;
+  currentStartedAt: Date;
+  userCreatedAt?: Date | null;
+}): Promise<Date> => {
+  const { userId, branchId, currentStartedAt, userCreatedAt } = options;
+  const candidateTimes = [currentStartedAt.getTime()];
+  if (userCreatedAt) candidateTimes.push(userCreatedAt.getTime());
+
+  const earliestActivity = await Activity.findOne({
+    activator: userId,
+    actorBranch: branchId,
+  }, { createdAt: true }).sort({ createdAt: 1 }).lean();
+  if (earliestActivity?.createdAt) candidateTimes.push(earliestActivity.createdAt.getTime());
+
+  const earliestLead = await Lead.findOne({
+    createdBy: userId,
+    $or: [
+      { createdBranch: branchId },
+      { handlingBranch: branchId },
+    ],
+  }, { createdAt: true }).sort({ createdAt: 1 }).lean();
+  if (earliestLead?.createdAt) candidateTimes.push(earliestLead.createdAt.getTime());
+
+  return new Date(Math.min(...candidateTimes));
+};
+
+export const backfillMembershipStartedAt = async (args: Pick<Args, 'apply'>) => {
+  const openMemberships = await BranchMembership.find({
+    endedAt: { $exists: false },
+  }).lean();
+
+  const userIds = [...new Set(openMemberships.map(item => String(item.user)))];
+  const branchIds = [...new Set(openMemberships.map(item => String(item.branch)))];
+  const users = await User.find({ _id: { $in: userIds } }, { username: true, createdAt: true }).lean();
+  const branches = await Branch.find({ _id: { $in: branchIds } }, { name: true }).lean();
+  const userById = new Map(users.map(user => [String(user._id), user]));
+  const branchById = new Map(branches.map(branch => [String(branch._id), branch]));
+
+  const updates: MembershipStartedAtUpdate[] = [];
+
+  for (const membership of openMemberships) {
+    const user = userById.get(String(membership.user));
+    const branch = branchById.get(String(membership.branch));
+    const nextStartedAt = await computeMembershipStartedAt({
+      userId: membership.user as Types.ObjectId,
+      branchId: membership.branch as Types.ObjectId,
+      currentStartedAt: membership.startedAt,
+      userCreatedAt: user?.createdAt,
+    });
+
+    if (nextStartedAt.getTime() >= membership.startedAt.getTime()) continue;
+
+    const update: MembershipStartedAtUpdate = {
+      membershipId: String(membership._id),
+      username: user?.username,
+      branchName: branch?.name,
+      previousStartedAt: membership.startedAt,
+      nextStartedAt,
+    };
+    updates.push(update);
+
+    if (args.apply) {
+      await BranchMembership.updateOne(
+        { _id: membership._id },
+        { $set: { startedAt: nextStartedAt } },
+      );
+    }
+  }
+
+  return {
+    membershipsReviewed: openMemberships.length,
+    membershipsStartedAtUpdated: updates.length,
+    membershipStartedAtSamples: updates.slice(0, 20),
+  };
 };
 
 const parseArgs = (): Args => {
@@ -130,13 +217,16 @@ const run = async () => {
     activitiesToUpdate: activitiesMatched,
     activitiesUnresolved,
     unresolvedActivityIds,
+    ...(await backfillMembershipStartedAt({ apply: args.apply })),
   }, null, 2));
 
   await mongoose.connection.close();
 };
 
-run().catch(async (error) => {
-  console.error(error);
-  try { await mongoose.connection.close(); } catch {}
-  process.exit(1);
-});
+if (require.main === module) {
+  run().catch(async (error) => {
+    console.error(error);
+    try { await mongoose.connection.close(); } catch {}
+    process.exit(1);
+  });
+}
