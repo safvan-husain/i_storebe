@@ -43,6 +43,19 @@ export const callReportsRequestSchema = z
     }).merge(optionalDateQueryFiltersSchema)
 
 
+export const branchReportRequestSchema = z.object({
+    branch: ObjectIdSchema.optional(),
+    groupBy: z.enum(['staff', 'branch']).optional(),
+    includeInactiveUsers: z.preprocess(
+        (val) => val === 'true' || val === true,
+        z.boolean().optional().default(false),
+    ),
+}).merge(optionalDateQueryFiltersSchema);
+
+export const personReportRequestSchema = z.object({
+    userId: ObjectIdSchema,
+}).merge(optionalDateQueryFiltersSchema);
+
 export const statsSchema = z.object({
     _id: z.string(),
     task_added: z.number().default(0),

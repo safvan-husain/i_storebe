@@ -30,6 +30,8 @@ services:
       NODE_ENV: development
       PORT: 4000
       MONGODB_URI: mongodb://mongo:27017/i-store-db
+      PUPPETEER_SKIP_CHROMIUM_DOWNLOAD: "true"
+      PUPPETEER_EXECUTABLE_PATH: /usr/bin/chromium
     ports:
       - "4000:4000"
     volumes:

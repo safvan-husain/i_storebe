@@ -8,11 +8,11 @@ import User, { IUser } from "../../models/User";
 import { z } from "zod";
 import { dateFiltersSchema, ObjectIdSchema } from "../../common/types";
 import { TypedResponse } from "../../common/interface";
-import puppeteer from 'puppeteer';
 import Task, { ITask } from "../../models/Task";
 import Lead, { ILead } from "../../models/Lead";
 import Target, { ITarget } from "../../models/Target";
 import { runtimeValidation } from "../../utils/validation";
+import { createPdf } from "../../utils/pdf";
 import BranchMembership from "../../models/BranchMembership";
 import Branch from "../../models/Branch";
 
@@ -489,24 +489,6 @@ export const getStaffReport = async (req: Request, res: TypedResponse<any>) => {
     } catch (e) {
         console.log("error on pdf report: ", e);
         onCatchError(e, res);
-    }
-}
-
-const createPdf = async (html: string) => {
-    const isRootUser = typeof process.getuid === 'function' && process.getuid() === 0;
-    const browser = await puppeteer.launch({
-        args: isRootUser ? ['--no-sandbox', '--disable-setuid-sandbox'] : [],
-    });
-
-    try {
-        const page = await browser.newPage();
-        await page.setContent('<html><body>' + html + '</body></html>', { waitUntil: 'load' });
-        const pdfBuffer = await page.pdf({
-            format: 'A4',
-        });
-        return pdfBuffer;
-    } finally {
-        await browser.close();
     }
 }
 
