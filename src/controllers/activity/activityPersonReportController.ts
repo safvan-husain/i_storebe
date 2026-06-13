@@ -1,5 +1,4 @@
 import { Request } from 'express';
-import { appendFileSync } from 'fs';
 import { Types } from 'mongoose';
 import Activity from '../../models/Activity';
 import Branch from '../../models/Branch';
@@ -12,14 +11,13 @@ import { runtimeValidation } from '../../utils/validation';
 import { createPdf } from '../../utils/pdf';
 import { personReportRequestSchema, statsSchema } from './validation';
 import {
-    ActivityReportRow,
+    PersonActivityReportRow,
     buildPerUserMetrics,
-    buildUserScopeTotals,
     emptyMetrics,
     formatRoleLabel,
     formatStintDate,
-    generateActivityReportHtml,
-    isZeroMetrics,
+    generatePersonActivityReportHtml,
+    sumActivityReportMetrics,
     uniqueObjectIds,
 } from './activityReportShared';
 
@@ -42,13 +40,6 @@ const clipStintRange = (
     const stintEnd = membershipEnd && membershipEnd < rangeEnd ? membershipEnd : rangeEnd;
     return { stintStart, stintEnd };
 };
-
-const buildStintLabel = (
-    branchName: string,
-    role: IBranchMembership['role'],
-    stintStart: Date,
-    stintEnd: Date,
-) => `${branchName} — ${formatRoleLabel(role)} (${formatStintDate(stintStart)} – ${formatStintDate(stintEnd)})`;
 
 const resolvePersonStints = async (
     userId: Types.ObjectId,
@@ -135,9 +126,10 @@ const buildPersonReportRows = async (
     rangeEnd: Date,
     createdAt: { $gte: Date; $lte: Date } | undefined,
     adminIds: Types.ObjectId[],
-): Promise<ActivityReportRow[]> => {
+): Promise<PersonActivityReportRow[]> => {
     const stints = await resolvePersonStints(userId, rangeStart, rangeEnd, createdAt);
-    const rows: ActivityReportRow[] = [];
+    const rows: PersonActivityReportRow[] = [];
+    const lastRowByBranch = new Map<string, PersonActivityReportRow>();
 
     for (let index = 0; index < stints.length; index += 1) {
         const stint = stints[index];
@@ -152,13 +144,13 @@ const buildPersonReportRows = async (
             rangeStart: stint.stintStart,
             rangeEnd: stint.stintEnd,
             createdAt: stintCreatedAt,
+            taskCreatedAt: null,
             adminIds,
             ignoreActiveUserFilter: true,
-            includeTaskMetrics: false,
+            includeUnscopedBranchActivity: true,
         });
 
         const metrics = metricsByUser.get(String(userId)) ?? emptyMetrics();
-        if (isZeroMetrics(metrics)) continue;
 
         const previousStint = index > 0 ? stints[index - 1] : null;
         if (
@@ -167,46 +159,79 @@ const buildPersonReportRows = async (
             && previousStint.membership.endedAt >= rangeStart
         ) {
             rows.push({
-                displayName: `Transferred to ${stint.branchName} on ${formatStintDate(previousStint.membership.endedAt)}`,
+                branchName: '',
+                periodStart: previousStint.membership.endedAt,
+                periodEnd: previousStint.membership.endedAt,
+                roleLabel: '',
                 isNoteRow: true,
+                noteText: `Transferred from ${previousStint.branchName} to ${stint.branchName} on ${formatStintDate(previousStint.membership.endedAt)}`,
                 ...emptyMetrics(),
             });
         }
 
-        rows.push({
-            displayName: buildStintLabel(
-                stint.branchName,
-                stint.role,
-                stint.stintStart,
-                stint.stintEnd,
-            ),
+        const row: PersonActivityReportRow = {
+            branchName: stint.branchName,
+            periodStart: stint.stintStart,
+            periodEnd: stint.stintEnd,
+            roleLabel: formatRoleLabel(stint.role),
             ...metrics,
-        });
+        };
+        rows.push(row);
+
+        const branchKey = String(stint.branchId);
+        const previousRow = lastRowByBranch.get(branchKey);
+        if (previousRow) {
+            previousRow.pending_tasks = 0;
+            previousRow.overdue_tasks = 0;
+        }
+        lastRowByBranch.set(branchKey, row);
     }
 
     return rows;
 };
 
+const validatePersonReportRows = (rows: PersonActivityReportRow[]): PersonActivityReportRow[] => {
+    const dataRows = rows.filter(row => !row.isNoteRow);
+
+    const validatedDataRows = runtimeValidation(
+        statsSchema,
+        dataRows.map(row => ({
+            _id: `${row.branchName}-${row.periodStart.toISOString()}`,
+            ...row,
+            made_won: 0,
+            removed_won: 0,
+            call_status_updated: 0,
+            total_leads: 0,
+        })),
+    ).map((row, index) => ({
+        branchName: dataRows[index].branchName,
+        periodStart: dataRows[index].periodStart,
+        periodEnd: dataRows[index].periodEnd,
+        roleLabel: dataRows[index].roleLabel,
+        task_added: row.task_added ?? 0,
+        lead_added: row.lead_added ?? 0,
+        overdue_tasks: row.overdue_tasks ?? 0,
+        status_updated: row.status_updated ?? 0,
+        is_won: row.is_won ?? 0,
+        is_visited: row.is_visited ?? 0,
+        pending_tasks: row.pending_tasks ?? 0,
+    }));
+
+    const validated: PersonActivityReportRow[] = [];
+    let dataIndex = 0;
+    for (const row of rows) {
+        if (row.isNoteRow) {
+            validated.push(row);
+        } else {
+            validated.push(validatedDataRows[dataIndex]);
+            dataIndex += 1;
+        }
+    }
+    return validated;
+};
+
 export const exportPersonActivityReport = async (req: Request, res: TypedResponse<any>) => {
     try {
-        // #region agent log
-        try {
-            appendFileSync(
-                '/Users/safvanhusain/code/hashqubes/istore/.cursor/debug-472d62.log',
-                `${JSON.stringify({
-                    sessionId: '472d62',
-                    runId: 'pre-fix',
-                    hypothesisId: 'D',
-                    location: 'activityPersonReportController.ts:exportPersonActivityReport',
-                    message: 'person report endpoint hit',
-                    data: { query: req.query, privilege: req.privilege },
-                    timestamp: Date.now(),
-                })}\n`,
-            );
-        } catch {
-            // ignore debug log failures in docker/local path differences
-        }
-        // #endregion
         if (req.privilege !== 'admin') {
             throw new AppError('Only admins can export person activity reports', 403);
         }
@@ -241,43 +266,15 @@ export const exportPersonActivityReport = async (req: Request, res: TypedRespons
             adminIds,
         );
 
-        const totals = await buildUserScopeTotals(
-            userObjectId,
-            rangeStart,
-            rangeEnd,
-            createdAt,
-            adminIds,
-        );
+        const validatedRows = validatePersonReportRows(rows);
+        const totals = sumActivityReportMetrics(validatedRows.filter(row => !row.isNoteRow));
 
-        const validatedRows: ActivityReportRow[] = runtimeValidation(
-            statsSchema,
-            rows.map(row => ({
-                _id: row.displayName,
-                ...row,
-                made_won: 0,
-                removed_won: 0,
-                call_status_updated: 0,
-                total_leads: 0,
-            })),
-        ).map((row, index) => ({
-            displayName: rows[index].displayName,
-            isNoteRow: rows[index].isNoteRow,
-            task_added: row.task_added ?? 0,
-            lead_added: row.lead_added ?? 0,
-            overdue_tasks: row.overdue_tasks ?? 0,
-            status_updated: row.status_updated ?? 0,
-            is_won: row.is_won ?? 0,
-            is_visited: row.is_visited ?? 0,
-            pending_tasks: row.pending_tasks ?? 0,
-        }));
-
-        const pdfBuffer = await createPdf(generateActivityReportHtml({
+        const pdfBuffer = await createPdf(generatePersonActivityReportHtml({
             rows: validatedRows,
             totals,
             start: startDate ?? new Date(0),
             end: endDate ?? new Date(),
-            rowLabel: 'Branch / Period',
-            title: `Activity Report — ${user.username}`,
+            personName: user.username,
         }));
 
         res.set({

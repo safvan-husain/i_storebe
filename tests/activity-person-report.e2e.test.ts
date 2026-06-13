@@ -262,6 +262,7 @@ describe('Person activity report export', () => {
         handledBy: staffTransferred._id,
         customer: customer._id,
         createdBranch: branchA._id,
+        handlingBranch: branchA._id,
         createdAt: new Date('2026-01-01'),
       }))._id,
       title: 'Pending task',
@@ -340,10 +341,14 @@ describe('Person activity report export', () => {
 
     expect(response.status).toBe(200);
     expect(mockPdfHtml).toContain('Activity Report — staff-transferred');
-    expect(mockPdfHtml).toContain('Branch A — Staff');
-    expect(mockPdfHtml).toContain('Branch B — Staff');
-    expect(mockPdfHtml).toContain('Transferred to Branch B');
-    expect(mockPdfHtml).not.toContain('Branch A — Staff (1/15/2026');
+    expect(mockPdfHtml).toContain('Person: staff-transferred');
+    expect(mockPdfHtml).toContain('<th>Branch</th>');
+    expect(mockPdfHtml).toContain('<th>Period</th>');
+    expect(mockPdfHtml).toContain('<th>Role</th>');
+    expect(mockPdfHtml).toContain('Branch A');
+    expect(mockPdfHtml).toContain('Branch B');
+    expect(mockPdfHtml).toContain('Transferred from Branch A to Branch B');
+    expect(mockPdfHtml).toContain('Combined Total (all branches)');
   });
 
   it('shows only the new branch stint when transfer happened before the range', async () => {
@@ -359,12 +364,12 @@ describe('Person activity report export', () => {
       .set('Authorization', `Bearer ${token}`);
 
     expect(response.status).toBe(200);
-    expect(mockPdfHtml).toContain('Branch B — Staff');
-    expect(mockPdfHtml).not.toContain('Branch A — Staff');
-    expect(mockPdfHtml).not.toContain('Transferred to');
+    expect(mockPdfHtml).toContain('Branch B');
+    expect(mockPdfHtml).not.toContain('Branch A');
+    expect(mockPdfHtml).not.toContain('Transferred from');
   });
 
-  it('omits zero-activity stints', async () => {
+  it('shows zero-activity membership stints', async () => {
     const token = await login('admin');
 
     const response = await request(app)
@@ -377,11 +382,65 @@ describe('Person activity report export', () => {
       .set('Authorization', `Bearer ${token}`);
 
     expect(response.status).toBe(200);
-    expect(mockPdfHtml).not.toContain('Branch A — Staff');
-    expect(mockPdfHtml).toContain('TOTAL');
+    expect(mockPdfHtml).toContain('Branch A');
+    expect(mockPdfHtml).toContain('Combined Total (all branches)');
   });
 
-  it('uses user-wide TOTAL row including pending tasks', async () => {
+  it('shows historical activity when membership startedAt predates branch provisioning', async () => {
+    const token = await login('admin');
+
+    const admin = await User.findOne({ username: 'admin' });
+    const staffHistorical = await User.create({
+      username: 'staff-historical',
+      password: 'password123',
+      privilege: 'staff',
+      secondPrivilege: 'regular',
+      isActive: true,
+      isAccountDeleted: false,
+      createdAt: new Date('2025-04-28T00:00:00.000Z'),
+    });
+    const branchHistorical = await Branch.create({
+      name: 'Branch Historical',
+      normalizedName: 'branch historical',
+      timezone: 'Asia/Dubai',
+      manager: seeded.managerA._id,
+      staffs: [staffHistorical._id],
+      isActive: true,
+      createdBy: admin!._id,
+      createdAt: new Date('2026-04-26T05:42:54.027Z'),
+    });
+    await BranchMembership.create({
+      branch: branchHistorical._id,
+      user: staffHistorical._id,
+      role: 'staff',
+      startedAt: new Date('2025-04-28T00:00:00.000Z'),
+    });
+    await Activity.create({
+      activator: staffHistorical._id,
+      actorBranch: branchHistorical._id,
+      type: 'lead_added',
+      action: 'historical lead before branch provisioning',
+      createdAt: new Date('2025-05-15T00:00:00.000Z'),
+    });
+
+    const response = await request(app)
+      .get('/api/activity/reports/person')
+      .query({
+        userId: String(staffHistorical._id),
+        startDate: String(new Date('2025-01-01T00:00:00.000Z').getTime()),
+        endDate: String(new Date('2026-12-31T00:00:00.000Z').getTime()),
+      })
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(response.status).toBe(200);
+    expect(mockPdfHtml).toContain('Branch Historical');
+    expect(mockPdfHtml).toContain('<td>1</td>');
+
+    const totals = extractTotalsRow(mockPdfHtml);
+    expect(totals[1]).toBe(1);
+  });
+
+  it('sums branch rows in combined total including branch-scoped pending tasks', async () => {
     const token = await login('admin');
 
     const response = await request(app)
@@ -394,10 +453,20 @@ describe('Person activity report export', () => {
       .set('Authorization', `Bearer ${token}`);
 
     expect(response.status).toBe(200);
+    expect(mockPdfHtml).toContain('Combined Total (all branches)');
+    expect(mockPdfHtml).toContain("linked lead's handling branch matches");
+
+    const branchARow = mockPdfHtml.match(
+      /<tr>\s*<td>Branch A<\/td>[\s\S]*?<\/tr>/,
+    )?.[0];
+    expect(branchARow).toBeDefined();
+    expect(branchARow).toContain('<td>1</td>');
+    expect(branchARow).toMatch(/<td>1<\/td>.*<td>1<\/td>\s*<\/tr>/);
 
     const totals = extractTotalsRow(mockPdfHtml);
+    expect(totals[0]).toBe(0);
     expect(totals[1]).toBe(2);
-    expect(totals[6]).toBe(1);
     expect(totals[2]).toBe(1);
+    expect(totals[6]).toBe(1);
   });
 });

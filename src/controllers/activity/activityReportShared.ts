@@ -21,6 +21,15 @@ export type ActivityReportRow = ActivityReportMetrics & {
     isNoteRow?: boolean;
 };
 
+export type PersonActivityReportRow = ActivityReportMetrics & {
+    branchName: string;
+    periodStart: Date;
+    periodEnd: Date;
+    roleLabel: string;
+    isNoteRow?: boolean;
+    noteText?: string;
+};
+
 export const METRIC_KEYS: (keyof ActivityReportMetrics)[] = [
     'task_added',
     'lead_added',
@@ -43,6 +52,18 @@ export const emptyMetrics = (): ActivityReportMetrics => ({
 
 export const isZeroMetrics = (metrics: ActivityReportMetrics) =>
     METRIC_KEYS.every(key => metrics[key] === 0);
+
+export const sumActivityReportMetrics = (
+    rows: ActivityReportMetrics[],
+): ActivityReportMetrics => {
+    const totals = emptyMetrics();
+    for (const row of rows) {
+        for (const key of METRIC_KEYS) {
+            totals[key] += row[key];
+        }
+    }
+    return totals;
+};
 
 export const uniqueObjectIds = (ids: Array<Types.ObjectId | string>) =>
     [...new Set(ids.map(String))].map(id => Types.ObjectId.createFromHexString(id));
@@ -76,15 +97,33 @@ const addActivityMetrics = (metrics: ActivityReportMetrics, type: IActivity['typ
     if (type === 'removed_won') metrics.is_won -= 1;
 };
 
+const missingBranchField = (field: 'actorBranch' | 'createdBranch' | 'handlingBranch') => ({
+    $or: [
+        { [field]: { $exists: false } },
+        { [field]: null },
+    ],
+});
+
+const getBranchLeadIdsForTasks = async (branchId: Types.ObjectId) =>
+    Lead.distinct('_id', {
+        $or: [
+            { handlingBranch: branchId },
+            { ...missingBranchField('handlingBranch'), createdBranch: branchId },
+        ],
+    });
+
 export const buildPerUserMetrics = async (options: {
     branchId?: Types.ObjectId;
     userIds: Types.ObjectId[];
     rangeStart: Date;
     rangeEnd: Date;
     createdAt?: { $gte: Date; $lte: Date };
+    taskCreatedAt?: { $gte: Date; $lte: Date } | null;
     adminIds: Types.ObjectId[];
     ignoreActiveUserFilter: boolean;
     includeTaskMetrics?: boolean;
+    scopeTasksByBranch?: boolean;
+    includeUnscopedBranchActivity?: boolean;
 }): Promise<Map<string, ActivityReportMetrics>> => {
     const {
         branchId,
@@ -92,9 +131,12 @@ export const buildPerUserMetrics = async (options: {
         rangeStart,
         rangeEnd,
         createdAt,
+        taskCreatedAt,
         adminIds,
         ignoreActiveUserFilter,
         includeTaskMetrics = true,
+        scopeTasksByBranch = true,
+        includeUnscopedBranchActivity = false,
     } = options;
 
     const metricsByUser = new Map<string, ActivityReportMetrics>();
@@ -122,7 +164,16 @@ export const buildPerUserMetrics = async (options: {
         activator: { $in: allowedObjectIds, $nin: adminIds },
         createdAt: createdAt ?? { $gte: rangeStart, $lte: rangeEnd },
     };
-    if (branchId) activityQuery.actorBranch = branchId;
+    if (branchId) {
+        if (includeUnscopedBranchActivity) {
+            activityQuery.$or = [
+                { actorBranch: branchId },
+                missingBranchField('actorBranch'),
+            ];
+        } else {
+            activityQuery.actorBranch = branchId;
+        }
+    }
 
     const activities = await Activity.find(activityQuery, { activator: true, type: true }).lean();
     for (const activity of activities) {
@@ -133,7 +184,16 @@ export const buildPerUserMetrics = async (options: {
         createdBy: { $in: allowedObjectIds },
         createdAt: createdAt ?? { $gte: rangeStart, $lte: rangeEnd },
     };
-    if (branchId) leadQuery.createdBranch = branchId;
+    if (branchId) {
+        if (includeUnscopedBranchActivity) {
+            leadQuery.$or = [
+                { createdBranch: branchId },
+                missingBranchField('createdBranch'),
+            ];
+        } else {
+            leadQuery.createdBranch = branchId;
+        }
+    }
 
     const leads = await Lead.find(leadQuery, { createdBy: true, enquireStatus: true }).lean();
     for (const lead of leads) {
@@ -146,7 +206,12 @@ export const buildPerUserMetrics = async (options: {
             isCompleted: false,
             assigned: { $in: allowedObjectIds },
         };
-        if (createdAt) taskQuery.createdAt = createdAt;
+        if (branchId && scopeTasksByBranch) {
+            const branchLeadIds = await getBranchLeadIdsForTasks(branchId);
+            taskQuery.lead = { $in: branchLeadIds };
+        }
+        const taskDateFilter = taskCreatedAt === undefined ? createdAt : taskCreatedAt;
+        if (taskDateFilter) taskQuery.createdAt = taskDateFilter;
 
         const now = new Date();
         const tasks = await Task.find(taskQuery, { assigned: true, due: true }).lean();
@@ -517,5 +582,136 @@ export const generateActivityReportHtml = (options: {
 
 export const formatStintDate = (date: Date) => date.toLocaleDateString();
 
+export const formatStintPeriod = (start: Date, end: Date) =>
+    `${formatStintDate(start)} – ${formatStintDate(end)}`;
+
 export const formatRoleLabel = (role: IBranchMembership['role']) =>
     role === 'manager' ? 'Manager' : 'Staff';
+
+export const generatePersonActivityReportHtml = (options: {
+    rows: PersonActivityReportRow[];
+    totals: ActivityReportMetrics;
+    start: Date;
+    end: Date;
+    personName: string;
+    title?: string;
+}) => {
+    const {
+        rows,
+        totals,
+        start,
+        end,
+        personName,
+        title = `Activity Report — ${personName}`,
+    } = options;
+
+    const headers = [
+        'Branch', 'Period', 'Role', 'Tasks Added', 'Leads Added', 'Overdue Task',
+        'Status Updates', 'Won', 'Visit', 'Pending Task',
+    ];
+    const columnCount = headers.length;
+
+    const bodyRows = rows.map(row => {
+        if (row.isNoteRow) {
+            return `<tr class="note-row"><td colspan="${columnCount}" style="text-align:left;font-style:italic;">${row.noteText ?? ''}</td></tr>`;
+        }
+        return `<tr>
+            <td>${row.branchName}</td>
+            <td>${formatStintPeriod(row.periodStart, row.periodEnd)}</td>
+            <td>${row.roleLabel}</td>
+            ${METRIC_KEYS.map(key => `<td>${row[key]}</td>`).join('')}
+        </tr>`;
+    }).join('');
+
+    const totalsRow = `<tr class="totals-row">
+        <td colspan="3"><strong>Combined Total (all branches)</strong></td>
+        ${METRIC_KEYS.map(key => `<td><strong>${totals[key]}</strong></td>`).join('')}
+    </tr>`;
+
+    const formattedStart = start.toLocaleDateString();
+    const formattedEnd = end.toLocaleDateString();
+
+    return `
+     <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            padding: 20px;
+            background: #f8f9fa;
+        }
+        h1 {
+            text-align: center;
+            color: #333;
+            font-size: 20px
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+            font-size: 13px;
+        }
+        th, td {
+            padding: 10px 6px;
+            text-align: center;
+            border: 1px solid #dee2e6;
+        }
+        th {
+            background-color: red;
+            color: white;
+            position: sticky;
+            top: 0;
+        }
+        tr:nth-child(even) {
+            background-color: #f1f1f1;
+        }
+        tr.totals-row td {
+            border-top: 2px solid #333;
+            background-color: #e9ecef;
+        }
+        tr.note-row td {
+            background-color: #fff8e1;
+            font-size: 12px;
+        }
+        .logo {
+            display: block;
+            margin: 0 auto 10px auto;
+            width: 200px;
+            height: auto;
+        }
+        .date-range {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            font-size: 14px;
+            color: #555;
+        }
+        .person-name {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            font-size: 20px;
+            font-weight: bold;
+            color: #222;
+        }
+        .footnote {
+            margin-top: 12px;
+            font-size: 11px;
+            color: #666;
+            font-style: italic;
+        }
+    </style>
+     <div class="date-range">
+        <strong>From:</strong> ${formattedStart}<br>
+        <strong>To:</strong> ${formattedEnd}
+    </div>
+    <div class="person-name">Person: ${personName}</div>
+    <img src="data:image/png;base64,${LOGO_BASE64}" class="logo" alt="Logo">
+    <h1>${title}</h1>
+    <table>
+        <thead>
+             ${headers.map(h => `<th>${h.replace(' ', '<br>')}</th>`).join('')}
+        </thead>
+        <tbody>${bodyRows}${totalsRow}</tbody>
+    </table>
+    <p class="footnote">Pending and overdue tasks are counted on the branch where the linked lead's handling branch matches. Combined total is the sum of all branch rows above.</p>
+    `;
+};
