@@ -3022,3 +3022,17 @@ export const getMonthlySummary = ok(async (req, res) => {
     );
     res.status(200).json(summary);
 });
+
+export async function regenerateAttendanceDailySnapshot(params: {
+    employeeId: Types.ObjectId;
+    branchId: Types.ObjectId;
+    dateString: string;
+}) {
+    return generateDailySnapshot({
+        employeeId: params.employeeId,
+        branchId: params.branchId,
+        dateString: params.dateString,
+        generatedBy: 'manual',
+        recalculateBasis: true,
+    });
+}

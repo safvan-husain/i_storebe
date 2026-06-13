@@ -38,7 +38,7 @@ const BranchSchema = new mongoose.Schema(
             type: String,
             required: true,
             trim: true,
-            default: 'Asia/Dubai',
+            default: 'Asia/Kolkata',
         },
         manager: {
             type: mongoose.Schema.Types.ObjectId,

@@ -407,6 +407,21 @@ describe('Branch management e2e', () => {
     expect(response.body.attendanceEnabled).toBe(true);
   });
 
+  it('defaults timezone to Asia/Kolkata when creating a branch', async () => {
+    const adminToken = await login('admin');
+
+    const response = await request(app)
+      .post('/api/branches')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        name: 'Indian Timezone Branch',
+        managerId: await getUserId('manager-a'),
+      });
+
+    expect(response.status).toBe(201);
+    expect(response.body.timezone).toBe('Asia/Kolkata');
+  });
+
   it('allows toggling attendanceEnabled from branch details', async () => {
     const adminToken = await login('admin');
 

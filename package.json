@@ -19,7 +19,8 @@
     "backfill:schedule-group-branches": "ts-node src/scripts/backfillScheduleGroupBranches.ts",
     "snapshot:activity-report": "ts-node src/scripts/snapshotActivityReportRows.ts",
     "provision:branches": "ts-node src/scripts/provisionBranchesFromManagers.ts",
-    "finalize:mapped-branches": "ts-node src/scripts/finalizeMappedManagerBranches.ts"
+    "finalize:mapped-branches": "ts-node src/scripts/finalizeMappedManagerBranches.ts",
+    "change-branch-timezone": "ts-node src/scripts/changeBranchTimezone.ts"
   },
   "keywords": [],
   "author": "",
