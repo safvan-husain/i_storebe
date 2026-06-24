@@ -5,6 +5,7 @@ import BranchMembership, { IBranchMembership } from '../../models/BranchMembersh
 import Lead, { ILead } from '../../models/Lead';
 import Task, { ITask } from '../../models/Task';
 import User, { IUser } from '../../models/User';
+import { AppError } from '../../middleware/error';
 
 export type ActivityReportMetrics = {
     task_added: number;
@@ -330,6 +331,95 @@ export const getBranchScopeUserIds = async (
         ...memberships.map(item => item.user),
         ...activityUserIds,
     ]);
+};
+
+/**
+ * Branch staff rows for the legacy /activity/statics export (manager branch reports).
+ * Active roster members always appear; transferred staff appear only when they have
+ * non-zero metrics in the selected period; inactive users are excluded.
+ */
+export const buildBranchLegacyReportRows = async (options: {
+    branchId: Types.ObjectId;
+    rangeStart: Date;
+    rangeEnd: Date;
+    createdAt?: { $gte: Date; $lte: Date };
+    adminIds: Types.ObjectId[];
+}): Promise<ActivityReportRow[]> => {
+    const { branchId, rangeStart, rangeEnd, createdAt, adminIds } = options;
+
+    const branch = await Branch.findById(branchId, { manager: true, staffs: true }).lean();
+    if (!branch) {
+        throw new AppError('Branch not found', 404);
+    }
+
+    const rosterUserIds = getRosterUserIds(branch);
+    const scopeUserIds = await getBranchScopeUserIds(branchId, rangeStart, rangeEnd, createdAt);
+    const rosterObjectIds = [...rosterUserIds].map(id => Types.ObjectId.createFromHexString(id));
+
+    const activeRosterUsers = await User.find({
+        _id: { $in: rosterObjectIds },
+        isActive: true,
+    }, { username: true, isActive: true }).lean();
+
+    const memberships = await BranchMembership.find({
+        branch: branchId,
+        user: { $in: scopeUserIds },
+        startedAt: { $lte: rangeEnd },
+        $or: [
+            { endedAt: { $exists: false } },
+            { endedAt: { $gte: rangeStart } },
+        ],
+    }).lean();
+
+    const membershipsByUser = new Map<string, IBranchMembership[]>();
+    for (const membership of memberships) {
+        const userId = String(membership.user);
+        membershipsByUser.set(userId, [...(membershipsByUser.get(userId) ?? []), membership]);
+    }
+
+    const metricsByUserId = await buildPerUserMetrics({
+        branchId,
+        userIds: scopeUserIds,
+        rangeStart,
+        rangeEnd,
+        createdAt,
+        adminIds,
+        ignoreActiveUserFilter: false,
+    });
+
+    const rows: ActivityReportRow[] = [];
+    const includedUserIds = new Set<string>();
+
+    for (const user of activeRosterUsers) {
+        const userId = String(user._id);
+        includedUserIds.add(userId);
+        rows.push({
+            displayName: user.username,
+            ...(metricsByUserId.get(userId) ?? emptyMetrics()),
+        });
+    }
+
+    const offRosterUsers = await User.find({
+        _id: { $in: scopeUserIds, $nin: rosterObjectIds },
+        isActive: true,
+    }, { username: true, isActive: true }).lean();
+
+    for (const user of offRosterUsers) {
+        const userId = String(user._id);
+        if (includedUserIds.has(userId)) continue;
+
+        const metrics = metricsByUserId.get(userId) ?? emptyMetrics();
+        if (isZeroMetrics(metrics)) continue;
+
+        const suffix = getStatusSuffix(user, false, membershipsByUser.get(userId) ?? []);
+        rows.push({
+            displayName: `${user.username}${suffix}`,
+            ...metrics,
+        });
+    }
+
+    rows.sort((left, right) => left.displayName.localeCompare(right.displayName));
+    return rows;
 };
 
 export const buildBranchScopeTotals = async (

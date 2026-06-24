@@ -15,6 +15,7 @@ import { runtimeValidation } from "../../utils/validation";
 import { createPdf } from "../../utils/pdf";
 import BranchMembership from "../../models/BranchMembership";
 import Branch from "../../models/Branch";
+import { buildBranchLegacyReportRows } from "./activityReportShared";
 
 export const getActivity = asyncHandler(
     async (req: Request, res: Response) => {
@@ -202,6 +203,51 @@ export const getStaffReport = async (req: Request, res: TypedResponse<any>) => {
             .find({ privilege: 'admin' }, { _id: true })
             .lean().then(e => e.map(e => e._id));
 
+        if (query.branch) {
+            const branchId = Types.ObjectId.createFromHexString(query.branch);
+            const rangeStart = query.startDate ?? new Date(0);
+            const rangeEnd = query.endDate ?? new Date();
+            const branchCreatedAt = query.startDate && query.endDate
+                ? { $gte: query.startDate, $lte: query.endDate }
+                : undefined;
+
+            const rows = await buildBranchLegacyReportRows({
+                branchId,
+                rangeStart,
+                rangeEnd,
+                createdAt: branchCreatedAt,
+                adminIds,
+            });
+
+            const validData = runtimeValidation(statsSchema, rows.map(row => ({
+                _id: row.displayName,
+                task_added: row.task_added,
+                lead_added: row.lead_added,
+                overdue_tasks: row.overdue_tasks,
+                status_updated: row.status_updated,
+                is_won: row.is_won,
+                is_visited: row.is_visited,
+                pending_tasks: row.pending_tasks,
+                made_won: 0,
+                removed_won: 0,
+                call_status_updated: 0,
+                total_leads: 0,
+            })));
+
+            const pdfBuffer = await createPdf(generateTableHtml(
+                validData,
+                query.startDate ?? new Date(0),
+                query.endDate ?? new Date(),
+            ));
+            res.set({
+                'Content-Type': 'application/pdf',
+                'Content-Disposition': 'attachment; filename="generated.pdf"',
+                'Content-Length': pdfBuffer.length,
+            });
+            res.end(pdfBuffer);
+            return;
+        }
+
         let pipeline: PipelineStage[] = [];
 
         const matchQuery: FilterQuery<IActivity> = {};
@@ -225,33 +271,6 @@ export const getStaffReport = async (req: Request, res: TypedResponse<any>) => {
                 $gte: query.startDate,
                 $lte: query.endDate
             };
-        }
-
-        if (query.branch) {
-            const branchId = Types.ObjectId.createFromHexString(query.branch);
-            matchQuery.actorBranch = branchId;
-
-            const rangeStart = query.startDate ?? new Date(0);
-            const rangeEnd = query.endDate ?? new Date();
-            const memberships = await BranchMembership.find({
-                branch: branchId,
-                startedAt: { $lte: rangeEnd },
-                $or: [
-                    { endedAt: { $exists: false } },
-                    { endedAt: { $gte: rangeStart } },
-                ],
-            }, { user: true }).lean();
-            const membershipUserIds = memberships.map(item => item.user);
-            const activityUserIds = await Activity.distinct('activator', {
-                actorBranch: branchId,
-                ...(createdAt ? { createdAt } : {}),
-            });
-            const userIds = [...new Set([...membershipUserIds, ...activityUserIds].map(String))]
-                .map(id => Types.ObjectId.createFromHexString(id));
-
-            staffs = { $in: userIds };
-            usernames = await User.find({ _id: { $in: userIds } }, { username: true })
-                .lean().then(e => e.map(e => e.username));
         }
 
         if (query.manager) {
