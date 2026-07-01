@@ -1770,20 +1770,6 @@ describe('Attendance endpoints e2e', () => {
     expect(missingRequestLocation.status).toBe(400);
     expect(missingRequestLocation.body.message).toBe('Current location is required for attendance');
 
-    const weakAccuracy = await request(app)
-      .post('/api/attendance/events/check-in')
-      .set('Authorization', `Bearer ${staffToken}`)
-      .send({
-        location: {
-          latitude: branchLatitude,
-          longitude: branchLongitude,
-          accuracyMeters: 150,
-        },
-        timestamp: '2099-05-04T04:45:00.000Z',
-      });
-    expect(weakAccuracy.status).toBe(400);
-    expect(weakAccuracy.body.message).toContain('GPS accuracy is too weak');
-
     const tooFar = await request(app)
       .post('/api/attendance/events/check-in')
       .set('Authorization', `Bearer ${staffToken}`)
@@ -1797,6 +1783,88 @@ describe('Attendance endpoints e2e', () => {
       });
     expect(tooFar.status).toBe(400);
     expect(tooFar.body.message).toBe('You are too far from the branch location to record attendance');
+
+    const expandedRadiusFail = await request(app)
+      .post('/api/attendance/events/check-in')
+      .set('Authorization', `Bearer ${staffToken}`)
+      .send({
+        location: {
+          latitude: branchLatitude + 0.00144,
+          longitude: branchLongitude,
+          accuracyMeters: 50,
+        },
+        timestamp: '2099-05-04T04:50:00.000Z',
+      });
+    expect(expandedRadiusFail.status).toBe(400);
+    expect(expandedRadiusFail.body.message).toBe('You are too far from the branch location to record attendance');
+
+    const legacyTooFar = await request(app)
+      .post('/api/attendance/events/check-in')
+      .set('Authorization', `Bearer ${staffToken}`)
+      .send({
+        location: {
+          latitude: branchLatitude + 0.00099,
+          longitude: branchLongitude,
+        },
+        timestamp: '2099-05-04T04:55:00.000Z',
+      });
+    expect(legacyTooFar.status).toBe(400);
+    expect(legacyTooFar.body.message).toBe('You are too far from the branch location to record attendance');
+
+    const weakAccuracy = await request(app)
+      .post('/api/attendance/events/check-in')
+      .set('Authorization', `Bearer ${staffToken}`)
+      .send({
+        location: {
+          latitude: branchLatitude,
+          longitude: branchLongitude,
+          accuracyMeters: 150,
+        },
+        timestamp: '2099-05-05T05:00:00.000Z',
+      });
+    expect(weakAccuracy.status).toBe(201);
+    expect(weakAccuracy.body.location.allowedRadiusMeters).toBe(250);
+
+    const largeAccuracyAtBranch = await request(app)
+      .post('/api/attendance/events/check-in')
+      .set('Authorization', `Bearer ${staffToken}`)
+      .send({
+        location: {
+          latitude: branchLatitude,
+          longitude: branchLongitude,
+          accuracyMeters: 500,
+        },
+        timestamp: '2099-05-06T06:00:00.000Z',
+      });
+    expect(largeAccuracyAtBranch.status).toBe(201);
+    expect(largeAccuracyAtBranch.body.location.allowedRadiusMeters).toBe(600);
+
+    const expandedRadiusPass = await request(app)
+      .post('/api/attendance/events/check-in')
+      .set('Authorization', `Bearer ${staffToken}`)
+      .send({
+        location: {
+          latitude: branchLatitude + 0.00126,
+          longitude: branchLongitude,
+          accuracyMeters: 50,
+        },
+        timestamp: '2099-05-07T07:00:00.000Z',
+      });
+    expect(expandedRadiusPass.status).toBe(201);
+    expect(expandedRadiusPass.body.location.allowedRadiusMeters).toBe(150);
+
+    const legacyWithinRange = await request(app)
+      .post('/api/attendance/events/check-in')
+      .set('Authorization', `Bearer ${staffToken}`)
+      .send({
+        location: {
+          latitude: branchLatitude + 0.00081,
+          longitude: branchLongitude,
+        },
+        timestamp: '2099-05-08T08:00:00.000Z',
+      });
+    expect(legacyWithinRange.status).toBe(201);
+    expect(legacyWithinRange.body.location.allowedRadiusMeters).toBe(100);
   });
 
   it('manages remote workers for admins only and exposes addable member options', async () => {

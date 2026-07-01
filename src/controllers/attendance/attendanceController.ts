@@ -20,6 +20,12 @@ import AttendanceScheduleTemplate, {
 } from '../../models/AttendanceSchedule';
 import AttendanceEvent, { IAttendanceEvent } from '../../models/AttendanceEvent';
 import AttendanceRemoteWorker from '../../models/AttendanceRemoteWorker';
+import {
+    ATTENDANCE_LOCATION_BASE_RADIUS_METERS,
+    evaluateAttendanceLocation,
+    isLegacyLocationPayload,
+    serializeAttendanceLocationPolicy,
+} from '../../utils/attendance-location-policy';
 import AttendanceDailySnapshot, {
     IAttendanceBreakSession,
     IAttendanceCalculationBasis,
@@ -70,8 +76,6 @@ type MyBreakOption = {
 const timePattern = /^([01]\d|2[0-3]):[0-5]\d$/;
 const datePattern = /^\d{4}-\d{2}-\d{2}$/;
 const weekdays: AttendanceWeekday[] = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
-const attendanceLocationRadiusMeters = 100;
-
 type AttendanceLocationProof = {
     latitude: number;
     longitude: number;
@@ -323,18 +327,6 @@ function parseCoordinate(value: unknown, fieldName: string, min: number, max: nu
     return parsed;
 }
 
-function distanceMeters(from: { latitude: number; longitude: number }, to: { latitude: number; longitude: number }) {
-    const earthRadiusMeters = 6371000;
-    const toRadians = (value: number) => value * Math.PI / 180;
-    const latitudeDelta = toRadians(to.latitude - from.latitude);
-    const longitudeDelta = toRadians(to.longitude - from.longitude);
-    const fromLatitude = toRadians(from.latitude);
-    const toLatitude = toRadians(to.latitude);
-    const a = Math.sin(latitudeDelta / 2) ** 2
-        + Math.cos(fromLatitude) * Math.cos(toLatitude) * Math.sin(longitudeDelta / 2) ** 2;
-    return earthRadiusMeters * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-}
-
 function buildAttendanceLocationProof(req: Request, branch: { location?: { latitude?: number; longitude?: number } }): AttendanceLocationProof {
     if (!branch.location || branch.location.latitude === undefined || branch.location.longitude === undefined) {
         throw new AppError('Branch location is required before attendance can be recorded', 400);
@@ -346,23 +338,26 @@ function buildAttendanceLocationProof(req: Request, branch: { location?: { latit
     const source = rawLocation as Record<string, unknown>;
     const latitude = parseCoordinate(source.latitude, 'location.latitude', -90, 90);
     const longitude = parseCoordinate(source.longitude, 'location.longitude', -180, 180);
-    const accuracyMeters = parseCoordinate(source.accuracyMeters, 'location.accuracyMeters', 0, 100000);
-    if (accuracyMeters > attendanceLocationRadiusMeters) {
-        throw new AppError('GPS accuracy is too weak for attendance. Move to an open area and try again.', 400);
-    }
-    const distance = distanceMeters(
-        { latitude, longitude },
-        { latitude: branch.location.latitude, longitude: branch.location.longitude },
-    );
-    if (distance > attendanceLocationRadiusMeters) {
+    const legacyMode = isLegacyLocationPayload(source);
+    const parsedAccuracy = legacyMode
+        ? undefined
+        : parseCoordinate(source.accuracyMeters, 'location.accuracyMeters', 0, 100000);
+    const evaluation = evaluateAttendanceLocation({
+        latitude,
+        longitude,
+        accuracyMeters: parsedAccuracy,
+        branchLatitude: branch.location.latitude,
+        branchLongitude: branch.location.longitude,
+    });
+    if (!evaluation.allowed) {
         throw new AppError('You are too far from the branch location to record attendance', 400);
     }
     return {
         latitude,
         longitude,
-        accuracyMeters,
-        distanceMeters: Math.round(distance),
-        allowedRadiusMeters: attendanceLocationRadiusMeters,
+        accuracyMeters: evaluation.accuracyMeters,
+        distanceMeters: Math.round(evaluation.distanceMeters),
+        allowedRadiusMeters: evaluation.effectiveRadiusMeters,
     };
 }
 
@@ -2533,9 +2528,10 @@ export const getMyAttendanceStatus = ok(async (req, res) => {
                 ? {
                     latitude: branch.location.latitude,
                     longitude: branch.location.longitude,
-                    allowedRadiusMeters: attendanceLocationRadiusMeters,
+                    allowedRadiusMeters: ATTENDANCE_LOCATION_BASE_RADIUS_METERS,
                 }
                 : null,
+            locationPolicy: serializeAttendanceLocationPolicy(),
             snapshot: null,
             workStatus: 'checked_out',
             canCheckIn: false,
@@ -2610,9 +2606,10 @@ export const getMyAttendanceStatus = ok(async (req, res) => {
             ? {
                 latitude: branch.location.latitude,
                 longitude: branch.location.longitude,
-                allowedRadiusMeters: attendanceLocationRadiusMeters,
+                allowedRadiusMeters: ATTENDANCE_LOCATION_BASE_RADIUS_METERS,
             }
             : null,
+        locationPolicy: serializeAttendanceLocationPolicy(),
         snapshot: snapshot ? serializeDailySnapshot(snapshot) : null,
         workStatus,
         canCheckIn: workStatus === 'not_started' && workingSchedule,
