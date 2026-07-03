@@ -16,6 +16,7 @@ import { createPdf } from "../../utils/pdf";
 import BranchMembership from "../../models/BranchMembership";
 import Branch from "../../models/Branch";
 import { buildBranchLegacyReportRows } from "./activityReportShared";
+import { assertCanViewLeadDetails } from "../../services/lead-access";
 
 export const getActivity = asyncHandler(
     async (req: Request, res: Response) => {
@@ -25,6 +26,12 @@ export const getActivity = asyncHandler(
 
             //if lead is provided, ignore other filters.
             if (reqFilter.lead) {
+                const lead = await Lead.findById(reqFilter.lead, {
+                    handledBy: true,
+                    handlingBranch: true,
+                    createdBranch: true,
+                }).lean();
+                await assertCanViewLeadDetails(req.userId!, req.privilege!, lead);
                 query = { lead: reqFilter.lead };
             } else {
                 if (reqFilter.branch?.length ?? 0) query.actorBranch = { $in: reqFilter.branch };

@@ -9,6 +9,7 @@ import {
   EnquireSourceType,
   EnquireStatusType,
   LeadFilterSchema,
+  globalLeadSearchSchema,
   PurposeType,
   updateLeadData,
   UpdateLeadStatus,
@@ -33,6 +34,11 @@ import Task from "../../models/Task";
 import { createNotificationForUsers } from "../../services/notification-services";
 import { runtimeValidation } from "../../utils/validation";
 import { getCurrentBranchIdForUser } from "../../services/branch-context";
+import {
+  canViewLeadDetails,
+  assertCanViewLeadDetails,
+  loadBranchManagers,
+} from "../../services/lead-access";
 
 //search Note to see the notes for specific sections
 export const createLead = asyncHandler(
@@ -350,7 +356,8 @@ export const getLeads = asyncHandler(
         matchStage._id = { $nin: taskedLeadIds };
       }
 
-      //if searched, ignore all the role based filter - in other words - only apply role based filter on non search request.
+      // DUPLICATE: legacy global-search via filter endpoint — remove once older
+      // clients migrate to POST /leads/global-search.
       if (!filter.searchTerm) {
         // Role-based filtering
         if (req.privilege === "manager" && (filter.staffs?.length ?? 0) === 0) {
@@ -529,6 +536,105 @@ export const getLeads = asyncHandler(
   },
 );
 
+const mapLeadDocumentToResponse = (e: any): ILeadResponse => ({
+  _id: e._id,
+  handlerName: e.handledBy?.username ?? "",
+  source: e.source,
+  enquireStatus: e.enquireStatus,
+  purpose: e.purpose,
+  callStatus: e.callStatus,
+  type: e.type,
+  product: e.product,
+  nearestStore: e.nearestStore,
+  name: e.contactSnapshot?.name ?? e.customer?.name ?? "",
+  phone: e.contactSnapshot?.phone ?? e.customer?.phone ?? "",
+  email: e.contactSnapshot?.email ?? e.customer?.email,
+  address: e.contactSnapshot?.address ?? e.customer?.address ?? "",
+  dob: e.contactSnapshot?.dob
+    ? new Date(e.contactSnapshot.dob).getTime()
+    : e.customer?.dob
+      ? new Date(e.customer.dob).getTime()
+      : undefined,
+  createdAt: new Date(e.createdAt).getTime(),
+});
+
+export interface ILeadSearchResult extends ILeadResponse {
+  canViewDetails: boolean;
+}
+
+export interface GlobalLeadSearchResponse {
+  leads: ILeadSearchResult[];
+  totalCount: number;
+}
+
+export const searchLeadsGlobally = asyncHandler(
+  async (req: Request, res: TypedResponse<GlobalLeadSearchResponse>) => {
+    try {
+      const filter = globalLeadSearchSchema.parse(req.body);
+      const searchRegex = {
+        $regex: filter.searchTerm.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
+        $options: "i",
+      };
+      const customerIds = await Customer.find(
+        {
+          $or: [{ name: searchRegex }, { phone: searchRegex }],
+        },
+        { _id: true },
+      )
+        .lean()
+        .then((rows) => rows.map((row) => row._id));
+
+      if (customerIds.length === 0) {
+        res.status(200).json({ leads: [], totalCount: 0 });
+        return;
+      }
+
+      const matchQuery: FilterQuery<ILead> = {
+        customer: { $in: customerIds },
+      };
+
+      const [rawLeads, totalCount] = await Promise.all([
+        Lead.find(matchQuery)
+          .sort({ createdAt: -1 })
+          .skip(filter.skip)
+          .limit(filter.limit)
+          .populate<{ handledBy: { username: string; _id: Types.ObjectId } }>(
+            "handledBy",
+            "_id username",
+          )
+          .populate<{ customer: ICustomer }>(
+            "customer",
+            "name phone email address dob",
+          )
+          .lean(),
+        Lead.countDocuments(matchQuery),
+      ]);
+
+      const branchManagers = await loadBranchManagers(
+        rawLeads.map((lead) => lead.handlingBranch ?? lead.createdBranch),
+      );
+
+      const leads: ILeadSearchResult[] = rawLeads.map((lead) => ({
+        ...mapLeadDocumentToResponse(lead),
+        canViewDetails: canViewLeadDetails(
+          req.userId!,
+          req.privilege!,
+          {
+            handledBy: lead.handledBy,
+            handlingBranch: lead.handlingBranch,
+            createdBranch: lead.createdBranch,
+          },
+          branchManagers,
+        ),
+      }));
+
+      res.status(200).json({ leads, totalCount });
+    } catch (error) {
+      onCatchError(error, res);
+    }
+  },
+);
+
 const searchTermSchema = z.object({
   searchTerm: z
     .string()
@@ -640,17 +746,28 @@ export const getLeadById = asyncHandler(
         type: true,
         createdAt: true,
         manager: true,
+        handledBy: true,
+        handlingBranch: true,
+        createdBranch: true,
         contactSnapshot: true,
       })
-        .populate<{ handledBy: { username: string } }>("handledBy", "username")
+        .populate<{ handledBy: { username: string; _id: Types.ObjectId } }>(
+          "handledBy",
+          "_id username",
+        )
         .populate<{ customer: ICustomer }>("customer")
         .lean();
 
-      // Check if lead exists
       if (!lead) {
         res.status(404).json({ message: "Lead not found" });
         return;
       }
+
+      await assertCanViewLeadDetails(req.userId!, req.privilege!, {
+        handledBy: lead.handledBy as any,
+        handlingBranch: lead.handlingBranch,
+        createdBranch: lead.createdBranch,
+      });
 
       res.status(200).json({
         _id: lead._id,

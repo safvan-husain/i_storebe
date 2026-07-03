@@ -6,7 +6,8 @@ import {
   getLeadById,
   updateLead,
   updateLeadStatus, transferLead, getTransferableEmployees, markDialed, getTaskCreatableLead,
-  generateLeadExcelReport
+  generateLeadExcelReport,
+  searchLeadsGlobally,
 } from '../controllers/leads/leadController';
 import { protect } from '../middleware/auth';
 
@@ -19,6 +20,7 @@ router
   .get(protect, getLeads);
 
 router.route('/filter').post(protect, getLeads);
+router.route('/global-search').post(protect, searchLeadsGlobally);
 router.route('/transfer').post(protect, transferLead)
 router.route('/status/:id').put(protect, updateLeadStatus);
 router.route('/transferable-users').get(protect, getTransferableEmployees);

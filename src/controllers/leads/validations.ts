@@ -71,6 +71,7 @@ export const LeadFilterSchema = z.object({
     type: z.array(Type).optional(),
     purpose: z.array(Purpose).optional(),
     phone: z.string().optional(),
+    /** @deprecated Use POST /leads/global-search. Kept for older app clients. */
     searchTerm: z.string().optional(),
     managers: z.array(ObjectIdSchema).optional(),
     staffs: z.array(ObjectIdSchema).optional(),
@@ -128,3 +129,11 @@ export const LeadExcelReportFilterSchema = z.object({
 });
 
 export type LeadExcelReportFilter = z.infer<typeof LeadExcelReportFilterSchema>;
+
+export const globalLeadSearchSchema = z.object({
+  searchTerm: z.string().min(1, { message: "searchTerm is required" }),
+  skip: z.coerce.number().int().min(0).optional().default(0),
+  limit: z.coerce.number().int().min(1).max(100).optional().default(20),
+});
+
+export type GlobalLeadSearchFilter = z.infer<typeof globalLeadSearchSchema>;
