@@ -2994,6 +2994,131 @@ describe('Attendance endpoints e2e', () => {
     expect(managerOtherBranchSnapshots.status).toBe(404);
   });
 
+  it('filters employee daily snapshots by date range for authorized viewers', async () => {
+    const seed = await seedUsers();
+    const adminToken = await login('admin');
+    const managerToken = await login('manager-a');
+
+    await AttendanceDailySnapshot.create([
+      {
+        employee: seed.staffId,
+        branch: seed.branchId,
+        date: '2099-05-04',
+        branchTimezone: 'Asia/Dubai',
+        shiftIds: [],
+        scheduledSegments: [],
+        requiredWorkMinutes: 0,
+        grossMinutes: 0,
+        productiveWorkMinutes: 0,
+        totalBreakMinutes: 0,
+        breakOvertimeMinutes: 0,
+        breakUndertimeMinutes: 0,
+        overtimeMinutes: 0,
+        undertimeMinutes: 0,
+        lateMinutes: 0,
+        earlyLeaveMinutes: 0,
+        breakTotals: [],
+        breakSessions: [],
+        status: 'incomplete',
+        generatedFromEventIds: [],
+        generatedBy: 'event',
+        generatedAt: new Date(),
+        version: 1,
+      },
+      {
+        employee: seed.staffId,
+        branch: seed.branchId,
+        date: '2099-05-06',
+        branchTimezone: 'Asia/Dubai',
+        shiftIds: [],
+        scheduledSegments: [],
+        requiredWorkMinutes: 0,
+        grossMinutes: 0,
+        productiveWorkMinutes: 0,
+        totalBreakMinutes: 0,
+        breakOvertimeMinutes: 0,
+        breakUndertimeMinutes: 0,
+        overtimeMinutes: 0,
+        undertimeMinutes: 0,
+        lateMinutes: 0,
+        earlyLeaveMinutes: 0,
+        breakTotals: [],
+        breakSessions: [],
+        status: 'present',
+        generatedFromEventIds: [],
+        generatedBy: 'event',
+        generatedAt: new Date(),
+        version: 1,
+      },
+      {
+        employee: seed.staffId,
+        branch: seed.branchId,
+        date: '2099-05-10',
+        branchTimezone: 'Asia/Dubai',
+        shiftIds: [],
+        scheduledSegments: [],
+        requiredWorkMinutes: 0,
+        grossMinutes: 0,
+        productiveWorkMinutes: 0,
+        totalBreakMinutes: 0,
+        breakOvertimeMinutes: 0,
+        breakUndertimeMinutes: 0,
+        overtimeMinutes: 0,
+        undertimeMinutes: 0,
+        lateMinutes: 0,
+        earlyLeaveMinutes: 0,
+        breakTotals: [],
+        breakSessions: [],
+        status: 'absent',
+        generatedFromEventIds: [],
+        generatedBy: 'scheduled_job',
+        generatedAt: new Date(),
+        version: 1,
+      },
+    ]);
+
+    const adminRange = await request(app)
+      .get(`/api/attendance/employees/${seed.staffId}/daily-snapshots`)
+      .query({ fromDate: '2099-05-04', toDate: '2099-05-06' })
+      .set('Authorization', `Bearer ${adminToken}`);
+
+    expect(adminRange.status).toBe(200);
+    expect(adminRange.body.items).toHaveLength(2);
+    expect(adminRange.body.items.map((item: { date: string }) => item.date)).toEqual([
+      '2099-05-06',
+      '2099-05-04',
+    ]);
+
+    const managerRange = await request(app)
+      .get(`/api/attendance/employees/${seed.staffId}/daily-snapshots`)
+      .query({ fromDate: '2099-05-04', toDate: '2099-05-10' })
+      .set('Authorization', `Bearer ${managerToken}`);
+
+    expect(managerRange.status).toBe(200);
+    expect(managerRange.body.items).toHaveLength(3);
+
+    const unauthorizedManager = await request(app)
+      .get(`/api/attendance/employees/${seed.adminId}/daily-snapshots`)
+      .query({ fromDate: '2099-05-04', toDate: '2099-05-06' })
+      .set('Authorization', `Bearer ${managerToken}`);
+
+    expect(unauthorizedManager.status).toBe(403);
+
+    const invalidRange = await request(app)
+      .get(`/api/attendance/employees/${seed.staffId}/daily-snapshots`)
+      .query({ fromDate: '2099-05-10', toDate: '2099-05-04' })
+      .set('Authorization', `Bearer ${adminToken}`);
+
+    expect(invalidRange.status).toBe(400);
+
+    const overMaxRange = await request(app)
+      .get(`/api/attendance/employees/${seed.staffId}/daily-snapshots`)
+      .query({ fromDate: '2099-01-01', toDate: '2099-05-01' })
+      .set('Authorization', `Bearer ${adminToken}`);
+
+    expect(overMaxRange.status).toBe(400);
+  });
+
   it('allows staff to view only their own daily summary', async () => {
     const seed = await seedUsers();
     const staffToken = await login('staff-one');

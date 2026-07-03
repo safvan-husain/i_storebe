@@ -307,6 +307,46 @@ function assertDate(value: unknown, fieldName: string) {
     }
 }
 
+const MAX_EMPLOYEE_SNAPSHOT_RANGE_DAYS = 90;
+
+function parseEmployeeSnapshotDateFilters(req: Request): Record<string, unknown> {
+    const exactDate = req.query.date ? String(req.query.date) : undefined;
+    const fromDate = req.query.fromDate ? String(req.query.fromDate) : undefined;
+    const toDate = req.query.toDate ? String(req.query.toDate) : undefined;
+
+    if (exactDate) {
+        assertDate(exactDate, 'date');
+        if (fromDate || toDate) {
+            throw new AppError('date cannot be combined with fromDate or toDate', 400);
+        }
+        return { date: exactDate };
+    }
+
+    if (fromDate || toDate) {
+        if (!fromDate || !toDate) {
+            throw new AppError('fromDate and toDate must be provided together', 400);
+        }
+        assertDate(fromDate, 'fromDate');
+        assertDate(toDate, 'toDate');
+        if (fromDate > toDate) {
+            throw new AppError('fromDate must be on or before toDate', 400);
+        }
+        const start = new Date(`${fromDate}T00:00:00.000Z`);
+        const end = new Date(`${toDate}T00:00:00.000Z`);
+        const diffDays =
+            Math.floor((end.getTime() - start.getTime()) / (24 * 60 * 60 * 1000)) + 1;
+        if (diffDays > MAX_EMPLOYEE_SNAPSHOT_RANGE_DAYS) {
+            throw new AppError(
+                `date range cannot exceed ${MAX_EMPLOYEE_SNAPSHOT_RANGE_DAYS} days`,
+                400,
+            );
+        }
+        return { date: { $gte: fromDate, $lte: toDate } };
+    }
+
+    return {};
+}
+
 function numberOrDefault(value: unknown, fallback: number) {
     if (value === undefined || value === null || value === '') return fallback;
     const parsed = Number(value);
@@ -2780,8 +2820,10 @@ export const getMyDailySnapshots = ok(async (req, res) => {
 
 export const getEmployeeDailySnapshots = ok(async (req, res) => {
     await assertManagerCanViewEmployee(req, req.params.employeeId);
-    const query: Record<string, unknown> = { employee: toObjectId(req.params.employeeId, 'employeeId') };
-    if (req.query.date) query.date = String(req.query.date);
+    const query: Record<string, unknown> = {
+        employee: toObjectId(req.params.employeeId, 'employeeId'),
+        ...parseEmployeeSnapshotDateFilters(req),
+    };
     const items = await AttendanceDailySnapshot.find(query)
         .populate('employee', 'username')
         .populate('branch', 'name')
