@@ -3182,4 +3182,63 @@ describe('Attendance endpoints e2e', () => {
       source: 'branch',
     }));
   });
+
+  it('scopes employee query to a manager direct staff reports', async () => {
+    const seed = await seedUsers();
+    const otherManager = await User.create({
+      username: 'manager-b',
+      password: 'password123',
+      privilege: 'manager',
+      secondPrivilege: 'regular',
+      isActive: true,
+      isAccountDeleted: false,
+    });
+    await User.create({
+      username: 'staff-two',
+      password: 'password123',
+      privilege: 'staff',
+      secondPrivilege: 'regular',
+      isActive: true,
+      isAccountDeleted: false,
+      manager: otherManager._id,
+    });
+
+    const adminToken = await login('admin');
+    const managerToken = await login('manager-a');
+
+    const adminResponse = await request(app)
+      .post('/api/users/employees/query')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ privileges: ['manager', 'staff'] });
+
+    const managerResponse = await request(app)
+      .post('/api/users/employees/query')
+      .set('Authorization', `Bearer ${managerToken}`)
+      .send({ privileges: ['manager', 'staff'] });
+
+    expect(adminResponse.status).toBe(200);
+    expect(adminResponse.body.employees.map((employee: { username: string }) => employee.username))
+      .toEqual(expect.arrayContaining(['manager-a', 'staff-one', 'staff-two']));
+
+    expect(managerResponse.status).toBe(200);
+    const managerUsernames = managerResponse.body.employees.map(
+      (employee: { username: string }) => employee.username,
+    );
+    expect(managerUsernames).toEqual(['staff-one']);
+    expect(managerUsernames).not.toContain('manager-a');
+    expect(managerUsernames).not.toContain('staff-two');
+    expect(seed.staffId).toBeTruthy();
+  });
+
+  it('rejects staff from querying employees', async () => {
+    await seedUsers();
+    const staffToken = await login('staff-one');
+
+    const response = await request(app)
+      .post('/api/users/employees/query')
+      .set('Authorization', `Bearer ${staffToken}`)
+      .send({ privileges: ['staff'] });
+
+    expect(response.status).toBe(403);
+  });
 });

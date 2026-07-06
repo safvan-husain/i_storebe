@@ -136,21 +136,31 @@ export const getActiveStaffsForManager = asyncHandler(async (req: Request, res: 
 
 export const queryEmployees = asyncHandler(async (req: Request, res: Response) => {
     try {
-        if (req.privilege !== UserPrivilegeSchema.enum.admin) {
-            res.status(403).json({ message: 'Only admins can query employees' });
+        const actorPrivilege = req.privilege;
+        if (actorPrivilege === UserPrivilegeSchema.enum.staff) {
+            res.status(403).json({ message: 'Not authorized to query employees' });
+            return;
+        }
+        if (actorPrivilege === UserPrivilegeSchema.enum.manager && !req.userId) {
+            res.status(403).json({ message: 'Manager id missing' });
             return;
         }
 
         const filter = employeeQuerySchema.parse(req.body ?? {});
+        const isManagerScoped = actorPrivilege === UserPrivilegeSchema.enum.manager;
         const query: FilterQuery<IUser> = {
             isAccountDeleted: { $ne: true },
-            privilege: { $in: filter.privileges },
+            privilege: isManagerScoped ? 'staff' : { $in: filter.privileges },
         };
+
+        if (isManagerScoped) {
+            query.manager = req.userId;
+        }
 
         if (typeof filter.active !== 'undefined') {
             query.isActive = filter.active;
         }
-        if (filter.secondPrivileges && filter.secondPrivileges.length > 0) {
+        if (!isManagerScoped && filter.secondPrivileges && filter.secondPrivileges.length > 0) {
             query.secondPrivilege = { $in: filter.secondPrivileges };
         }
         if (filter.search) {
