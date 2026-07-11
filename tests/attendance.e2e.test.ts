@@ -283,6 +283,7 @@ describe('Attendance endpoints e2e', () => {
         graceLateMinutes: 10,
         graceEarlyLeaveMinutes: 10,
         isActive: true,
+        branchIds: [seed.branchId],
       });
 
     expect(shift.status).toBe(201);
@@ -380,8 +381,125 @@ describe('Attendance endpoints e2e', () => {
     });
   });
 
-  it('blocks manager and staff from attendance configuration endpoints', async () => {
+  it('manages a branch and group schedule through the resolved flow without rewriting snapshots', async () => {
+    const seed = await seedUsers();
+    const adminToken = await login('admin');
+    const shift = await request(app)
+      .post('/api/attendance/configuration/shifts')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        name: 'Resolved Shift',
+        startTime: '09:00',
+        endTime: '17:00',
+        requiredWorkMinutes: 420,
+        branchIds: [seed.branchId],
+      });
+    expect(shift.status).toBe(201);
+
+    const snapshot = await AttendanceDailySnapshot.create({
+      employee: seed.staffId,
+      branch: seed.branchId,
+      date: '2026-01-01',
+      branchTimezone: 'Asia/Dubai',
+      status: 'present',
+      generatedBy: 'manual',
+      calculationBasis: {
+        schemaVersion: 1,
+        capturedAt: new Date('2026-01-01T18:00:00.000Z'),
+        source: 'branch',
+        branchTimezone: 'Asia/Dubai',
+        scheduledSegments: [],
+        requiredWorkMinutes: 0,
+      },
+    });
+    const originalBasis = JSON.parse(JSON.stringify(snapshot.calculationBasis));
+    const weeklyPattern = {
+      monday: shift.body._id,
+      tuesday: shift.body._id,
+      wednesday: shift.body._id,
+      thursday: shift.body._id,
+      friday: shift.body._id,
+      saturday: null,
+      sunday: null,
+    };
+
+    const branchSchedule = await request(app)
+      .put(`/api/attendance/branch-schedules/${seed.branchId}`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ effectiveFrom: '2099-08-01', weeklyPattern });
+    expect(branchSchedule.status).toBe(200);
+    expect(branchSchedule.body.schedule.upcoming.weeklyPattern.monday).toBe(shift.body._id);
+
+    const group = await request(app)
+      .post('/api/attendance/configuration/schedule-groups')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ name: 'Resolved Team', branchId: seed.branchId });
+    expect(group.status).toBe(201);
+    const members = await request(app)
+      .put(`/api/attendance/configuration/schedule-groups/${group.body._id}/members`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ employeeIds: [seed.staffId] });
+    expect(members.status).toBe(200);
+    const groupSchedule = await request(app)
+      .put(`/api/attendance/branch-schedules/${seed.branchId}/groups/${group.body._id}`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ effectiveFrom: '2099-08-02', weeklyPattern });
+    expect(groupSchedule.status).toBe(200);
+    expect(groupSchedule.body.groups[0].members).toHaveLength(1);
+
+    const unchanged = await AttendanceDailySnapshot.findById(snapshot._id).lean();
+    expect(unchanged?.calculationBasis).toEqual(expect.objectContaining(originalBasis as object));
+
+    const cancel = await request(app)
+      .delete(`/api/attendance/branch-schedules/upcoming/${branchSchedule.body.schedule.upcoming.changeId}`)
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(cancel.status).toBe(200);
+    expect(cancel.body.schedule.upcoming).toBeNull();
+  });
+
+  it('keeps legacy attendance configuration payloads working', async () => {
     await seedUsers();
+    const adminToken = await login('admin');
+    const shift = await request(app)
+      .post('/api/attendance/shifts')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        name: 'Legacy Shift',
+        startTime: '09:00',
+        endTime: '17:00',
+        requiredWorkMinutes: 420,
+      });
+    expect(shift.status).toBe(201);
+    expect(shift.body.branchIds ?? []).toEqual([]);
+
+    const group = await request(app)
+      .post('/api/attendance/schedule-groups')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ name: 'Legacy Branchless Group' });
+    expect(group.status).toBe(201);
+    expect(group.body.branchId).toBeUndefined();
+
+    const template = await request(app)
+      .post('/api/attendance/schedule-templates')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        name: 'Legacy Global Template',
+        weeklyPattern: {
+          monday: [shift.body._id],
+          tuesday: [],
+          wednesday: [],
+          thursday: [],
+          friday: [],
+          saturday: [],
+          sunday: [],
+        },
+      });
+    expect(template.status).toBe(201);
+    expect(template.body.branchId).toBeUndefined();
+  });
+
+  it('blocks manager and staff from attendance configuration endpoints', async () => {
+    const seed = await seedUsers();
     const managerToken = await login('manager-a');
     const staffToken = await login('staff-one');
 
@@ -393,6 +511,7 @@ describe('Attendance endpoints e2e', () => {
         startTime: '09:00',
         endTime: '17:00',
         requiredWorkMinutes: 420,
+        branchIds: [seed.branchId],
       });
 
     expect(managerShiftAttempt.status).toBe(403);
@@ -518,6 +637,7 @@ describe('Attendance endpoints e2e', () => {
         startTime: '09:00',
         endTime: '17:00',
         requiredWorkMinutes: 420,
+        branchIds: [seed.branchId],
       });
     expect(dayShift.status).toBe(201);
 
@@ -529,6 +649,7 @@ describe('Attendance endpoints e2e', () => {
         startTime: '11:00',
         endTime: '19:00',
         requiredWorkMinutes: 420,
+        branchIds: [seed.branchId],
       });
     expect(lateShift.status).toBe(201);
 
@@ -677,6 +798,7 @@ describe('Attendance endpoints e2e', () => {
         startTime: '08:00',
         endTime: '16:00',
         requiredWorkMinutes: 420,
+        branchIds: [seed.branchId],
       });
     expect(earlyShift.status).toBe(201);
 
@@ -688,6 +810,7 @@ describe('Attendance endpoints e2e', () => {
         startTime: '12:00',
         endTime: '20:00',
         requiredWorkMinutes: 420,
+        branchIds: [seed.branchId],
       });
     expect(lateShift.status).toBe(201);
 
@@ -1099,6 +1222,7 @@ describe('Attendance endpoints e2e', () => {
         startTime: '08:00',
         endTime: '16:00',
         requiredWorkMinutes: 420,
+        branchIds: [seed.branchId],
       });
     expect(earlyShift.status).toBe(201);
 
@@ -1110,6 +1234,7 @@ describe('Attendance endpoints e2e', () => {
         startTime: '12:00',
         endTime: '20:00',
         requiredWorkMinutes: 420,
+        branchIds: [seed.branchId],
       });
     expect(lateShift.status).toBe(201);
 
@@ -1121,6 +1246,7 @@ describe('Attendance endpoints e2e', () => {
         startTime: '10:00',
         endTime: '18:00',
         requiredWorkMinutes: 420,
+        branchIds: [seed.branchId],
       });
     expect(exceptionShift.status).toBe(201);
 

@@ -14,12 +14,16 @@ import {
     createPrivilege,
     createScheduleAssignment,
     createScheduleGroup,
+    createConfigurationScheduleGroup,
     createScheduleTemplate,
     createShift,
+    createConfigurationShift,
+    cancelUpcomingSchedule,
     finalizeDailySnapshots,
     getEmployeeDailySnapshots,
     getEmployeePrivileges,
     getEmployeeSchedule,
+    getBranchSchedule,
     getMyAttendanceStatus,
     getMonthlySummary,
     getMyDailySnapshots,
@@ -34,10 +38,13 @@ import {
     listScheduleAssignments,
     listScheduleGroupMemberOptions,
     listScheduleGroupMembers,
+    listConfigurationScheduleGroupMembers,
     listScheduleGroups,
+    listConfigurationScheduleGroups,
     listScheduleTemplates,
     listShiftMemberships,
     listShifts,
+    listConfigurationShifts,
     previewDayOverrides,
     previewScheduleGroupMembers,
     removeScheduleGroupMember,
@@ -51,8 +58,12 @@ import {
     updatePrivilege,
     updateScheduleAssignment,
     updateScheduleGroup,
+    updateConfigurationScheduleGroup,
     updateScheduleTemplate,
     updateShift,
+    updateConfigurationShift,
+    putBranchSchedule,
+    putGroupSchedule,
 } from '../controllers/attendance/attendanceController';
 
 const router = express.Router();
@@ -65,6 +76,13 @@ router.route('/shifts')
 
 router.route('/shifts/:id')
     .patch(updateShift);
+
+router.route('/configuration/shifts')
+    .post(createConfigurationShift)
+    .get(listConfigurationShifts);
+
+router.route('/configuration/shifts/:id')
+    .patch(updateConfigurationShift);
 
 router.route('/shift-memberships')
     .post(assignShiftMembers)
@@ -135,6 +153,26 @@ router.route('/schedule-groups/:id/members/preview')
 router.route('/schedule-groups/:id/members/:employeeId')
     .delete(removeScheduleGroupMember);
 
+router.route('/configuration/schedule-groups')
+    .post(createConfigurationScheduleGroup)
+    .get(listConfigurationScheduleGroups);
+
+router.route('/configuration/schedule-groups/:id')
+    .patch(updateConfigurationScheduleGroup);
+
+router.route('/configuration/schedule-groups/:id/members')
+    .get(listConfigurationScheduleGroupMembers)
+    .put(setScheduleGroupMembers);
+
+router.route('/configuration/schedule-groups/:id/member-options')
+    .get(listScheduleGroupMemberOptions);
+
+router.route('/configuration/schedule-groups/:id/members/preview')
+    .post(previewScheduleGroupMembers);
+
+router.route('/configuration/schedule-groups/:id/members/:employeeId')
+    .delete(removeScheduleGroupMember);
+
 router.route('/remote-workers')
     .get(getRemoteWorkers);
 
@@ -150,6 +188,11 @@ router.route('/schedule-assignments')
 
 router.route('/schedule-assignments/:id')
     .patch(updateScheduleAssignment);
+
+router.get('/branch-schedules/:branchId', getBranchSchedule);
+router.put('/branch-schedules/:branchId', putBranchSchedule);
+router.put('/branch-schedules/:branchId/groups/:groupId', putGroupSchedule);
+router.delete('/branch-schedules/upcoming/:changeId', cancelUpcomingSchedule);
 
 router.get('/employees/:employeeId/schedule', getEmployeeSchedule);
 router.get('/me/status', getMyAttendanceStatus);

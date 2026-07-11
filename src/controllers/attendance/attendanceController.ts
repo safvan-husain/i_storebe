@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import asyncHandler from 'express-async-handler';
 import mongoose, { Types } from 'mongoose';
+import { createHash } from 'crypto';
 import { AppError, onCatchError } from '../../middleware/error';
 import User from '../../models/User';
 import Branch from '../../models/Branch';
@@ -182,6 +183,59 @@ async function assertManagerBranch(req: Request) {
         throw new AppError('Manager branch not found', 403);
     }
     return branchId;
+}
+
+async function resolveManagedBranch(req: Request, requestedBranchId: unknown) {
+    const requested = toObjectId(requestedBranchId, 'branchId');
+    if (req.privilege === 'manager') {
+        const actorBranchId = await assertManagerBranch(req);
+        if (String(actorBranchId) !== String(requested)) {
+            throw new AppError('Managers can only manage their own branch schedule', 403);
+        }
+    } else {
+        requireAdmin(req);
+    }
+    const branch = await Branch.findOne({ _id: requested, isActive: true });
+    if (!branch) throw new AppError('Branch not found or inactive', 404);
+    return branch;
+}
+
+async function normalizeShiftBranchIds(value: unknown) {
+    if (!Array.isArray(value)) {
+        throw new AppError('branchIds must be a non-empty list of active branches', 400);
+    }
+    const ids = Array.from(new Set(value.map(String))).map((id) => toObjectId(id, 'branchIds'));
+    if (ids.length === 0) {
+        throw new AppError('At least one active branch is required', 400);
+    }
+    const count = await Branch.countDocuments({ _id: { $in: ids }, isActive: true });
+    if (count !== ids.length) {
+        throw new AppError('Every shift branch must be active', 400);
+    }
+    return ids;
+}
+
+async function assertShiftCoverageCanBeRemoved(shiftId: Types.ObjectId, removedBranchIds: Types.ObjectId[]) {
+    if (removedBranchIds.length === 0) return;
+    const templates = await AttendanceScheduleTemplate.find({
+        isActive: true,
+        $or: weekdays.map((weekday) => ({ [`weeklyPattern.${weekday}`]: shiftId })),
+    }, { _id: 1 }).lean();
+    if (templates.length === 0) return;
+    const templateIds = templates.map((item) => item._id);
+    const groups = await AttendanceScheduleGroup.find({ branch: { $in: removedBranchIds } }, { _id: 1 }).lean();
+    const inUse = await AttendanceScheduleAssignment.exists({
+        template: { $in: templateIds },
+        isActive: true,
+        supersededAt: { $exists: false },
+        $or: [
+            { targetType: 'branch', branch: { $in: removedBranchIds } },
+            { targetType: 'group', group: { $in: groups.map((item) => item._id) } },
+        ],
+    });
+    if (inUse) {
+        throw new AppError('Cannot remove a branch while its current or upcoming schedule uses this shift', 409);
+    }
 }
 
 async function assertCanManageGroup(req: Request, group: { branch?: Types.ObjectId | string | null }) {
@@ -576,10 +630,12 @@ function managedGroupMembershipQuery(_asOf = new Date()) {
 
 function activeAssignmentQueryForRange(dayStart: Date, dayEnd: Date) {
     return {
-        isActive: true,
         supersededAt: { $exists: false },
         effectiveFrom: { $lte: dayEnd },
-        $or: [{ expiresAt: { $exists: false } }, { expiresAt: null }, { expiresAt: { $gt: dayStart } }],
+        $and: [
+            { $or: [{ isActive: true }, { configurationStatus: 'upcoming' }] },
+            { $or: [{ expiresAt: { $exists: false } }, { expiresAt: null }, { expiresAt: { $gt: dayStart } }] },
+        ],
     };
 }
 
@@ -587,8 +643,8 @@ async function groupHasActiveScheduleAssignment(groupId: Types.ObjectId) {
     const assignment = await AttendanceScheduleAssignment.findOne({
         targetType: 'group',
         group: groupId,
-        isActive: true,
         supersededAt: { $exists: false },
+        $or: [{ isActive: true }, { configurationStatus: 'upcoming' }],
     }).lean();
     return !!assignment;
 }
@@ -643,8 +699,8 @@ async function scheduleGroupSummary(group: any, asOf = new Date(), managementVie
     const activeAssignment = await AttendanceScheduleAssignment.findOne({
         targetType: 'group',
         group: group._id,
-        isActive: true,
         supersededAt: { $exists: false },
+        $or: [{ isActive: true }, { configurationStatus: 'upcoming' }],
     }, { _id: 1 }).lean();
 
     const groupObject = typeof group.toObject === 'function' ? group.toObject() : group;
@@ -1389,9 +1445,14 @@ function ok(handler: (req: Request, res: Response) => Promise<void>) {
     });
 }
 
-export const createShift = ok(async (req, res) => {
+async function createShiftFromRequest(req: Request, strictCoverage: boolean) {
     requireAdmin(req);
     const createdBy = requireUserId(req);
+    const branchIds = strictCoverage
+        ? await normalizeShiftBranchIds(req.body.branchIds)
+        : Array.isArray(req.body.branchIds)
+            ? await normalizeShiftBranchIds(req.body.branchIds)
+            : undefined;
     const hasWeeklyPattern = hasExplicitWeeklyPattern(req.body);
     const weeklyPattern = normalizeWeeklyPattern(req.body);
     const firstRule = firstWorkingRule(weeklyPattern);
@@ -1403,7 +1464,7 @@ export const createShift = ok(async (req, res) => {
     const requiredWorkMinutes = hasWeeklyPattern
         ? req.body.requiredWorkMinutes ?? firstRule!.requiredWorkMinutes
         : numberOrDefault(req.body.requiredWorkMinutes, 0);
-    const shift = await AttendanceShift.create({
+    return AttendanceShift.create({
         name: req.body.name,
         startTime: req.body.startTime ?? firstRule!.startTime,
         endTime: req.body.endTime ?? firstRule!.endTime,
@@ -1413,8 +1474,18 @@ export const createShift = ok(async (req, res) => {
         graceLateMinutes: numberOrDefault(req.body.graceLateMinutes, 0),
         graceEarlyLeaveMinutes: numberOrDefault(req.body.graceEarlyLeaveMinutes, 0),
         isActive: req.body.isActive ?? true,
+        ...(branchIds ? { branchIds } : {}),
         createdBy,
     });
+}
+
+export const createShift = ok(async (req, res) => {
+    const shift = await createShiftFromRequest(req, false);
+    res.status(201).json(shift);
+});
+
+export const createConfigurationShift = ok(async (req, res) => {
+    const shift = await createShiftFromRequest(req, true);
     res.status(201).json(shift);
 });
 
@@ -1424,12 +1495,37 @@ export const listShifts = ok(async (req, res) => {
     res.status(200).json({ items: shifts });
 });
 
-export const updateShift = ok(async (req, res) => {
+export const listConfigurationShifts = ok(async (req, res) => {
+    requireAdminOrManager(req);
+    const actorBranchId = await getActorBranchId(req);
+    const requestedBranchId = req.query.branchId
+        ? toObjectId(String(req.query.branchId), 'branchId')
+        : undefined;
+    if (actorBranchId && requestedBranchId && String(actorBranchId) !== String(requestedBranchId)) {
+        throw new AppError('Managers can only view shifts for their own branch', 403);
+    }
+    const branchId = actorBranchId ?? requestedBranchId;
+    const selectable = req.query.selectable === 'true' || !!actorBranchId;
+    const query: Record<string, unknown> = {};
+    if (selectable) query.isActive = true;
+    if (branchId) query.branchIds = branchId;
+    const shifts = await AttendanceShift.find(query).sort({ name: 1 });
+    res.status(200).json({ items: shifts });
+});
+
+async function updateShiftFromRequest(req: Request, strictCoverage: boolean) {
     requireAdmin(req);
     const existing = await AttendanceShift.findById(req.params.id);
     if (!existing) throw new AppError('Shift not found', 404);
 
     const update: Record<string, unknown> = { ...req.body };
+    if (strictCoverage) {
+        const branchIds = await normalizeShiftBranchIds(req.body.branchIds);
+        const included = new Set(branchIds.map(String));
+        const removed = (existing.branchIds ?? []).filter((id) => !included.has(String(id)));
+        await assertShiftCoverageCanBeRemoved(existing._id, removed);
+        update.branchIds = branchIds;
+    }
     const hasWeeklyPattern = hasExplicitWeeklyPattern(req.body);
     if (hasWeeklyPattern) {
         const bodyForPattern = {
@@ -1474,8 +1570,16 @@ export const updateShift = ok(async (req, res) => {
         savedAt: new Date(),
     });
     existing.set({ ...update, version: existing.version + 1 });
-    const shift = await existing.save();
-    if (!shift) throw new AppError('Shift not found', 404);
+    return existing.save();
+}
+
+export const updateShift = ok(async (req, res) => {
+    const shift = await updateShiftFromRequest(req, false);
+    res.status(200).json(shift);
+});
+
+export const updateConfigurationShift = ok(async (req, res) => {
+    const shift = await updateShiftFromRequest(req, true);
     res.status(200).json(shift);
 });
 
@@ -2008,6 +2112,66 @@ export const updateScheduleGroup = ok(async (req, res) => {
     res.status(200).json(await scheduleGroupSummary(group));
 });
 
+export const createConfigurationScheduleGroup = ok(async (req, res) => {
+    requireAdmin(req);
+    const branch = toObjectId(req.body.branchId, 'branchId');
+    const branchDoc = await Branch.findOne({ _id: branch, isActive: true }, { _id: 1 }).lean();
+    if (!branchDoc) throw new AppError('Branch not found or inactive', 404);
+    const group = await AttendanceScheduleGroup.create({
+        name: req.body.name,
+        description: req.body.description,
+        branch,
+        isActive: req.body.isActive ?? true,
+        createdBy: requireUserId(req),
+    });
+    res.status(201).json(await scheduleGroupSummary(group));
+});
+
+export const listConfigurationScheduleGroups = ok(async (req, res) => {
+    requireAdminOrManager(req);
+    const actorBranchId = await getActorBranchId(req);
+    const requestedBranchId = req.query.branchId
+        ? toObjectId(String(req.query.branchId), 'branchId')
+        : undefined;
+    if (actorBranchId && requestedBranchId && String(actorBranchId) !== String(requestedBranchId)) {
+        throw new AppError('Managers can only view groups for their own branch', 403);
+    }
+    const branchId = actorBranchId ?? requestedBranchId;
+    const query: Record<string, unknown> = { isActive: true, branch: { $exists: true, $ne: null } };
+    if (branchId) query.branch = branchId;
+    const groups = await AttendanceScheduleGroup.find(query).sort({ name: 1 });
+    res.status(200).json({ items: await Promise.all(groups.map((group) => scheduleGroupSummary(group))) });
+});
+
+export const updateConfigurationScheduleGroup = ok(async (req, res) => {
+    requireAdminOrManager(req);
+    const group = await AttendanceScheduleGroup.findById(req.params.id);
+    if (!group || !group.branch) throw new AppError('Branch schedule group not found', 404);
+    await assertCanManageGroup(req, group);
+    if (req.body.branchId !== undefined && String(req.body.branchId) !== String(group.branch)) {
+        throw new AppError('A schedule group branch cannot be changed', 400);
+    }
+    if (req.body.isActive === false) {
+        const [hasMembers, hasSchedules] = await Promise.all([
+            AttendanceScheduleGroupMembership.exists({ group: group._id, ...managedGroupMembershipQuery() }),
+            AttendanceScheduleAssignment.exists({
+                targetType: 'group',
+                group: group._id,
+                supersededAt: { $exists: false },
+                $or: [{ isActive: true }, { configurationStatus: 'upcoming' }],
+            }),
+        ]);
+        if (hasMembers || hasSchedules) {
+            throw new AppError('Move members and cancel schedules before deactivating this group', 409);
+        }
+    }
+    if (req.body.name !== undefined) group.name = req.body.name;
+    if (req.body.description !== undefined) group.description = req.body.description;
+    if (req.body.isActive !== undefined) group.isActive = req.body.isActive === true;
+    await group.save();
+    res.status(200).json(await scheduleGroupSummary(group));
+});
+
 async function scheduleGroupMembers(groupId: Types.ObjectId, asOf = new Date(), managementView = true) {
     const memberships = await AttendanceScheduleGroupMembership.find({
         group: groupId,
@@ -2123,6 +2287,15 @@ export const listScheduleGroupMembers = ok(async (req, res) => {
     if (!group) throw new AppError('Schedule group not found', 404);
     const managementView = req.query.managementView !== 'false';
     res.status(200).json({ items: await scheduleGroupMembers(groupId, new Date(), managementView) });
+});
+
+export const listConfigurationScheduleGroupMembers = ok(async (req, res) => {
+    requireAdminOrManager(req);
+    const groupId = toObjectId(req.params.id, 'id');
+    const group = await AttendanceScheduleGroup.findById(groupId).lean();
+    if (!group || !group.branch) throw new AppError('Branch schedule group not found', 404);
+    await assertCanManageGroup(req, group);
+    res.status(200).json({ items: await scheduleGroupMembers(groupId, new Date(), true) });
 });
 
 async function scheduleGroupTransferPreview(groupId: Types.ObjectId, employeeIds: Types.ObjectId[]) {
@@ -2351,6 +2524,271 @@ export const setRemoteWorkerMembers = ok(async (req, res) => {
     });
 });
 
+type ResolvedWeeklyPattern = Record<AttendanceWeekday, Types.ObjectId[]>;
+
+function normalizeResolvedWeeklyPattern(value: unknown): ResolvedWeeklyPattern {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        throw new AppError('weeklyPattern must be an object', 400);
+    }
+    const source = value as Record<string, unknown>;
+    return weekdays.reduce((pattern, weekday) => {
+        const raw = source[weekday];
+        if (raw === null || raw === undefined || raw === '') {
+            pattern[weekday] = [];
+            return pattern;
+        }
+        const values = Array.isArray(raw) ? raw : [raw];
+        if (values.length > 1) {
+            throw new AppError(`weeklyPattern.${weekday} supports one shift`, 400);
+        }
+        pattern[weekday] = values.map((id) => toObjectId(String(id), `weeklyPattern.${weekday}`));
+        return pattern;
+    }, {} as ResolvedWeeklyPattern);
+}
+
+async function assertPatternAvailableToBranch(pattern: ResolvedWeeklyPattern, branchId: Types.ObjectId) {
+    const shiftIds = Array.from(new Set(weekdays.flatMap((weekday) => pattern[weekday].map(String))));
+    if (shiftIds.length === 0) throw new AppError('At least one working day is required', 400);
+    const shifts = await AttendanceShift.find({
+        _id: { $in: shiftIds },
+        isActive: true,
+        branchIds: branchId,
+    }, { _id: 1 }).lean();
+    if (shifts.length !== shiftIds.length) {
+        throw new AppError('Every selected shift must be active and available to the target branch', 400);
+    }
+}
+
+function schedulePatternKey(pattern: ResolvedWeeklyPattern) {
+    const stable = weekdays.map((weekday) => [weekday, pattern[weekday].map(String)]);
+    return createHash('sha256').update(JSON.stringify(stable)).digest('hex');
+}
+
+function sameSchedulePattern(value: any, pattern: ResolvedWeeklyPattern) {
+    return weekdays.every((weekday) => {
+        const existing = (value?.[weekday] ?? []).map(String);
+        const requested = pattern[weekday].map(String);
+        return existing.length === requested.length && existing.every((id: string, index: number) => id === requested[index]);
+    });
+}
+
+async function findOrCreateInternalTemplate(
+    branchId: Types.ObjectId,
+    pattern: ResolvedWeeklyPattern,
+    createdBy: Types.ObjectId,
+    session?: any,
+) {
+    const candidates = await AttendanceScheduleTemplate.find({ branch: branchId, isActive: true }).session(session ?? null);
+    const existing = candidates.find((item) => sameSchedulePattern(item.weeklyPattern, pattern));
+    if (existing) return existing;
+    const key = schedulePatternKey(pattern);
+    const [created] = await AttendanceScheduleTemplate.create([{
+        name: `Internal schedule ${key.slice(0, 16)}`,
+        type: 'weekly',
+        weeklyPattern: pattern,
+        branch: branchId,
+        isActive: true,
+        createdBy,
+    }], session ? { session } : undefined);
+    return created;
+}
+
+function targetAssignmentFilter(targetType: 'branch' | 'group', branchId: Types.ObjectId, groupId?: Types.ObjectId) {
+    return targetType === 'branch'
+        ? { targetType: 'branch', branch: branchId }
+        : { targetType: 'group', group: groupId };
+}
+
+async function resolvedTargetSchedule(
+    targetType: 'branch' | 'group',
+    branchId: Types.ObjectId,
+    groupId?: Types.ObjectId,
+) {
+    const now = new Date();
+    const target = targetAssignmentFilter(targetType, branchId, groupId);
+    const base = { ...target, supersededAt: { $exists: false } };
+    const [current, upcoming] = await Promise.all([
+        AttendanceScheduleAssignment.findOne({
+            ...base,
+            effectiveFrom: { $lte: now },
+            $and: [
+                { $or: [{ isActive: true }, { configurationStatus: 'upcoming' }] },
+                { $or: [{ expiresAt: { $exists: false } }, { expiresAt: null }, { expiresAt: { $gt: now } }] },
+            ],
+        }).sort({ effectiveFrom: -1 }).lean(),
+        AttendanceScheduleAssignment.findOne({
+            ...base,
+            configurationStatus: 'upcoming',
+            effectiveFrom: { $gt: now },
+        }).sort({ effectiveFrom: 1 }).lean(),
+    ]);
+    const templateIds = [current?.template, upcoming?.template].filter(Boolean);
+    const templates = await AttendanceScheduleTemplate.find({ _id: { $in: templateIds } }).lean();
+    const serialize = (assignment: any) => {
+        if (!assignment) return null;
+        const template = templates.find((item) => String(item._id) === String(assignment.template));
+        if (!template) return null;
+        return {
+            changeId: String(assignment._id),
+            effectiveFrom: assignment.effectiveFrom,
+            weeklyPattern: weekdays.reduce((result, weekday) => {
+                const ids = ((template.weeklyPattern as any)?.[weekday] ?? []).map(String);
+                result[weekday] = ids[0] ?? null;
+                return result;
+            }, {} as Record<string, string | null>),
+        };
+    };
+    return { current: serialize(current), upcoming: serialize(upcoming) };
+}
+
+async function resolvedBranchScheduleState(branch: any) {
+    const groups = await AttendanceScheduleGroup.find({ branch: branch._id, isActive: true }).sort({ name: 1 });
+    const groupStates = await Promise.all(groups.map(async (group) => ({
+        id: String(group._id),
+        name: group.name,
+        description: group.description,
+        members: await scheduleGroupMembers(group._id),
+        schedule: await resolvedTargetSchedule('group', branch._id, group._id),
+    })));
+    const covered = new Set(groupStates.flatMap((group) => group.members.map((member) => member.employeeId)));
+    const populated = await Branch.findById(branch._id)
+        .populate('manager', 'username privilege isActive')
+        .populate('staffs', 'username privilege isActive')
+        .lean() as any;
+    const employees = [populated?.manager, ...(populated?.staffs ?? [])]
+        .filter((employee: any) => employee?.isActive === true)
+        .map((employee: any) => ({
+            employeeId: String(employee._id),
+            employeeName: employee.username,
+            privilege: employee.privilege,
+        }));
+    return {
+        branch: {
+            id: String(branch._id),
+            name: branch.name,
+            timezone: branch.timezone,
+        },
+        schedule: await resolvedTargetSchedule('branch', branch._id),
+        groups: groupStates,
+        unassignedEmployees: employees.filter((employee: any) => !covered.has(employee.employeeId)),
+    };
+}
+
+async function runScheduleMutation<T>(work: (session?: any) => Promise<T>) {
+    const topology = (mongoose.connection.getClient() as any).topology?.description?.type;
+    if (!['ReplicaSetWithPrimary', 'Sharded'].includes(topology)) return work();
+    let result!: T;
+    await mongoose.connection.transaction(async (session) => {
+        result = await work(session);
+    });
+    return result;
+}
+
+export const getBranchSchedule = ok(async (req, res) => {
+    requireAdminOrManager(req);
+    const branch = await resolveManagedBranch(req, req.params.branchId);
+    res.status(200).json(await resolvedBranchScheduleState(branch));
+});
+
+async function putResolvedSchedule(req: Request, res: Response, targetType: 'branch' | 'group') {
+    requireAdminOrManager(req);
+    const branch = await resolveManagedBranch(req, req.params.branchId);
+    const groupId = targetType === 'group' ? toObjectId(req.params.groupId, 'groupId') : undefined;
+    if (groupId) {
+        const group = await AttendanceScheduleGroup.findOne({ _id: groupId, branch: branch._id, isActive: true });
+        if (!group) throw new AppError('Schedule group not found in this branch', 404);
+    }
+    const pattern = normalizeResolvedWeeklyPattern(req.body.weeklyPattern);
+    await assertPatternAvailableToBranch(pattern, branch._id);
+    const localToday = branchLocalParts(new Date(), branch.timezone).date;
+    const effectiveDate = String(req.body.effectiveFrom ?? '');
+    assertDate(effectiveDate, 'effectiveFrom');
+    if (effectiveDate <= localToday) {
+        throw new AppError('Schedule changes must start on a future branch-local day', 400);
+    }
+    const effectiveFrom = branchLocalDateTimeToUtc(effectiveDate, '00:00', branch.timezone);
+    const createdBy = requireUserId(req);
+    const target = targetAssignmentFilter(targetType, branch._id, groupId);
+
+    await runScheduleMutation(async (session) => {
+        const queryOptions = session ? { session } : undefined;
+        const upcoming = await AttendanceScheduleAssignment.find({
+            ...target,
+            configurationStatus: 'upcoming',
+            supersededAt: { $exists: false },
+            effectiveFrom: { $gt: new Date() },
+        }).session(session ?? null);
+        if (upcoming.length > 0) {
+            await AttendanceScheduleAssignment.updateMany(
+                { _id: { $in: upcoming.map((item) => item._id) } },
+                { $set: { isActive: false, supersededAt: new Date() } },
+                queryOptions,
+            );
+        }
+        const current = await AttendanceScheduleAssignment.findOne({
+            ...target,
+            supersededAt: { $exists: false },
+            effectiveFrom: { $lte: new Date() },
+            $and: [
+                { $or: [{ isActive: true }, { configurationStatus: 'upcoming' }] },
+                { $or: [{ expiresAt: { $exists: false } }, { expiresAt: null }, { expiresAt: { $gt: new Date() } }] },
+            ],
+        }).sort({ effectiveFrom: -1 }).session(session ?? null);
+        if (current) {
+            current.expiresAt = effectiveFrom;
+            await current.save(queryOptions);
+        }
+        const template = await findOrCreateInternalTemplate(branch._id, pattern, createdBy, session);
+        await AttendanceScheduleAssignment.create([{
+            template: template._id,
+            targetType,
+            ...(targetType === 'branch' ? { branch: branch._id } : { group: groupId }),
+            effectiveFrom,
+            isActive: false,
+            configurationStatus: 'upcoming',
+            createdBy,
+        }], queryOptions);
+    });
+    res.status(200).json(await resolvedBranchScheduleState(branch));
+}
+
+export const putBranchSchedule = ok((req, res) => putResolvedSchedule(req, res, 'branch'));
+export const putGroupSchedule = ok((req, res) => putResolvedSchedule(req, res, 'group'));
+
+export const cancelUpcomingSchedule = ok(async (req, res) => {
+    requireAdminOrManager(req);
+    const changeId = toObjectId(req.params.changeId, 'changeId');
+    const upcoming = await AttendanceScheduleAssignment.findOne({
+        _id: changeId,
+        configurationStatus: 'upcoming',
+        supersededAt: { $exists: false },
+        effectiveFrom: { $gt: new Date() },
+        targetType: { $in: ['branch', 'group'] },
+    });
+    if (!upcoming) throw new AppError('Upcoming schedule change not found', 404);
+    const branchId = upcoming.targetType === 'branch'
+        ? upcoming.branch
+        : (await AttendanceScheduleGroup.findById(upcoming.group, { branch: 1 }).lean())?.branch;
+    const branch = await resolveManagedBranch(req, String(branchId ?? ''));
+    const target = targetAssignmentFilter(upcoming.targetType as 'branch' | 'group', branch._id, upcoming.group);
+    await runScheduleMutation(async (session) => {
+        const options = session ? { session } : undefined;
+        await AttendanceScheduleAssignment.updateOne(
+            { _id: upcoming._id },
+            { $set: { isActive: false, supersededAt: new Date() } },
+            options,
+        );
+        await AttendanceScheduleAssignment.updateOne({
+            ...target,
+            supersededAt: { $exists: false },
+            effectiveFrom: { $lt: upcoming.effectiveFrom },
+            expiresAt: upcoming.effectiveFrom,
+            $or: [{ isActive: true }, { configurationStatus: 'upcoming' }],
+        }, { $unset: { expiresAt: 1 } }, options);
+    });
+    res.status(200).json(await resolvedBranchScheduleState(branch));
+});
+
 export const createScheduleTemplate = ok(async (req, res) => {
     requireAdminOrManager(req);
     let branch: Types.ObjectId | undefined;
@@ -2421,6 +2859,18 @@ export const createScheduleAssignment = ok(async (req, res) => {
             : req.body.targetType === 'employee'
                 ? { targetType: 'employee', employee, isActive: true, supersededAt: { $exists: false } }
                 : { targetType: 'global', isActive: true, supersededAt: { $exists: false } };
+    const pendingTarget = req.body.targetType === 'branch'
+        ? { targetType: 'branch', branch }
+        : req.body.targetType === 'group'
+            ? { targetType: 'group', group }
+            : req.body.targetType === 'employee'
+                ? { targetType: 'employee', employee }
+                : { targetType: 'global' };
+    await AttendanceScheduleAssignment.updateMany({
+        ...pendingTarget,
+        configurationStatus: 'upcoming',
+        supersededAt: { $exists: false },
+    }, { $set: { supersededAt: new Date() } });
     await AttendanceScheduleAssignment.updateMany(filter, { $set: { supersededAt: new Date(), isActive: false } });
     const assignment = await AttendanceScheduleAssignment.create({
         template,
@@ -2440,7 +2890,9 @@ export const listScheduleAssignments = ok(async (req, res) => {
     requireAdminOrManager(req);
     const actorBranchId = await getActorBranchId(req);
     if (!actorBranchId) {
-        const items = await AttendanceScheduleAssignment.find().sort({ createdAt: -1 });
+        const items = await AttendanceScheduleAssignment.find({
+            configurationStatus: { $ne: 'upcoming' },
+        }).sort({ createdAt: -1 });
         res.status(200).json({ items: items.map(serializeScheduleAssignment) });
         return;
     }
@@ -2450,6 +2902,7 @@ export const listScheduleAssignments = ok(async (req, res) => {
     }, { _id: 1 }).lean();
     const groupIds = branchGroups.map((item) => item._id);
     const items = await AttendanceScheduleAssignment.find({
+        configurationStatus: { $ne: 'upcoming' },
         $or: [
             { targetType: 'branch', branch: actorBranchId },
             { targetType: 'group', group: { $in: groupIds } },

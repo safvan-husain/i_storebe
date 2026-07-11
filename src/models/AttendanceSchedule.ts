@@ -35,6 +35,7 @@ export interface IAttendanceScheduleAssignment extends Document {
     expiresAt?: Date;
     supersededAt?: Date;
     isActive: boolean;
+    configurationStatus?: 'upcoming';
     createdBy: Types.ObjectId;
     createdAt: Date;
     updatedAt: Date;
@@ -97,6 +98,10 @@ const AttendanceScheduleTemplateSchema = new mongoose.Schema(
         isActive: {
             type: Boolean,
             default: true,
+        },
+        configurationStatus: {
+            type: String,
+            enum: ['upcoming'],
         },
         createdBy: {
             type: mongoose.Schema.Types.ObjectId,

@@ -40,6 +40,7 @@ export interface IAttendanceShift extends Document {
     graceLateMinutes: number;
     graceEarlyLeaveMinutes: number;
     isActive: boolean;
+    branchIds: Types.ObjectId[];
     createdBy: Types.ObjectId;
     createdAt: Date;
     updatedAt: Date;
@@ -141,6 +142,10 @@ const AttendanceShiftSchema = new mongoose.Schema(
             type: Boolean,
             default: true,
         },
+        branchIds: [{
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'Branch',
+        }],
         createdBy: {
             type: mongoose.Schema.Types.ObjectId,
             ref: 'User',
@@ -153,6 +158,7 @@ const AttendanceShiftSchema = new mongoose.Schema(
 );
 
 AttendanceShiftSchema.index({ isActive: 1, name: 1 });
+AttendanceShiftSchema.index({ branchIds: 1, isActive: 1, name: 1 });
 
 const AttendanceShift = mongoose.model<IAttendanceShift>('AttendanceShift', AttendanceShiftSchema);
 
