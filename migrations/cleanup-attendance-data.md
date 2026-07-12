@@ -63,35 +63,37 @@ Expected result:
 - Their open HR memberships are ended rather than deleted.
 - KANNUR HEAD OFFICE's existing manager is not replaced.
 
-### 19TH MILE schedule groups
+### 19TH MILE schedule
 
 Branch:
 
 - Branch: `19TH MILE`
 - Branch ID: `6a08c65f1e1885f4145eb591`
 
-Rename and scope the existing groups instead of creating duplicate group records:
+Required result:
 
-- Rename `test` (`6a0ee6c8a1434d9c2605430d`) to `19th Mile Group 1`.
-- Rename `test-2` (`6a0ee689a1434d9c260542ea`) to `19th Mile Group 2`.
-- Set both groups' branch scope to `19TH MILE` (`6a08c65f1e1885f4145eb591`).
-- Preserve their existing schedule assignments and effective dates.
+- Configure one branch-scoped schedule for `19TH MILE` from 9:30 AM to 10 PM.
+- Required work is 690 minutes after the one-hour break allowance.
+- The branch schedule applies to all current 19TH MILE managers and staff without requiring schedule groups.
+- Retire the legacy `test` (`6a0ee6c8a1434d9c2605430d`) and `test-2` (`6a0ee689a1434d9c260542ea`) group assignments.
+- Mark the two legacy groups inactive after their assignments and open memberships are closed. Preserve the records for audit history rather than deleting them.
 
-Current active 19TH MILE roster:
+Current active 19TH MILE roster covered directly by the branch schedule:
 
-- `Abhijith Mngr` (`686a4a5e6feea51edf8d2cf2`, manager) is currently in `test`; retain in `19th Mile Group 1`.
-- `Nadeer 19th mile` (`69b7a9068c8282c866d215b0`, staff) is currently in `test-2`; retain in `19th Mile Group 2`.
-- `SAIFUDHEEN` (`6a4761235c07f1cf65bb6dc4`, staff) is not currently in either group; add to `19th Mile Group 1`.
+- `Abhijith Mngr` (`686a4a5e6feea51edf8d2cf2`, manager).
+- `Nadeer 19th mile` (`69b7a9068c8282c866d215b0`, staff).
+- `SAIFUDHEEN` (`6a4761235c07f1cf65bb6dc4`, staff).
 
-Remove stale active group memberships:
+Close all open memberships in the legacy groups:
 
-- Remove `SHAMIL 19TH MILE` (`6948165a06ea855a1268fde6`) from `test`. The user is inactive and the 19TH MILE branch membership ended on July 9, 2026.
-- Remove `IRFAN LK` (`6a09cde6447993297e792e86`) from `test-2`. The user is active, but the 19TH MILE branch membership ended on July 9, 2026.
-- End these group memberships rather than deleting their historical records.
+- Close Abhijith Mngr's `test` membership and Nadeer 19th mile's `test-2` membership because the branch schedule replaces both group schedules.
+- Close `SHAMIL 19TH MILE` (`6948165a06ea855a1268fde6`) in `test`. The user is inactive and the branch membership ended on July 9, 2026.
+- Close `IRFAN LK` (`6a09cde6447993297e792e86`) in `test-2`. The user is active, but the branch membership ended on July 9, 2026.
+- End memberships rather than deleting their historical records.
 
 No action is required for `devaj` (`67f618785281197161debf7c`) because the `test` group membership is already closed.
 
-`NADEER 19` (`68c14136f3a7510bc25d5a5f`) is still present in the branch's embedded staff list but is inactive and is not a member of either schedule group. Review this stale branch reference separately; do not add the user to either group.
+`NADEER 19` (`68c14136f3a7510bc25d5a5f`) is still present in the branch's embedded staff list but is inactive. Review this stale branch reference separately.
 
 ### Duplicate NADEER account
 
@@ -179,12 +181,12 @@ Recommended migration policy:
 22. Update manager-facing shift queries to return only active global shifts and active shifts owned by the manager's branch.
 23. Add backend validation so managers cannot place another branch's shift or an inactive shift into a schedule template.
 24. Preserve existing snapshot calculation bases and historical attendance records without rewriting their captured shift data.
-25. Rename `test` to `19th Mile Group 1` and set its branch scope to 19TH MILE.
-26. Rename `test-2` to `19th Mile Group 2` and set its branch scope to 19TH MILE.
-27. Retain Abhijith Mngr in Group 1 and Nadeer 19th mile in Group 2.
-28. End SHAMIL 19TH MILE's Group 1 membership and IRFAN LK's Group 2 membership without deleting history.
-29. Add SAIFUDHEEN to `19th Mile Group 1` so the existing later-shift assignment applies.
-30. Preserve both existing group schedule assignments and their effective dates.
+25. Create the 9:30 AM to 10 PM schedule as the branch-level default for 19TH MILE.
+26. Supersede the active schedule assignments for `test` and `test-2` at the branch schedule's effective boundary.
+27. End all open `test` and `test-2` memberships without deleting membership history.
+28. Mark `test` and `test-2` inactive after their assignments and memberships are closed.
+29. Verify Abhijith Mngr, Nadeer 19th mile, and SAIFUDHEEN all resolve through the branch schedule.
+30. Preserve historical attendance calculation bases that captured either former group schedule.
 31. Remove the inactive `NADEER 19` user from the branch's current embedded staff list without rewriting historical branch membership.
 32. Search every collection for references to user ID `68c14136f3a7510bc25d5a5f`, including branches, memberships, leads, activities, tasks, login history, attendance, reports, notifications, files, and audit records.
 33. Stop for manual review if any unexpected reference to `NADEER 19` is found.
@@ -210,13 +212,10 @@ Recommended migration policy:
 - Inactive shifts do not appear in manager selectors and are rejected by the backend.
 - Existing active templates reference shifts allowed for their branch, or are listed for manual correction.
 - Historical attendance snapshots still resolve their captured calculation basis after shift scoping.
-- `test` no longer exists as a group name; its record is now `19th Mile Group 1` and is scoped to 19TH MILE.
-- `test-2` no longer exists as a group name; its record is now `19th Mile Group 2` and is scoped to 19TH MILE.
-- Group 1 contains only approved current 19TH MILE users and retains its existing schedule assignment.
-- Group 2 contains only approved current 19TH MILE users and retains its existing schedule assignment.
-- SHAMIL 19TH MILE and IRFAN LK have no open membership in either 19TH MILE schedule group.
-- SAIFUDHEEN has exactly one open membership in `19th Mile Group 1` and resolves to its existing later-shift assignment.
-- No user outside the current active 19TH MILE roster has an open membership in either group.
+- 19TH MILE has one branch-scoped schedule from 9:30 AM to 10 PM with 690 required work minutes.
+- Abhijith Mngr, Nadeer 19th mile, and SAIFUDHEEN resolve through that branch schedule.
+- `test` and `test-2` are inactive and have no current or upcoming schedule assignments.
+- No user has an open membership in `test` or `test-2`.
 - `NADEER 19` (`68c14136f3a7510bc25d5a5f`) is removed or anonymized according to the approved policy and is absent from the current 19TH MILE staff list.
 - No unexpected dangling reference remains for the removed duplicate account.
 - `Nadeer 19th mile` (`69b7a9068c8282c866d215b0`) and all login and attendance records remain unchanged.
@@ -230,9 +229,9 @@ Before applying the migration, capture the complete affected branch, user, and m
 3. End or remove only the KANNUR HEAD OFFICE memberships created by this migration.
 4. Restore any `User.manager` values changed by this migration.
 5. Verify that no unrelated KANNUR HEAD OFFICE membership was modified.
-6. Restore the original `test` and `test-2` names and organization-wide scopes if the 19TH MILE group cleanup is rolled back.
-7. Reopen only the stale group memberships ended by this migration.
-8. End or remove only the SAIFUDHEEN group membership created by this migration.
+6. Reactivate `test` and `test-2` only if the 19TH MILE branch schedule migration is rolled back.
+7. Restore their previous assignments and reopen only memberships closed by this migration.
+8. Supersede the new 19TH MILE branch assignment during rollback without rewriting historical snapshots.
 9. Restore the duplicate account and its 19TH MILE branch reference from the pre-migration backup if the account cleanup is rolled back.
 
 ## Implementation Requirement

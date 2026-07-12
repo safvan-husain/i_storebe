@@ -99,10 +99,6 @@ const AttendanceScheduleTemplateSchema = new mongoose.Schema(
             type: Boolean,
             default: true,
         },
-        configurationStatus: {
-            type: String,
-            enum: ['upcoming'],
-        },
         createdBy: {
             type: mongoose.Schema.Types.ObjectId,
             ref: 'User',
@@ -151,6 +147,10 @@ const AttendanceScheduleAssignmentSchema = new mongoose.Schema(
         isActive: {
             type: Boolean,
             default: true,
+        },
+        configurationStatus: {
+            type: String,
+            enum: ['upcoming'],
         },
         createdBy: {
             type: mongoose.Schema.Types.ObjectId,
