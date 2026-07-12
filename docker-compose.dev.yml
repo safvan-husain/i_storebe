@@ -7,6 +7,8 @@ services:
       - "27019:27017"
     volumes:
       - mongo_data:/data/db
+      - ./docker/mongo-init/01-restore-production-backup.sh:/docker-entrypoint-initdb.d/01-restore-production-backup.sh:ro
+      - ../mongodb-backup-2026-07-12T16-00-18-359687.archive.gz:/backup/production.archive.gz:ro
     healthcheck:
       test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
       interval: 10s
@@ -46,7 +48,7 @@ services:
       mongo:
         condition: service_healthy
     volumes:
-      - ../mongodb-backup-2026-04-23T14-22-08-986899.archive.gz:/backup/archive.gz:ro
+      - ../mongodb-backup-2026-07-12T16-00-18-359687.archive.gz:/backup/archive.gz:ro
     command: >
       bash -lc "mongorestore
       --uri=mongodb://mongo:27017

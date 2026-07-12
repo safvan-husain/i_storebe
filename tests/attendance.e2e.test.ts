@@ -437,6 +437,8 @@ describe('Attendance endpoints e2e', () => {
       .send({ effectiveFrom: '2099-08-01', weeklyPattern });
     expect(branchSchedule.status).toBe(200);
     expect(branchSchedule.body.schedule.upcoming.weeklyPattern.monday).toBe(shift.body._id);
+    expect(branchSchedule.body.schedule.upcoming.templateId).toBeTruthy();
+    expect(branchSchedule.body.schedule.upcoming.templateName).toMatch(/^Internal schedule /);
 
     const group = await request(app)
       .post('/api/attendance/configuration/schedule-groups')
@@ -454,6 +456,12 @@ describe('Attendance endpoints e2e', () => {
       .send({ effectiveFrom: '2099-08-02', weeklyPattern });
     expect(groupSchedule.status).toBe(200);
     expect(groupSchedule.body.groups[0].members).toHaveLength(1);
+    expect(groupSchedule.body.groups[0].schedule.upcoming.templateId).toBe(
+      branchSchedule.body.schedule.upcoming.templateId,
+    );
+    expect(groupSchedule.body.groups[0].schedule.upcoming.templateName).toBe(
+      branchSchedule.body.schedule.upcoming.templateName,
+    );
 
     const coverageUsage = await request(app)
       .get(`/api/attendance/configuration/shifts/${shift.body._id}/coverage-usage`)
@@ -478,7 +486,9 @@ describe('Attendance endpoints e2e', () => {
     });
 
     const unchanged = await AttendanceDailySnapshot.findById(snapshot._id).lean();
-    expect(unchanged?.calculationBasis).toEqual(expect.objectContaining(originalBasis as object));
+    expect(JSON.parse(JSON.stringify(unchanged?.calculationBasis))).toEqual(
+      expect.objectContaining(originalBasis as object),
+    );
 
     const cancel = await request(app)
       .delete(`/api/attendance/branch-schedules/upcoming/${branchSchedule.body.schedule.upcoming.changeId}`)

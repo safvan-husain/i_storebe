@@ -5,8 +5,12 @@ This restore flow is only for the local Docker development MongoDB. Do not use i
 The backup archive is expected at:
 
 ```text
-/Users/safvanhusain/code/hashqubes/istore/mongodb-backup-2026-04-23T14-22-08-986899.archive.gz
+/Users/safvanhusain/code/hashqubes/istore/mongodb-backup-2026-07-12T16-00-18-359687.archive.gz
 ```
+
+## First Boot Default
+
+Compose restores the archive automatically when it creates a new local MongoDB volume. Existing volumes are not overwritten on restart.
 
 ## 1. Start MongoDB
 

@@ -2717,6 +2717,8 @@ async function resolvedTargetSchedule(
         if (!template) return null;
         return {
             changeId: String(assignment._id),
+            templateId: String(template._id),
+            templateName: template.name,
             effectiveFrom: assignment.effectiveFrom,
             weeklyPattern: weekdays.reduce((result, weekday) => {
                 const ids = ((template.weeklyPattern as any)?.[weekday] ?? []).map(String);

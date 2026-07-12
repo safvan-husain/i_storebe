@@ -36,6 +36,7 @@ type PlannedTarget = {
     branchId: Types.ObjectId;
     branchName: string;
     shift: ShiftSpec & { requiredWorkMinutes: number };
+    desiredBranchIds: Types.ObjectId[];
     templateName: string;
 };
 
@@ -104,6 +105,10 @@ function shiftName(shift: ShiftSpec) {
     return `${displayTime(shift.startTime)} to ${displayTime(shift.endTime)}`;
 }
 
+function shiftKey(shift: ShiftSpec & { requiredWorkMinutes: number }) {
+    return `${shift.startTime}-${shift.endTime}-${shift.requiredWorkMinutes}`;
+}
+
 function weeklyPattern(shiftId: Types.ObjectId) {
     return Object.fromEntries(weekdays.map((weekday) => [weekday, [shiftId]]));
 }
@@ -130,6 +135,7 @@ async function resolvePlan() {
             branchId: branch._id,
             branchName: branch.name,
             shift: defaultShift,
+            desiredBranchIds: [],
             templateName: `${branch.name} Default Schedule`,
         });
 
@@ -159,9 +165,18 @@ async function resolvePlan() {
                 branchId: branch._id,
                 branchName: branch.name,
                 shift: { ...groupShiftSpec, requiredWorkMinutes: requiredWorkMinutes(groupShiftSpec) },
+                desiredBranchIds: [],
                 templateName: `${groupSpec.canonical} Schedule`,
             });
         }
+    }
+
+    for (const target of targets) {
+        const matchingTargets = targets.filter((candidate) =>
+            shiftKey(candidate.shift) === shiftKey(target.shift));
+        target.desiredBranchIds = Array.from(new Map(
+            matchingTargets.map((candidate) => [String(candidate.branchId), candidate.branchId]),
+        ).values());
     }
 
     return { errors, warnings, targets };
@@ -181,7 +196,7 @@ async function upsertShift(target: PlannedTarget, actorId: Types.ObjectId, sessi
             name: canonicalName,
             ...target.shift,
             weeklyPattern: Object.fromEntries(weekdays.map((weekday) => [weekday, null])),
-            branchIds: [target.branchId],
+            branchIds: target.desiredBranchIds,
             version: 1,
             graceLateMinutes: 0,
             graceEarlyLeaveMinutes: 0,
@@ -207,8 +222,10 @@ async function upsertShift(target: PlannedTarget, actorId: Types.ObjectId, sessi
             shift.version += 1;
             changed = true;
         }
-        if (!(shift.branchIds ?? []).some((id) => String(id) === String(target.branchId))) {
-            shift.branchIds = [...(shift.branchIds ?? []), target.branchId];
+        const storedBranchIds = (shift.branchIds ?? []).map(String).sort();
+        const desiredBranchIds = target.desiredBranchIds.map(String).sort();
+        if (storedBranchIds.join(',') !== desiredBranchIds.join(',')) {
+            shift.branchIds = target.desiredBranchIds;
             changed = true;
         }
         if (changed) await shift.save({ session });
@@ -361,6 +378,9 @@ export async function configureBranchAttendanceSchedules(args: Args) {
             target: target.targetName,
             shift: `${target.shift.startTime}-${target.shift.endTime}`,
             requiredWorkMinutes: target.shift.requiredWorkMinutes,
+            branchScope: target.desiredBranchIds.map((branchId) =>
+                plan.targets.find((candidate) =>
+                    String(candidate.branchId) === String(branchId))?.branchName ?? String(branchId)),
             template: target.templateName,
         })),
         warnings: plan.warnings,

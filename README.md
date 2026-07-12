@@ -49,23 +49,31 @@ MongoDB is exposed locally at:
 mongodb://localhost:27017/i-store-db
 ```
 
-### Restore The Production Backup Into Local Docker MongoDB
+### Production Backup Bootstrap
 
-The restore is manual by design. Starting Docker will not wipe your local development data.
+On the first MongoDB boot for a new local Docker volume, Compose restores the bundled production backup automatically. Later restarts keep local changes because MongoDB runs initialization scripts only for an empty data directory.
 
 The expected backup archive is:
 
 ```text
-/Users/safvanhusain/code/hashqubes/istore/mongodb-backup-2026-04-23T14-22-08-986899.archive.gz
+/Users/safvanhusain/code/hashqubes/istore/mongodb-backup-2026-07-12T16-00-18-359687.archive.gz
 ```
 
-To drop and re-import the `i-store-db` collections into the Docker MongoDB service:
+To deliberately drop and re-import the `i-store-db` collections into an existing local Docker volume:
 
 ```bash
 docker compose -f docker-compose.dev.yml --profile restore run --rm mongo-restore
 ```
 
 This command targets only the Compose MongoDB service at `mongodb://mongo:27017`, reads the archive as read-only, uses `--gzip --archive=/backup/archive.gz`, and uses `--drop` so restored collections replace the existing local Docker copies.
+
+To reset to the default archive on the next Docker boot, remove only the local Mongo volume, then start Compose again:
+
+```bash
+docker compose -f docker-compose.dev.yml down
+docker volume rm backend_mongo_data
+docker compose -f docker-compose.dev.yml up --build
+```
 
 To inspect restored collections:
 
