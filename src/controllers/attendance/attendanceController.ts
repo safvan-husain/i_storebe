@@ -215,26 +215,107 @@ async function normalizeShiftBranchIds(value: unknown) {
     return ids;
 }
 
-async function assertShiftCoverageCanBeRemoved(shiftId: Types.ObjectId, removedBranchIds: Types.ObjectId[]) {
-    if (removedBranchIds.length === 0) return;
+type ShiftCoverageUsage = {
+    targetType: 'branch' | 'group' | 'employee' | 'global';
+    targetId?: string;
+    targetName: string;
+    status: 'current' | 'upcoming';
+    effectiveFrom: Date;
+};
+
+async function shiftCoverageUsage(shiftId: Types.ObjectId) {
+    const shift = await AttendanceShift.findById(shiftId, { branchIds: 1 }).lean();
+    if (!shift) throw new AppError('Shift not found', 404);
     const templates = await AttendanceScheduleTemplate.find({
         isActive: true,
         $or: weekdays.map((weekday) => ({ [`weeklyPattern.${weekday}`]: shiftId })),
     }, { _id: 1 }).lean();
-    if (templates.length === 0) return;
+    if (templates.length === 0) return [];
     const templateIds = templates.map((item) => item._id);
-    const groups = await AttendanceScheduleGroup.find({ branch: { $in: removedBranchIds } }, { _id: 1 }).lean();
-    const inUse = await AttendanceScheduleAssignment.exists({
+    const now = new Date();
+    const assignments = await AttendanceScheduleAssignment.find({
         template: { $in: templateIds },
-        isActive: true,
         supersededAt: { $exists: false },
-        $or: [
-            { targetType: 'branch', branch: { $in: removedBranchIds } },
-            { targetType: 'group', group: { $in: groups.map((item) => item._id) } },
+        $and: [
+            { $or: [{ isActive: true }, { configurationStatus: 'upcoming' }] },
+            { $or: [{ expiresAt: { $exists: false } }, { expiresAt: null }, { expiresAt: { $gt: now } }] },
         ],
-    });
-    if (inUse) {
-        throw new AppError('Cannot remove a branch while its current or upcoming schedule uses this shift', 409);
+    }).lean();
+    if (assignments.length === 0) return [];
+
+    const groupIds = assignments.filter((item) => item.targetType === 'group').map((item) => item.group);
+    const employeeIds = assignments.filter((item) => item.targetType === 'employee').map((item) => item.employee);
+    const [groups, employeeBranches, coveredBranches] = await Promise.all([
+        AttendanceScheduleGroup.find({ _id: { $in: groupIds } }, { name: 1, branch: 1 }).lean(),
+        Branch.find({
+            isActive: true,
+            $or: [{ manager: { $in: employeeIds } }, { staffs: { $in: employeeIds } }],
+        }, { name: 1, manager: 1, staffs: 1 }).lean(),
+        Branch.find({ _id: { $in: shift.branchIds ?? [] }, isActive: true }, { name: 1 }).lean(),
+    ]);
+    const branchIds = new Set<string>();
+    for (const assignment of assignments) {
+        if (assignment.targetType === 'branch' && assignment.branch) branchIds.add(String(assignment.branch));
+        if (assignment.targetType === 'group') {
+            const group = groups.find((item) => String(item._id) === String(assignment.group));
+            if (group?.branch) branchIds.add(String(group.branch));
+        }
+        if (assignment.targetType === 'employee' && assignment.employee) {
+            const branch = employeeBranches.find((item) => branchContainsEmployeeOrManager(item, assignment.employee!));
+            if (branch) branchIds.add(String(branch._id));
+        }
+        if (assignment.targetType === 'global') {
+            for (const branch of coveredBranches) branchIds.add(String(branch._id));
+        }
+    }
+    const branches = await Branch.find({ _id: { $in: Array.from(branchIds) } }, { name: 1 }).lean();
+    return branches.map((branch) => {
+        const usages: ShiftCoverageUsage[] = [];
+        for (const assignment of assignments) {
+            let applies = false;
+            let targetName = 'Branch schedule';
+            let targetId: string | undefined;
+            if (assignment.targetType === 'branch') {
+                applies = String(assignment.branch) === String(branch._id);
+                targetId = assignment.branch ? String(assignment.branch) : undefined;
+                targetName = branch.name;
+            } else if (assignment.targetType === 'group') {
+                const group = groups.find((item) => String(item._id) === String(assignment.group));
+                applies = String(group?.branch ?? '') === String(branch._id);
+                targetId = group ? String(group._id) : undefined;
+                targetName = group?.name ?? 'Schedule group';
+            } else if (assignment.targetType === 'employee') {
+                const employeeBranch = employeeBranches.find((item) =>
+                    assignment.employee && branchContainsEmployeeOrManager(item, assignment.employee));
+                applies = String(employeeBranch?._id ?? '') === String(branch._id);
+                targetId = assignment.employee ? String(assignment.employee) : undefined;
+                targetName = 'Employee schedule';
+            } else if (assignment.targetType === 'global') {
+                applies = coveredBranches.some((item) => String(item._id) === String(branch._id));
+                targetName = 'Legacy global schedule';
+            }
+            if (applies) usages.push({
+                targetType: assignment.targetType as ShiftCoverageUsage['targetType'],
+                targetId,
+                targetName,
+                status: assignment.effectiveFrom.getTime() > now.getTime() ? 'upcoming' : 'current',
+                effectiveFrom: assignment.effectiveFrom,
+            });
+        }
+        return { branchId: String(branch._id), branchName: branch.name, usages };
+    }).filter((item) => item.usages.length > 0);
+}
+
+async function assertShiftCoverageCanBeRemoved(shiftId: Types.ObjectId, removedBranchIds: Types.ObjectId[]) {
+    if (removedBranchIds.length === 0) return;
+    const removed = new Set(removedBranchIds.map(String));
+    const conflicts = (await shiftCoverageUsage(shiftId)).filter((item) => removed.has(item.branchId));
+    if (conflicts.length > 0) {
+        throw new AppError(
+            'Change the branch schedule before removing this shift from the branch',
+            409,
+            { conflicts },
+        );
     }
 }
 
@@ -1511,6 +1592,12 @@ export const listConfigurationShifts = ok(async (req, res) => {
     if (branchId) query.branchIds = branchId;
     const shifts = await AttendanceShift.find(query).sort({ name: 1 });
     res.status(200).json({ items: shifts });
+});
+
+export const getConfigurationShiftCoverageUsage = ok(async (req, res) => {
+    requireAdmin(req);
+    const shiftId = toObjectId(req.params.id, 'id');
+    res.status(200).json({ items: await shiftCoverageUsage(shiftId) });
 });
 
 async function updateShiftFromRequest(req: Request, strictCoverage: boolean) {

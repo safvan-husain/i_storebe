@@ -24,6 +24,7 @@ import {
     getEmployeePrivileges,
     getEmployeeSchedule,
     getBranchSchedule,
+    getConfigurationShiftCoverageUsage,
     getMyAttendanceStatus,
     getMonthlySummary,
     getMyDailySnapshots,
@@ -83,6 +84,8 @@ router.route('/configuration/shifts')
 
 router.route('/configuration/shifts/:id')
     .patch(updateConfigurationShift);
+
+router.get('/configuration/shifts/:id/coverage-usage', getConfigurationShiftCoverageUsage);
 
 router.route('/shift-memberships')
     .post(assignShiftMembers)

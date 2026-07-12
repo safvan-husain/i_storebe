@@ -384,6 +384,14 @@ describe('Attendance endpoints e2e', () => {
   it('manages a branch and group schedule through the resolved flow without rewriting snapshots', async () => {
     const seed = await seedUsers();
     const adminToken = await login('admin');
+    const unusedBranch = await Branch.create({
+      name: 'Unused Coverage Branch',
+      normalizedName: 'unused-coverage-branch',
+      timezone: 'Asia/Dubai',
+      staffs: [],
+      isActive: true,
+      createdBy: seed.adminId,
+    });
     const shift = await request(app)
       .post('/api/attendance/configuration/shifts')
       .set('Authorization', `Bearer ${adminToken}`)
@@ -392,7 +400,7 @@ describe('Attendance endpoints e2e', () => {
         startTime: '09:00',
         endTime: '17:00',
         requiredWorkMinutes: 420,
-        branchIds: [seed.branchId],
+        branchIds: [seed.branchId, String(unusedBranch._id)],
       });
     expect(shift.status).toBe(201);
 
@@ -446,6 +454,28 @@ describe('Attendance endpoints e2e', () => {
       .send({ effectiveFrom: '2099-08-02', weeklyPattern });
     expect(groupSchedule.status).toBe(200);
     expect(groupSchedule.body.groups[0].members).toHaveLength(1);
+
+    const coverageUsage = await request(app)
+      .get(`/api/attendance/configuration/shifts/${shift.body._id}/coverage-usage`)
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(coverageUsage.status).toBe(200);
+    const branchUsage = coverageUsage.body.items.find(
+      (item: { branchId: string }) => item.branchId === seed.branchId,
+    );
+    expect(branchUsage.usages).toEqual(expect.arrayContaining([
+      expect.objectContaining({ targetType: 'branch', status: 'upcoming' }),
+      expect.objectContaining({ targetType: 'group', targetName: 'Resolved Team', status: 'upcoming' }),
+    ]));
+
+    const blockedRemoval = await request(app)
+      .patch(`/api/attendance/configuration/shifts/${shift.body._id}`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ branchIds: [String(unusedBranch._id)] });
+    expect(blockedRemoval.status).toBe(409);
+    expect(blockedRemoval.body.error.conflicts[0]).toMatchObject({
+      branchId: seed.branchId,
+      branchName: 'Dubai Main',
+    });
 
     const unchanged = await AttendanceDailySnapshot.findById(snapshot._id).lean();
     expect(unchanged?.calculationBasis).toEqual(expect.objectContaining(originalBasis as object));
