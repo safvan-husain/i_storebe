@@ -5,7 +5,7 @@ import {
   getTasks,
   getTaskById,
   // updateTask,
-  completeTask, callReports, getTodayTaskStat, getTasksV2, callReports2,
+  completeTask, callReports, getTodayTaskStat, getTasksV2, getTasksV3, callReports2,
 } from '../controllers/tasks/taskController';
 import { protect } from '../middleware/auth';
 
@@ -23,6 +23,9 @@ router.route('/filter')
 
 router.route('/v2')
     .post(getTasksV2)
+// Deprecated legacy route above remains unchanged. Latest branch-aware clients use this route.
+router.route('/v3')
+    .post(getTasksV3)
 
 router.route('/complete')
     .post(completeTask);

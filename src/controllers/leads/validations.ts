@@ -78,6 +78,12 @@ export const LeadFilterSchema = z.object({
     queryType: z.enum(['regular', 'spotlight']).optional().default('regular')
 }).merge(paginationSchema).merge(optionalDateQueryFiltersSchema);
 
+/** Latest branch-aware listing contract. Legacy LeadFilterSchema remains supported. */
+export const LeadBranchFilterSchema = LeadFilterSchema.extend({
+    branchIds: z.array(ObjectIdSchema).optional(),
+    employeeIds: z.array(ObjectIdSchema).optional(),
+});
+
 export const inActivateUserRequestSchema = z.object({
     id: ObjectIdSchema,
     isActive: z.boolean()

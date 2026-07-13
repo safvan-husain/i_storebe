@@ -2,6 +2,8 @@ import { FilterQuery, Types } from 'mongoose';
 import Activity from '../models/Activity';
 import Branch, { IBranch } from '../models/Branch';
 import User from '../models/User';
+import Lead from '../models/Lead';
+import Task from '../models/Task';
 import { AppError } from '../middleware/error';
 import { ObjectIdSchema, UserPrivilegeSchema } from '../common/types';
 import { closeOpenMembershipsForUsers, syncOpenMembershipsForBranch } from './branch-context';
@@ -141,6 +143,7 @@ const removeUsersFromOtherBranches = async ({
         );
     }
     if (staffIds && staffIds.length > 0) {
+        await handOverStaffFromOtherBranches({ branchId, staffIds });
         await Branch.updateMany(
             { _id: { $ne: branchId }, staffs: { $in: staffIds } },
             { $pull: { staffs: { $in: staffIds } } }
@@ -154,6 +157,46 @@ const syncStaffManagers = async (staffIds: Types.ObjectId[], managerId?: Types.O
         { _id: { $in: staffIds }, privilege: 'staff' },
         { $set: { manager: managerId ?? null } }
     );
+};
+
+// Ownership handover intentionally preserves historical attribution fields.
+const handOverOpenWork = async ({ staffId, sourceBranch }: {
+    staffId: Types.ObjectId;
+    sourceBranch: IBranch;
+}) => {
+    if (!sourceBranch.manager) {
+        throw new AppError(`Branch "${sourceBranch.name}" requires a manager before staff can be moved or removed`, 400);
+    }
+    const managerId = sourceBranch.manager as Types.ObjectId;
+    const leads = await Lead.find({ handledBy: staffId, enquireStatus: { $ne: 'won' } }, { _id: true }).lean();
+    const leadIds = leads.map(lead => lead._id);
+    if (leadIds.length === 0) return;
+    await Lead.updateMany(
+        { _id: { $in: leadIds } },
+        { $set: { handledBy: managerId, manager: managerId, handlingBranch: sourceBranch._id } },
+    );
+    await Task.updateMany(
+        { lead: { $in: leadIds }, isCompleted: false },
+        { $set: { assigned: managerId } },
+    );
+};
+
+const handOverStaffFromOtherBranches = async ({ branchId, staffIds }: {
+    branchId: Types.ObjectId;
+    staffIds?: Types.ObjectId[];
+}) => {
+    if (!staffIds?.length) return;
+    const sources = await Branch.find({ _id: { $ne: branchId }, staffs: { $in: staffIds } });
+    for (const source of sources) {
+        if (!source.manager) throw new AppError(`Branch "${source.name}" requires a manager before staff can be moved`, 400);
+    }
+    for (const source of sources) {
+        for (const staffId of staffIds) {
+            if (source.staffs.some(id => String(id) === String(staffId))) {
+                await handOverOpenWork({ staffId, sourceBranch: source });
+            }
+        }
+    }
 };
 
 const getUsernames = async (ids: Types.ObjectId[]) => {
@@ -350,6 +393,7 @@ export const branchService = {
             .map(id => toObjectId(id));
         const managerChanged = String(nextManager ?? '') !== String(oldManager ?? '');
 
+        for (const staffId of removedStaffs) await handOverOpenWork({ staffId, sourceBranch: branch });
         await removeUsersFromOtherBranches({ branchId, managerId: nextManager, staffIds: nextStaffs });
 
         branch.manager = nextManager;
@@ -484,6 +528,10 @@ export const branchService = {
         const staffId = toObjectId(ObjectIdSchema.parse(staffIdParam));
         const branch = await Branch.findById(branchId);
         if (!branch) throw new AppError('Branch not found', 404);
+
+        if (branch.staffs.some(id => String(id) === String(staffId))) {
+            await handOverOpenWork({ staffId, sourceBranch: branch });
+        }
 
         branch.staffs = branch.staffs.filter(id => String(id) !== String(staffId));
         await branch.save();

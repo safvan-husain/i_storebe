@@ -6,7 +6,7 @@ import {
   getLeadById,
   updateLead,
   updateLeadStatus, transferLead, getTransferableEmployees, markDialed, getTaskCreatableLead,
-  generateLeadExcelReport,
+  generateLeadExcelReport, getLeadsV2,
   searchLeadsGlobally,
 } from '../controllers/leads/leadController';
 import { protect } from '../middleware/auth';
@@ -20,6 +20,8 @@ router
   .get(protect, getLeads);
 
 router.route('/filter').post(protect, getLeads);
+// Deprecated legacy route above remains unchanged. Latest branch-aware clients use this route.
+router.route('/v2/filter').post(protect, getLeadsV2);
 router.route('/global-search').post(protect, searchLeadsGlobally);
 router.route('/transfer').post(protect, transferLead)
 router.route('/status/:id').put(protect, updateLeadStatus);

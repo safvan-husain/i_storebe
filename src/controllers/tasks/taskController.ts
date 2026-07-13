@@ -9,6 +9,7 @@ import {
     completeTaskSchema,
     TaskCreateSchema,
     TaskFilterSchema,
+    TaskBranchFilterSchema,
     updateSchema
 } from './validation';
 import {onCatchError} from "../../middleware/error";
@@ -26,6 +27,7 @@ import {
 } from "../../common/types";
 import task from "../../models/Task";
 import {callReportsRequestSchema} from "../activity/validation";
+import {getCurrentBranchIdForUser} from '../../services/branch-context';
 
 //TODO: check all response are consistent.
 
@@ -34,6 +36,10 @@ export const createTask = asyncHandler(async (req: Request, res: Response) => {
     try {
         if(!req.userId) {
             res.status(404).json({message: 'User not found'});
+            return;
+        }
+        if (req.privilege !== 'admin' && !(await getCurrentBranchIdForUser(req.userId))) {
+            res.status(403).json({message: 'You do not belong to any branch. Please ask admin to add you to a branch.', code: 'BRANCH_ASSIGNMENT_REQUIRED'});
             return;
         }
         let assigner = await User.findById(req.userId, {username: true}).lean();
@@ -311,6 +317,45 @@ export const getTasksV2 = asyncHandler(async (req: Request, res: TypedResponse<a
         console.log(error);
         onCatchError(error, res);
     }
+});
+
+// Latest branch-aware contract. Keep getTasksV2 and /tasks/v2 unchanged for old clients.
+export const getTasksV3 = asyncHandler(async (req: Request, res: TypedResponse<any>) => {
+    try {
+        const filter = TaskBranchFilterSchema.parse(req.body);
+        const currentBranch = req.privilege === 'admin' ? undefined : await getCurrentBranchIdForUser(req.userId);
+        if (req.privilege !== 'admin' && !currentBranch) {
+            res.status(200).json({accessState: 'no_branch', tasks: [], stat: [{completed: 0, total: 0, overDue: 0, pending: 0}]});
+            return;
+        }
+        const branchLeadIds = async (ids: Array<string | Types.ObjectId>) => Lead.distinct('_id', {
+            $or: [
+                {handlingBranch: {$in: ids.map(id => new Types.ObjectId(String(id)))}},
+                {handlingBranch: {$exists: false}, createdBranch: {$in: ids.map(id => new Types.ObjectId(String(id)))}}
+            ]
+        });
+        const query: any = {};
+        if (filter.startDate || filter.endDate) query.createdAt = {...(filter.startDate ? {$gte: filter.startDate} : {}), ...(filter.endDate ? {$lte: filter.endDate} : {})};
+        if (filter.category) query.category = filter.category;
+        if (req.privilege === 'staff') query.assigned = new Types.ObjectId(req.userId!);
+        else if (req.privilege === 'manager') {
+            const ids = await branchLeadIds([currentBranch!]);
+            query.$or = [{lead: {$in: ids}}, {assigned: new Types.ObjectId(req.userId!)}];
+        } else {
+            if (filter.branchIds?.length) query.lead = {$in: await branchLeadIds(filter.branchIds)};
+            if (filter.employeeIds?.length) query.assigned = {$in: filter.employeeIds.map(id => new Types.ObjectId(id))};
+        }
+        const [tasks, total, completed, overDue] = await Promise.all([
+            Task.find(query).sort({due: 1}).skip(filter.skip).limit(filter.limit).populate('assigned', 'username').lean(),
+            Task.countDocuments(query), Task.countDocuments({...query, isCompleted: true}), Task.countDocuments({...query, isCompleted: false, due: {$lt: new Date()}}),
+        ]);
+        res.status(200).json({
+            accessState: 'ok',
+            tasks: tasks.filter(task => !task.isCompleted).map((task: any) => ({...task, _id: String(task._id), lead: String(task.lead), assigned: task.assigned?.username ?? 'None', due: new Date(task.due).getTime(), createdAt: new Date(task.createdAt).getTime()})),
+            stat: [{completed, total, overDue, pending: Math.max(total - completed, 0)}],
+        });
+        return;
+    } catch (error) { onCatchError(error, res); }
 });
 
 // Get a single task by id (v2 shape)

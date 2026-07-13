@@ -25,6 +25,12 @@ export const TaskFilterSchema = z.object({
     category: categorySchema.optional(),
 }).merge(paginationSchema).merge(optionalDateQueryFiltersSchema);
 
+/** Latest branch-aware listing contract. Legacy TaskFilterSchema remains supported. */
+export const TaskBranchFilterSchema = TaskFilterSchema.extend({
+    branchIds: z.array(ObjectIdSchema).optional(),
+    employeeIds: z.array(ObjectIdSchema).optional(),
+});
+
 export const completeTaskSchema = z.object({
     id: ObjectIdSchema.optional(),
     leadId: ObjectIdSchema.optional(),

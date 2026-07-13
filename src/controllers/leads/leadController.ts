@@ -9,6 +9,7 @@ import {
   EnquireSourceType,
   EnquireStatusType,
   LeadFilterSchema,
+  LeadBranchFilterSchema,
   globalLeadSearchSchema,
   PurposeType,
   updateLeadData,
@@ -51,6 +52,11 @@ export const createLead = asyncHandler(
       }).lean();
       if (!requester) {
         res.status(401).json({ message: "User not found" });
+        return;
+      }
+
+      if (req.privilege !== "admin" && !(await getCurrentBranchIdForUser(req.userId))) {
+        res.status(403).json({ message: "You do not belong to any branch. Please ask admin to add you to a branch.", code: "BRANCH_ASSIGNMENT_REQUIRED" } as any);
         return;
       }
 
@@ -535,6 +541,54 @@ export const getLeads = asyncHandler(
     }
   },
 );
+
+// New contract for the latest app. Keep getLeads/POST /filter unchanged for old clients.
+export const getLeadsV2 = asyncHandler(async (req: Request, res: Response) => {
+  try {
+    const filter = LeadBranchFilterSchema.parse(req.body);
+    const currentBranch = req.privilege === 'admin' ? undefined : await getCurrentBranchIdForUser(req.userId);
+    if (req.privilege !== 'admin' && !currentBranch) {
+      res.status(200).json({ accessState: 'no_branch', leads: [], totalCount: 0, todayCount: 0, weekCount: 0, monthCount: 0 });
+      return;
+    }
+    const query: FilterQuery<ILead> = {};
+    if (filter.startDate || filter.endDate) query.createdAt = { ...(filter.startDate ? { $gte: filter.startDate } : {}), ...(filter.endDate ? { $lte: filter.endDate } : {}) };
+    if (filter.enquireStatus?.length) query.enquireStatus = { $in: filter.enquireStatus };
+    if (filter.source?.length) query.source = { $in: filter.source };
+    if (filter.purpose?.length) query.purpose = { $in: filter.purpose };
+    if (filter.type?.length) query.type = { $in: filter.type };
+    const branchClause = (ids: string[] | Types.ObjectId[]) => ({ $or: [
+      { handlingBranch: { $in: ids.map(id => new Types.ObjectId(String(id))) } },
+      { handlingBranch: { $exists: false }, createdBranch: { $in: ids.map(id => new Types.ObjectId(String(id))) } },
+    ] });
+    if (req.privilege === 'staff') query.handledBy = new Types.ObjectId(req.userId!);
+    else if (req.privilege === 'manager') query.$or = [branchClause([currentBranch!]), { handledBy: new Types.ObjectId(req.userId!) }];
+    else {
+      const clauses: any[] = [];
+      if (filter.branchIds?.length) clauses.push(branchClause(filter.branchIds));
+      if (filter.employeeIds?.length) clauses.push({ handledBy: { $in: filter.employeeIds.map(id => new Types.ObjectId(id)) } });
+      if (clauses.length) query.$and = clauses;
+    }
+    const [rows, totalCount] = await Promise.all([
+      Lead.find(query).sort({ createdAt: -1 }).skip(filter.skip).limit(filter.limit)
+        .populate('handledBy', 'username').populate('customer', 'name phone email address dob')
+        .populate('handlingBranch', 'name').populate('createdBranch', 'name').lean(),
+      Lead.countDocuments(query),
+    ]);
+    const leads = rows.map((lead: any) => ({
+      _id: lead._id, handlerName: lead.handledBy?.username ?? '', source: lead.source,
+      enquireStatus: lead.enquireStatus, purpose: lead.purpose, callStatus: lead.callStatus,
+      type: lead.type, product: lead.product, nearestStore: lead.nearestStore,
+      name: lead.contactSnapshot?.name ?? lead.customer?.name ?? '', phone: lead.contactSnapshot?.phone ?? lead.customer?.phone ?? '',
+      email: lead.contactSnapshot?.email ?? lead.customer?.email, address: lead.contactSnapshot?.address ?? lead.customer?.address ?? '',
+      dob: lead.contactSnapshot?.dob ? new Date(lead.contactSnapshot.dob).getTime() : lead.customer?.dob ? new Date(lead.customer.dob).getTime() : undefined,
+      createdAt: new Date(lead.createdAt).getTime(),
+      branch: lead.handlingBranch ?? lead.createdBranch ?? null,
+    }));
+    res.status(200).json({ accessState: 'ok', leads, totalCount, todayCount: 0, weekCount: 0, monthCount: 0 });
+    return;
+  } catch (error) { onCatchError(error, res); }
+});
 
 const mapLeadDocumentToResponse = (e: any): ILeadResponse => ({
   _id: e._id,
