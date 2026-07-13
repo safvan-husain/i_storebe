@@ -39,7 +39,7 @@ export const createTask = asyncHandler(async (req: Request, res: Response) => {
             return;
         }
         if (req.privilege !== 'admin' && !(await getCurrentBranchIdForUser(req.userId))) {
-            res.status(403).json({message: 'You do not belong to any branch. Please ask admin to add you to a branch.', code: 'BRANCH_ASSIGNMENT_REQUIRED'});
+            res.status(403).json({message: 'You are not added to any branch. Please ask admin to add you to a branch to create a task.', code: 'BRANCH_ASSIGNMENT_REQUIRED'});
             return;
         }
         let assigner = await User.findById(req.userId, {username: true}).lean();
@@ -352,7 +352,17 @@ export const getTasksV3 = asyncHandler(async (req: Request, res: TypedResponse<a
         ]);
         res.status(200).json({
             accessState: 'ok',
-            tasks: tasks.map((task: any) => ({...task, _id: String(task._id), lead: String(task.lead), assigned: task.assigned?.username ?? 'None', due: new Date(task.due).getTime(), createdAt: new Date(task.createdAt).getTime()})),
+            tasks: tasks.map((task: any) => ({
+                _id: String(task._id),
+                lead: String(task.lead),
+                assigned: task.assigned?.username ?? 'None',
+                title: task.title ?? 'None',
+                description: task.description ?? 'None',
+                category: task.category,
+                due: new Date(task.due).getTime(),
+                createdAt: new Date(task.createdAt).getTime(),
+                isCompleted: task.isCompleted,
+            })),
             stat: [{completed, total, overDue, pending: Math.max(total - completed, 0)}],
         });
         return;

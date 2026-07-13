@@ -56,7 +56,7 @@ export const createLead = asyncHandler(
       }
 
       if (req.privilege !== "admin" && !(await getCurrentBranchIdForUser(req.userId))) {
-        res.status(403).json({ message: "You do not belong to any branch. Please ask admin to add you to a branch.", code: "BRANCH_ASSIGNMENT_REQUIRED" } as any);
+        res.status(403).json({ message: "You are not added to any branch. Please ask admin to add you to a branch to create a lead.", code: "BRANCH_ASSIGNMENT_REQUIRED" } as any);
         return;
       }
 
