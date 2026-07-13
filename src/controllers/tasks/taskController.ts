@@ -345,13 +345,14 @@ export const getTasksV3 = asyncHandler(async (req: Request, res: TypedResponse<a
             if (filter.branchIds?.length) query.lead = {$in: await branchLeadIds(filter.branchIds)};
             if (filter.employeeIds?.length) query.assigned = {$in: filter.employeeIds.map(id => new Types.ObjectId(id))};
         }
+        const pendingQuery = {...query, isCompleted: false};
         const [tasks, total, completed, overDue] = await Promise.all([
-            Task.find(query).sort({due: 1}).skip(filter.skip).limit(filter.limit).populate('assigned', 'username').lean(),
+            Task.find(pendingQuery).sort({due: 1}).skip(filter.skip).limit(filter.limit).populate('assigned', 'username').lean(),
             Task.countDocuments(query), Task.countDocuments({...query, isCompleted: true}), Task.countDocuments({...query, isCompleted: false, due: {$lt: new Date()}}),
         ]);
         res.status(200).json({
             accessState: 'ok',
-            tasks: tasks.filter(task => !task.isCompleted).map((task: any) => ({...task, _id: String(task._id), lead: String(task.lead), assigned: task.assigned?.username ?? 'None', due: new Date(task.due).getTime(), createdAt: new Date(task.createdAt).getTime()})),
+            tasks: tasks.map((task: any) => ({...task, _id: String(task._id), lead: String(task.lead), assigned: task.assigned?.username ?? 'None', due: new Date(task.due).getTime(), createdAt: new Date(task.createdAt).getTime()})),
             stat: [{completed, total, overDue, pending: Math.max(total - completed, 0)}],
         });
         return;
