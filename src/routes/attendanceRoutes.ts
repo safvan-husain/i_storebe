@@ -7,16 +7,11 @@ import {
     checkOut,
     correctBreakEnd,
     correctCheckout,
-    assignShiftMembers,
     createBreakSubtype,
     createBreakType,
     createDayOverrides,
     createPrivilege,
-    createScheduleAssignment,
-    createScheduleGroup,
     createConfigurationScheduleGroup,
-    createScheduleTemplate,
-    createShift,
     createConfigurationShift,
     cancelUpcomingSchedule,
     finalizeDailySnapshots,
@@ -49,7 +44,6 @@ import {
     previewDayOverrides,
     previewScheduleGroupMembers,
     removeScheduleGroupMember,
-    removeShiftMembership,
     setEmployeePrivileges,
     setRemoteWorkerMembers,
     setScheduleGroupMembers,
@@ -57,11 +51,7 @@ import {
     updateBreakType,
     updateDayOverride,
     updatePrivilege,
-    updateScheduleAssignment,
-    updateScheduleGroup,
     updateConfigurationScheduleGroup,
-    updateScheduleTemplate,
-    updateShift,
     updateConfigurationShift,
     putBranchSchedule,
     putGroupSchedule,
@@ -69,14 +59,20 @@ import {
 
 const router = express.Router();
 
+const rejectDeprecatedConfigurationWrite: express.RequestHandler = (_req, res) => {
+    res.status(410).json({
+        message: 'This action is deprecated.',
+    });
+};
+
 router.use(protect);
 
 router.route('/shifts')
-    .post(createShift)
+    .post(rejectDeprecatedConfigurationWrite)
     .get(listShifts);
 
 router.route('/shifts/:id')
-    .patch(updateShift);
+    .patch(rejectDeprecatedConfigurationWrite);
 
 router.route('/configuration/shifts')
     .post(createConfigurationShift)
@@ -88,11 +84,11 @@ router.route('/configuration/shifts/:id')
 router.get('/configuration/shifts/:id/coverage-usage', getConfigurationShiftCoverageUsage);
 
 router.route('/shift-memberships')
-    .post(assignShiftMembers)
+    .post(rejectDeprecatedConfigurationWrite)
     .get(listShiftMemberships);
 
 router.route('/shift-memberships/:id')
-    .delete(removeShiftMembership);
+    .delete(rejectDeprecatedConfigurationWrite);
 
 router.route('/day-overrides')
     .post(createDayOverrides)
@@ -130,22 +126,22 @@ router.route('/break-subtypes/:id')
     .patch(updateBreakSubtype);
 
 router.route('/schedule-templates')
-    .post(createScheduleTemplate)
+    .post(rejectDeprecatedConfigurationWrite)
     .get(listScheduleTemplates);
 
 router.route('/schedule-templates/:id')
-    .patch(updateScheduleTemplate);
+    .patch(rejectDeprecatedConfigurationWrite);
 
 router.route('/schedule-groups')
-    .post(createScheduleGroup)
+    .post(rejectDeprecatedConfigurationWrite)
     .get(listScheduleGroups);
 
 router.route('/schedule-groups/:id')
-    .patch(updateScheduleGroup);
+    .patch(rejectDeprecatedConfigurationWrite);
 
 router.route('/schedule-groups/:id/members')
     .get(listScheduleGroupMembers)
-    .put(setScheduleGroupMembers);
+    .put(rejectDeprecatedConfigurationWrite);
 
 router.route('/schedule-groups/:id/member-options')
     .get(listScheduleGroupMemberOptions);
@@ -154,7 +150,7 @@ router.route('/schedule-groups/:id/members/preview')
     .post(previewScheduleGroupMembers);
 
 router.route('/schedule-groups/:id/members/:employeeId')
-    .delete(removeScheduleGroupMember);
+    .delete(rejectDeprecatedConfigurationWrite);
 
 router.route('/configuration/schedule-groups')
     .post(createConfigurationScheduleGroup)
@@ -186,11 +182,11 @@ router.route('/remote-workers/members')
     .put(setRemoteWorkerMembers);
 
 router.route('/schedule-assignments')
-    .post(createScheduleAssignment)
+    .post(rejectDeprecatedConfigurationWrite)
     .get(listScheduleAssignments);
 
 router.route('/schedule-assignments/:id')
-    .patch(updateScheduleAssignment);
+    .patch(rejectDeprecatedConfigurationWrite);
 
 router.get('/branch-schedules/:branchId', getBranchSchedule);
 router.put('/branch-schedules/:branchId', putBranchSchedule);

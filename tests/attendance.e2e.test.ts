@@ -52,6 +52,13 @@ import User from '../src/models/User';
 import Branch from '../src/models/Branch';
 import AttendanceDailySnapshot from '../src/models/AttendanceDailySnapshot';
 import FileDocument from '../src/models/FileDocument';
+import AttendanceShift from '../src/models/AttendanceShift';
+import AttendanceShiftMembership from '../src/models/AttendanceShiftMembership';
+import AttendanceScheduleTemplate, {
+  AttendanceScheduleAssignment,
+  AttendanceScheduleGroup,
+  AttendanceScheduleGroupMembership,
+} from '../src/models/AttendanceSchedule';
 
 jest.setTimeout(60000);
 
@@ -497,45 +504,43 @@ describe('Attendance endpoints e2e', () => {
     expect(cancel.body.schedule.upcoming).toBeNull();
   });
 
-  it('keeps legacy attendance configuration payloads working', async () => {
-    await seedUsers();
+  it('rejects deprecated attendance configuration writes without changing the database', async () => {
+    const seed = await seedUsers();
     const adminToken = await login('admin');
-    const shift = await request(app)
-      .post('/api/attendance/shifts')
-      .set('Authorization', `Bearer ${adminToken}`)
-      .send({
-        name: 'Legacy Shift',
-        startTime: '09:00',
-        endTime: '17:00',
-        requiredWorkMinutes: 420,
-      });
-    expect(shift.status).toBe(201);
-    expect(shift.body.branchIds ?? []).toEqual([]);
+    const id = new mongoose.Types.ObjectId().toString();
+    const deprecatedWrites = [
+      ['post', '/api/attendance/shifts'],
+      ['patch', `/api/attendance/shifts/${id}`],
+      ['post', '/api/attendance/shift-memberships'],
+      ['delete', `/api/attendance/shift-memberships/${id}`],
+      ['post', '/api/attendance/schedule-templates'],
+      ['patch', `/api/attendance/schedule-templates/${id}`],
+      ['post', '/api/attendance/schedule-groups'],
+      ['patch', `/api/attendance/schedule-groups/${id}`],
+      ['put', `/api/attendance/schedule-groups/${id}/members`],
+      ['delete', `/api/attendance/schedule-groups/${id}/members/${seed.staffId}`],
+      ['post', '/api/attendance/schedule-assignments'],
+      ['patch', `/api/attendance/schedule-assignments/${id}`],
+    ] as const;
 
-    const group = await request(app)
-      .post('/api/attendance/schedule-groups')
-      .set('Authorization', `Bearer ${adminToken}`)
-      .send({ name: 'Legacy Branchless Group' });
-    expect(group.status).toBe(201);
-    expect(group.body.branchId).toBeUndefined();
+    for (const [method, path] of deprecatedWrites) {
+      const response = await request(app)[method](path)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ name: 'Must not be persisted' });
 
-    const template = await request(app)
-      .post('/api/attendance/schedule-templates')
-      .set('Authorization', `Bearer ${adminToken}`)
-      .send({
-        name: 'Legacy Global Template',
-        weeklyPattern: {
-          monday: [shift.body._id],
-          tuesday: [],
-          wednesday: [],
-          thursday: [],
-          friday: [],
-          saturday: [],
-          sunday: [],
-        },
-      });
-    expect(template.status).toBe(201);
-    expect(template.body.branchId).toBeUndefined();
+      expect(response.status).toBe(410);
+      expect(response.body).toEqual({ message: 'This action is deprecated.' });
+    }
+
+    const documentCounts = await Promise.all([
+      AttendanceShift.countDocuments(),
+      AttendanceShiftMembership.countDocuments(),
+      AttendanceScheduleTemplate.countDocuments(),
+      AttendanceScheduleAssignment.countDocuments(),
+      AttendanceScheduleGroup.countDocuments(),
+      AttendanceScheduleGroupMembership.countDocuments(),
+    ]);
+    expect(documentCounts).toEqual([0, 0, 0, 0, 0, 0]);
   });
 
   it('blocks manager and staff from attendance configuration endpoints', async () => {
