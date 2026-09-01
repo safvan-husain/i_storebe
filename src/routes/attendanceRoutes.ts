@@ -21,6 +21,7 @@ import {
     getBranchSchedule,
     getConfigurationShiftCoverageUsage,
     getMyAttendanceStatus,
+    getAttendanceRangeSummary,
     getMonthlySummary,
     getMyDailySnapshots,
     getTeamAttendanceAttention,
@@ -206,6 +207,7 @@ router.get('/team/daily-snapshots/attention', getTeamAttendanceAttention);
 router.get('/team/daily-snapshots', getTeamDailySnapshots);
 router.get('/employees/:employeeId/daily-snapshots', getEmployeeDailySnapshots);
 router.get('/employees/:employeeId/monthly-summary', getMonthlySummary);
+router.get('/reports/summary', getAttendanceRangeSummary);
 
 router.post('/jobs/finalize-daily-snapshots', finalizeDailySnapshots);
 router.post('/daily-snapshots/:id/corrections/checkout', correctCheckout);

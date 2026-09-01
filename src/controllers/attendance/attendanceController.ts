@@ -36,7 +36,7 @@ import { hasFaceEnrollment } from '../../services/face-enrollment-service';
 import { getCurrentBranchIdForUser } from '../../services/branch-context';
 
 type GeneratedBy = 'event' | 'checkout' | 'scheduled_job' | 'correction' | 'manual';
-type Actor = Pick<Request, 'userId' | 'privilege'>;
+type Actor = Pick<Request, 'userId' | 'privilege' | 'secondPrivilege'>;
 type ResolvedShift = {
     _id: Types.ObjectId;
     name?: string;
@@ -159,10 +159,116 @@ function requireAdmin(req: Request) {
     }
 }
 
+function requireAdminOrHr(req: Request) {
+    if (req.privilege === 'admin' || req.secondPrivilege === 'hr') {
+        return;
+    }
+    throw new AppError('Admin or HR privilege required', 403);
+}
+
 function requireAdminOrManager(req: Request) {
     if (!['admin', 'manager'].includes(req.privilege)) {
         throw new AppError('Admin or manager privilege required', 403);
     }
+}
+
+function assertDateString(value: unknown, fieldName: string): string {
+    const text = String(value ?? '');
+    if (!datePattern.test(text)) {
+        throw new AppError(`${fieldName} must use YYYY-MM-DD format`, 400);
+    }
+    return text;
+}
+
+type AttendanceSummaryPersonScope = {
+    employeeId: string;
+    employeeName: string;
+    branchId?: string;
+    branchName?: string;
+};
+
+async function resolveAttendanceSummaryPeople(params: {
+    employeeId?: string;
+    branchId?: string;
+}): Promise<AttendanceSummaryPersonScope[]> {
+    if (params.employeeId) {
+        const employeeObjectId = toObjectId(params.employeeId, 'employeeId');
+        const employee = await User.findById(employeeObjectId)
+            .select('_id username privilege isActive')
+            .lean();
+        if (!employee) {
+            throw new AppError('Employee not found', 404);
+        }
+        let branchId: string | undefined;
+        let branchName: string | undefined;
+        if (params.branchId) {
+            const branchObjectId = toObjectId(params.branchId, 'branchId');
+            const branch = await Branch.findOne({ _id: branchObjectId, isActive: true })
+                .select('_id name manager staffs')
+                .lean();
+            if (!branch) {
+                throw new AppError('Branch not found or inactive', 404);
+            }
+            const inBranch =
+                String(branch.manager ?? '') === String(employee._id) ||
+                (branch.staffs ?? []).some((staffId) => String(staffId) === String(employee._id));
+            if (!inBranch) {
+                throw new AppError('Employee is not a member of the selected branch', 404);
+            }
+            branchId = String(branch._id);
+            branchName = branch.name;
+        } else {
+            try {
+                const branch = await getEmployeeBranch(employeeObjectId);
+                branchId = String(branch._id);
+                branchName = branch.name;
+            } catch {
+                // Employee may not be assigned to a branch yet.
+            }
+        }
+        return [{
+            employeeId: String(employee._id),
+            employeeName: employee.username ?? String(employee._id),
+            branchId,
+            branchName,
+        }];
+    }
+
+    const branchQuery = params.branchId
+        ? { _id: toObjectId(params.branchId, 'branchId'), isActive: true }
+        : { isActive: true };
+    const branches = await Branch.find(branchQuery, { name: 1, manager: 1, staffs: 1 })
+        .populate('manager', 'username privilege isActive')
+        .populate('staffs', 'username privilege isActive')
+        .sort({ name: 1 })
+        .lean();
+    if (params.branchId && branches.length === 0) {
+        throw new AppError('Branch not found or inactive', 404);
+    }
+
+    const peopleById = new Map<string, AttendanceSummaryPersonScope>();
+    for (const branch of branches as any[]) {
+        const addEmployee = (employee: any) => {
+            if (!employee || !['manager', 'staff'].includes(employee.privilege)) return;
+            if (employee.isActive !== true) return;
+            const employeeId = String(employee._id ?? employee);
+            if (peopleById.has(employeeId)) return;
+            peopleById.set(employeeId, {
+                employeeId,
+                employeeName: employee.username ?? employeeId,
+                branchId: String(branch._id),
+                branchName: branch.name,
+            });
+        };
+        addEmployee(branch.manager);
+        for (const staff of branch.staffs ?? []) addEmployee(staff);
+    }
+
+    return Array.from(peopleById.values()).sort((a, b) => {
+        const branchCompare = (a.branchName ?? '').localeCompare(b.branchName ?? '');
+        if (branchCompare !== 0) return branchCompare;
+        return a.employeeName.localeCompare(b.employeeName);
+    });
 }
 
 async function getActorBranchId(req: Request) {
@@ -808,7 +914,7 @@ async function scheduleGroupSummary(group: any, asOf = new Date(), managementVie
 }
 
 async function assertManagerCanViewEmployee(actor: Actor, employeeId: string) {
-    if (actor.privilege === 'admin') return;
+    if (actor.privilege === 'admin' || actor.secondPrivilege === 'hr') return;
     if (actor.privilege === 'staff') {
         if (actor.userId !== employeeId) {
             throw new AppError('Not authorized to view this employee attendance', 403);
@@ -3602,6 +3708,92 @@ export const getMonthlySummary = ok(async (req, res) => {
         { new: true, upsert: true }
     );
     res.status(200).json(summary);
+});
+
+export const getAttendanceRangeSummary = ok(async (req, res) => {
+    requireAdminOrHr(req);
+    const from = assertDateString(req.query.from, 'from');
+    const to = assertDateString(req.query.to, 'to');
+    if (from > to) {
+        throw new AppError('from must be on or before to', 400);
+    }
+    const employeeId = typeof req.query.employeeId === 'string' && req.query.employeeId.trim().length > 0
+        ? req.query.employeeId.trim()
+        : undefined;
+    const branchId = typeof req.query.branchId === 'string' && req.query.branchId.trim().length > 0
+        ? req.query.branchId.trim()
+        : undefined;
+
+    const people = await resolveAttendanceSummaryPeople({ employeeId, branchId });
+    const employeeObjectIds = people.map((person) => toObjectId(person.employeeId, 'employeeId'));
+    const snapshotQuery: Record<string, unknown> = {
+        employee: { $in: employeeObjectIds },
+        date: { $gte: from, $lte: to },
+    };
+    if (branchId) {
+        snapshotQuery.branch = toObjectId(branchId, 'branchId');
+    }
+
+    const snapshots = employeeObjectIds.length === 0
+        ? []
+        : await AttendanceDailySnapshot.find(snapshotQuery)
+            .select('employee status productiveWorkMinutes')
+            .lean();
+
+    const snapshotsByEmployee = new Map<string, typeof snapshots>();
+    for (const snapshot of snapshots) {
+        const key = String(snapshot.employee);
+        const list = snapshotsByEmployee.get(key) ?? [];
+        list.push(snapshot);
+        snapshotsByEmployee.set(key, list);
+    }
+
+    const peopleSummaries = people.map((person) => {
+        const personSnapshots = snapshotsByEmployee.get(person.employeeId) ?? [];
+        let presentDays = 0;
+        let absentDays = 0;
+        let productiveWorkMinutes = 0;
+        let missingCheckoutDays = 0;
+        let excludedIncompleteDays = 0;
+
+        for (const snapshot of personSnapshots) {
+            if (snapshot.status === 'present') {
+                presentDays += 1;
+                productiveWorkMinutes += snapshot.productiveWorkMinutes ?? 0;
+                continue;
+            }
+            if (snapshot.status === 'absent') {
+                absentDays += 1;
+                continue;
+            }
+            if (snapshot.status === 'missing_checkout') {
+                missingCheckoutDays += 1;
+                continue;
+            }
+            if (snapshot.status === 'incomplete' || snapshot.status === 'open_break') {
+                excludedIncompleteDays += 1;
+            }
+        }
+
+        return {
+            employeeId: person.employeeId,
+            employeeName: person.employeeName,
+            branchId: person.branchId,
+            branchName: person.branchName,
+            presentDays,
+            absentDays,
+            productiveWorkMinutes,
+            missingCheckoutDays,
+            excludedIncompleteDays,
+        };
+    });
+
+    res.status(200).json({
+        from,
+        to,
+        branchId: branchId ?? null,
+        people: peopleSummaries,
+    });
 });
 
 export async function regenerateAttendanceDailySnapshot(params: {

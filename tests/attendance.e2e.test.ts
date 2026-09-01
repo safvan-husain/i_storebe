@@ -3412,4 +3412,164 @@ describe('Attendance endpoints e2e', () => {
 
     expect(response.status).toBe(403);
   });
+
+  it('aggregates attendance range summary for admin and hr, and rejects managers', async () => {
+    const seed = await seedUsers();
+    const adminToken = await login('admin');
+    const managerToken = await login('manager-a');
+
+    await User.create({
+      username: 'hr-user',
+      password: 'password123',
+      privilege: 'staff',
+      secondPrivilege: 'hr',
+      isActive: true,
+      isAccountDeleted: false,
+      manager: seed.managerId,
+    });
+    const hrToken = await login('hr-user');
+
+    const snapshotFields = {
+      branch: seed.branchId,
+      branchTimezone: 'Asia/Dubai',
+      shiftIds: [],
+      scheduledSegments: [],
+      requiredWorkMinutes: 420,
+      grossMinutes: 0,
+      totalBreakMinutes: 0,
+      breakOvertimeMinutes: 0,
+      breakUndertimeMinutes: 0,
+      overtimeMinutes: 0,
+      undertimeMinutes: 0,
+      lateMinutes: 0,
+      earlyLeaveMinutes: 0,
+      breakTotals: [],
+      breakSessions: [],
+      generatedFromEventIds: [],
+      generatedBy: 'event' as const,
+      generatedAt: new Date(),
+      version: 1,
+    };
+
+    await AttendanceDailySnapshot.create([
+      {
+        ...snapshotFields,
+        employee: seed.staffId,
+        date: '2099-06-01',
+        status: 'present',
+        productiveWorkMinutes: 400,
+        grossMinutes: 480,
+      },
+      {
+        ...snapshotFields,
+        employee: seed.staffId,
+        date: '2099-06-02',
+        status: 'present',
+        productiveWorkMinutes: 380,
+        grossMinutes: 460,
+      },
+      {
+        ...snapshotFields,
+        employee: seed.staffId,
+        date: '2099-06-03',
+        status: 'absent',
+        productiveWorkMinutes: 0,
+      },
+      {
+        ...snapshotFields,
+        employee: seed.staffId,
+        date: '2099-06-04',
+        status: 'missing_checkout',
+        productiveWorkMinutes: 250,
+      },
+      {
+        ...snapshotFields,
+        employee: seed.staffId,
+        date: '2099-06-05',
+        status: 'open_break',
+        productiveWorkMinutes: 100,
+      },
+      {
+        ...snapshotFields,
+        employee: seed.staffId,
+        date: '2099-06-06',
+        status: 'incomplete',
+        productiveWorkMinutes: 90,
+      },
+      {
+        ...snapshotFields,
+        employee: seed.staffId,
+        date: '2099-06-07',
+        status: 'off_day',
+        requiredWorkMinutes: 0,
+        productiveWorkMinutes: 0,
+      },
+      {
+        ...snapshotFields,
+        employee: seed.managerId,
+        date: '2099-06-01',
+        status: 'present',
+        productiveWorkMinutes: 420,
+      },
+    ]);
+
+    const managerDenied = await request(app)
+      .get('/api/attendance/reports/summary')
+      .query({ from: '2099-06-01', to: '2099-06-07', employeeId: seed.staffId })
+      .set('Authorization', `Bearer ${managerToken}`);
+    expect(managerDenied.status).toBe(403);
+
+    const staffDenied = await request(app)
+      .get('/api/attendance/reports/summary')
+      .query({ from: '2099-06-01', to: '2099-06-07', employeeId: seed.staffId })
+      .set('Authorization', `Bearer ${await login('staff-one')}`);
+    expect(staffDenied.status).toBe(403);
+
+    const personSummary = await request(app)
+      .get('/api/attendance/reports/summary')
+      .query({ from: '2099-06-01', to: '2099-06-07', employeeId: seed.staffId })
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(personSummary.status).toBe(200);
+    expect(personSummary.body.from).toBe('2099-06-01');
+    expect(personSummary.body.to).toBe('2099-06-07');
+    expect(personSummary.body.people).toHaveLength(1);
+    expect(personSummary.body.people[0]).toMatchObject({
+      employeeId: seed.staffId,
+      employeeName: 'staff-one',
+      presentDays: 2,
+      absentDays: 1,
+      productiveWorkMinutes: 780,
+      missingCheckoutDays: 1,
+      excludedIncompleteDays: 2,
+    });
+
+    const hrSummary = await request(app)
+      .get('/api/attendance/reports/summary')
+      .query({
+        from: '2099-06-01',
+        to: '2099-06-07',
+        branchId: seed.branchId,
+      })
+      .set('Authorization', `Bearer ${hrToken}`);
+    expect(hrSummary.status).toBe(200);
+    expect(hrSummary.body.branchId).toBe(seed.branchId);
+    expect(hrSummary.body.people).toHaveLength(2);
+    const byName = Object.fromEntries(
+      hrSummary.body.people.map((person: { employeeName: string }) => [person.employeeName, person]),
+    );
+    expect(byName['staff-one']).toMatchObject({
+      presentDays: 2,
+      absentDays: 1,
+      productiveWorkMinutes: 780,
+      missingCheckoutDays: 1,
+      excludedIncompleteDays: 2,
+    });
+    expect(byName['manager-a']).toMatchObject({
+      presentDays: 1,
+      absentDays: 0,
+      productiveWorkMinutes: 420,
+      missingCheckoutDays: 0,
+      excludedIncompleteDays: 0,
+    });
+  });
 });
