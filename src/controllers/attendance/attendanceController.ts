@@ -3723,6 +3723,7 @@ export const getAttendanceRangeSummary = ok(async (req, res) => {
     const branchId = typeof req.query.branchId === 'string' && req.query.branchId.trim().length > 0
         ? req.query.branchId.trim()
         : undefined;
+    const excludeWithoutSnapshots = req.query.excludeWithoutSnapshots === 'true';
 
     const people = await resolveAttendanceSummaryPeople({ employeeId, branchId });
     const employeeObjectIds = people.map((person) => toObjectId(person.employeeId, 'employeeId'));
@@ -3748,45 +3749,50 @@ export const getAttendanceRangeSummary = ok(async (req, res) => {
         snapshotsByEmployee.set(key, list);
     }
 
-    const peopleSummaries = people.map((person) => {
-        const personSnapshots = snapshotsByEmployee.get(person.employeeId) ?? [];
-        let presentDays = 0;
-        let absentDays = 0;
-        let productiveWorkMinutes = 0;
-        let missingCheckoutDays = 0;
-        let excludedIncompleteDays = 0;
+    const peopleSummaries = people
+        .filter((person) => {
+            if (employeeId || !excludeWithoutSnapshots) return true;
+            return (snapshotsByEmployee.get(person.employeeId) ?? []).length > 0;
+        })
+        .map((person) => {
+            const personSnapshots = snapshotsByEmployee.get(person.employeeId) ?? [];
+            let presentDays = 0;
+            let absentDays = 0;
+            let productiveWorkMinutes = 0;
+            let missingCheckoutDays = 0;
+            let excludedIncompleteDays = 0;
 
-        for (const snapshot of personSnapshots) {
-            if (snapshot.status === 'present') {
-                presentDays += 1;
-                productiveWorkMinutes += snapshot.productiveWorkMinutes ?? 0;
-                continue;
+            for (const snapshot of personSnapshots) {
+                if (snapshot.status === 'present') {
+                    presentDays += 1;
+                    productiveWorkMinutes += snapshot.productiveWorkMinutes ?? 0;
+                    continue;
+                }
+                if (snapshot.status === 'absent') {
+                    absentDays += 1;
+                    continue;
+                }
+                if (snapshot.status === 'missing_checkout') {
+                    missingCheckoutDays += 1;
+                    continue;
+                }
+                if (snapshot.status === 'incomplete' || snapshot.status === 'open_break') {
+                    excludedIncompleteDays += 1;
+                }
             }
-            if (snapshot.status === 'absent') {
-                absentDays += 1;
-                continue;
-            }
-            if (snapshot.status === 'missing_checkout') {
-                missingCheckoutDays += 1;
-                continue;
-            }
-            if (snapshot.status === 'incomplete' || snapshot.status === 'open_break') {
-                excludedIncompleteDays += 1;
-            }
-        }
 
-        return {
-            employeeId: person.employeeId,
-            employeeName: person.employeeName,
-            branchId: person.branchId,
-            branchName: person.branchName,
-            presentDays,
-            absentDays,
-            productiveWorkMinutes,
-            missingCheckoutDays,
-            excludedIncompleteDays,
-        };
-    });
+            return {
+                employeeId: person.employeeId,
+                employeeName: person.employeeName,
+                branchId: person.branchId,
+                branchName: person.branchName,
+                presentDays,
+                absentDays,
+                productiveWorkMinutes,
+                missingCheckoutDays,
+                excludedIncompleteDays,
+            };
+        });
 
     res.status(200).json({
         from,

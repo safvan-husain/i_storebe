@@ -3571,5 +3571,72 @@ describe('Attendance endpoints e2e', () => {
       missingCheckoutDays: 0,
       excludedIncompleteDays: 0,
     });
+
+    const noSnapshotUser = await User.create({
+      username: 'staff-no-snapshot',
+      password: 'password123',
+      privilege: 'staff',
+      secondPrivilege: 'regular',
+      isActive: true,
+      isAccountDeleted: false,
+      manager: seed.managerId,
+    });
+    const offDayUser = await User.create({
+      username: 'staff-off-day',
+      password: 'password123',
+      privilege: 'staff',
+      secondPrivilege: 'regular',
+      isActive: true,
+      isAccountDeleted: false,
+      manager: seed.managerId,
+    });
+    await Branch.findByIdAndUpdate(seed.branchId, {
+      $addToSet: { staffs: { $each: [noSnapshotUser._id, offDayUser._id] } },
+    });
+    await AttendanceDailySnapshot.create({
+      ...snapshotFields,
+      employee: offDayUser._id,
+      date: '2099-06-01',
+      status: 'off_day',
+      requiredWorkMinutes: 0,
+      productiveWorkMinutes: 0,
+    });
+
+    const unfiltered = await request(app)
+      .get('/api/attendance/reports/summary')
+      .query({ from: '2099-06-01', to: '2099-06-07', branchId: seed.branchId })
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(unfiltered.status).toBe(200);
+    expect(unfiltered.body.people.map((person: { employeeName: string }) => person.employeeName))
+      .toEqual(expect.arrayContaining(['staff-no-snapshot', 'staff-off-day']));
+
+    const filtered = await request(app)
+      .get('/api/attendance/reports/summary')
+      .query({
+        from: '2099-06-01',
+        to: '2099-06-07',
+        branchId: seed.branchId,
+        excludeWithoutSnapshots: true,
+      })
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(filtered.status).toBe(200);
+    const filteredNames = filtered.body.people.map(
+      (person: { employeeName: string }) => person.employeeName,
+    );
+    expect(filteredNames).not.toContain('staff-no-snapshot');
+    expect(filteredNames).toContain('staff-off-day');
+
+    const selectedPerson = await request(app)
+      .get('/api/attendance/reports/summary')
+      .query({
+        from: '2099-06-01',
+        to: '2099-06-07',
+        employeeId: String(noSnapshotUser._id),
+        excludeWithoutSnapshots: true,
+      })
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(selectedPerson.status).toBe(200);
+    expect(selectedPerson.body.people).toHaveLength(1);
+    expect(selectedPerson.body.people[0].employeeName).toBe('staff-no-snapshot');
   });
 });
