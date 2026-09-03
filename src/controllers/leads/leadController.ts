@@ -548,7 +548,7 @@ export const getLeadsV2 = asyncHandler(async (req: Request, res: Response) => {
     const filter = LeadBranchFilterSchema.parse(req.body);
     const currentBranch = req.privilege === 'admin' ? undefined : await getCurrentBranchIdForUser(req.userId);
     if (req.privilege !== 'admin' && !currentBranch) {
-      res.status(200).json({ accessState: 'no_branch', leads: [], totalCount: 0, todayCount: 0, weekCount: 0, monthCount: 0 });
+      res.status(200).json({ accessState: 'no_branch', leads: [], totalCount: 0 });
       return;
     }
     const query: FilterQuery<ILead> = {};
@@ -585,9 +585,67 @@ export const getLeadsV2 = asyncHandler(async (req: Request, res: Response) => {
       createdAt: new Date(lead.createdAt).getTime(),
       branch: lead.handlingBranch ?? lead.createdBranch ?? null,
     }));
-    res.status(200).json({ accessState: 'ok', leads, totalCount, todayCount: 0, weekCount: 0, monthCount: 0 });
+    res.status(200).json({ accessState: 'ok', leads, totalCount });
     return;
   } catch (error) { onCatchError(error, res); }
+});
+
+export interface LeadDashboardSummary {
+  todayCount: number;
+  weekCount: number;
+  monthCount: number;
+  totalCount: number;
+}
+
+export function getLeadDashboardSummaryDateRanges(now = new Date()) {
+  // Shift the instant into IST, then use UTC getters to safely manipulate the
+  // India calendar date without depending on the host server timezone.
+  const istOffsetMs = 5.5 * 60 * 60 * 1000;
+  const istNow = new Date(now.getTime() + istOffsetMs);
+  const istDateToUtc = (year: number, month: number, day: number) =>
+    new Date(Date.UTC(year, month, day) - istOffsetMs);
+  const year = istNow.getUTCFullYear();
+  const month = istNow.getUTCMonth();
+  const day = istNow.getUTCDate();
+  const todayStart = istDateToUtc(year, month, day);
+  const tomorrowStart = istDateToUtc(year, month, day + 1);
+  const weekStart = istDateToUtc(year, month, day - istNow.getUTCDay());
+  const nextWeekStart = istDateToUtc(year, month, day - istNow.getUTCDay() + 7);
+  const monthStart = istDateToUtc(year, month, 1);
+  const nextMonthStart = istDateToUtc(year, month + 1, 1);
+
+  return { todayStart, tomorrowStart, weekStart, nextWeekStart, monthStart, nextMonthStart };
+}
+
+export const getLeadDashboardSummary = asyncHandler(async (req: Request, res: TypedResponse<LeadDashboardSummary>) => {
+  try {
+    if (req.privilege !== 'admin') {
+      res.status(403).json({ message: 'Forbidden' });
+      return;
+    }
+
+    const { todayStart, tomorrowStart, weekStart, nextWeekStart, monthStart, nextMonthStart } =
+      getLeadDashboardSummaryDateRanges();
+    const [summary] = await Lead.aggregate([
+      {
+        $facet: {
+          totalCount: [{ $count: 'count' }],
+          todayCount: [{ $match: { createdAt: { $gte: todayStart, $lt: tomorrowStart } } }, { $count: 'count' }],
+          weekCount: [{ $match: { createdAt: { $gte: weekStart, $lt: nextWeekStart } } }, { $count: 'count' }],
+          monthCount: [{ $match: { createdAt: { $gte: monthStart, $lt: nextMonthStart } } }, { $count: 'count' }],
+        },
+      },
+    ]);
+
+    res.status(200).json({
+      totalCount: summary?.totalCount?.[0]?.count ?? 0,
+      todayCount: summary?.todayCount?.[0]?.count ?? 0,
+      weekCount: summary?.weekCount?.[0]?.count ?? 0,
+      monthCount: summary?.monthCount?.[0]?.count ?? 0,
+    });
+  } catch (error) {
+    onCatchError(error, res);
+  }
 });
 
 const mapLeadDocumentToResponse = (e: any): ILeadResponse => ({

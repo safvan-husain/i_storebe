@@ -137,7 +137,8 @@ export const getActiveStaffsForManager = asyncHandler(async (req: Request, res: 
 export const queryEmployees = asyncHandler(async (req: Request, res: Response) => {
     try {
         const actorPrivilege = req.privilege;
-        if (actorPrivilege === UserPrivilegeSchema.enum.staff) {
+        const isHr = req.secondPrivilege === 'hr';
+        if (actorPrivilege === UserPrivilegeSchema.enum.staff && !isHr) {
             res.status(403).json({ message: 'Not authorized to query employees' });
             return;
         }
@@ -147,7 +148,7 @@ export const queryEmployees = asyncHandler(async (req: Request, res: Response) =
         }
 
         const filter = employeeQuerySchema.parse(req.body ?? {});
-        const isManagerScoped = actorPrivilege === UserPrivilegeSchema.enum.manager;
+        const isManagerScoped = actorPrivilege === UserPrivilegeSchema.enum.manager && !isHr;
         const query: FilterQuery<IUser> = {
             isAccountDeleted: { $ne: true },
             privilege: isManagerScoped ? 'staff' : { $in: filter.privileges },

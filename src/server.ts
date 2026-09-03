@@ -279,5 +279,17 @@ if (process.env.NODE_ENV !== 'test') {
       timezone: "Asia/Kolkata"
   });
 
+  // Finalize attendance snapshots at 3:00 AM IST (21:30 UTC).
+  cron.schedule('0 3 * * *', async () => {
+      try {
+          const { finalizeAllBranchesForLocalYesterday } = await import('./services/attendance-finalize-daily');
+          await finalizeAllBranchesForLocalYesterday();
+      } catch (error) {
+          logProcessError('Attendance finalize cron failed', error);
+      }
+  }, {
+      timezone: "Asia/Kolkata"
+  });
+
   startTaskScheduler();
 }

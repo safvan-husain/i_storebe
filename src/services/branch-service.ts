@@ -31,12 +31,20 @@ type Actor = {
     userId?: string;
     username?: string;
     privilege?: string;
+    secondPrivilege?: string;
 };
 
 const ensureAdmin = (actor: Actor) => {
     if (actor.privilege !== UserPrivilegeSchema.enum.admin) {
         throw new AppError('Only admins can manage branches', 403);
     }
+};
+
+const ensureAdminOrHr = (actor: Actor) => {
+    if (actor.privilege === UserPrivilegeSchema.enum.admin || actor.secondPrivilege === 'hr') {
+        return;
+    }
+    throw new AppError('Only admins or HR can view branches', 403);
 };
 
 const toObjectId = (id: string) => Types.ObjectId.createFromHexString(id);
@@ -311,7 +319,7 @@ export const branchService = {
     },
 
     async getBranches(actor: Actor) {
-        ensureAdmin(actor);
+        ensureAdminOrHr(actor);
         return Branch.find()
             .sort({ isActive: -1, name: 1 })
             .populate('manager', 'username privilege secondPrivilege isActive')

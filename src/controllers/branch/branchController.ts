@@ -7,6 +7,7 @@ const actorFromRequest = (req: Request) => ({
     userId: req.userId,
     username: req.username,
     privilege: req.privilege,
+    secondPrivilege: req.secondPrivilege,
 });
 
 export const createBranch = asyncHandler(async (req: Request, res: Response) => {

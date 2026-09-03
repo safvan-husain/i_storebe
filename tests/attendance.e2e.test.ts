@@ -163,7 +163,7 @@ describe('Attendance endpoints e2e', () => {
 
   const createAttendanceSetup = async (adminToken: string, seed: Awaited<ReturnType<typeof seedUsers>>) => {
     const shift = await request(app)
-      .post('/api/attendance/shifts')
+      .post('/api/attendance/configuration/shifts')
       .set('Authorization', `Bearer ${adminToken}`)
       .send({
         name: 'Full Day',
@@ -173,6 +173,7 @@ describe('Attendance endpoints e2e', () => {
         graceLateMinutes: 10,
         graceEarlyLeaveMinutes: 10,
         isActive: true,
+        branchIds: [seed.branchId],
       });
     expect(shift.status).toBe(201);
 
@@ -219,43 +220,34 @@ describe('Attendance endpoints e2e', () => {
       });
     expect(breakSubtype.status).toBe(201);
 
-    const template = await request(app)
-      .post('/api/attendance/schedule-templates')
+    const branchSchedule = await request(app)
+      .put(`/api/attendance/branch-schedules/${seed.branchId}`)
       .set('Authorization', `Bearer ${adminToken}`)
       .send({
-        name: 'Standard Week',
-        type: 'weekly',
-        weeklyPattern: {
-          monday: [shift.body._id],
-          tuesday: [shift.body._id],
-          wednesday: [shift.body._id],
-          thursday: [shift.body._id],
-          friday: [shift.body._id],
-          saturday: [],
-          sunday: [],
-        },
-        isActive: true,
-      });
-    expect(template.status).toBe(201);
-
-    const branchAssignment = await request(app)
-      .post('/api/attendance/schedule-assignments')
-      .set('Authorization', `Bearer ${adminToken}`)
-      .send({
-        templateId: template.body._id,
-        targetType: 'branch',
-        branchId: seed.branchId,
         effectiveFrom: '2099-05-01',
+        weeklyPattern: {
+          monday: shift.body._id,
+          tuesday: shift.body._id,
+          wednesday: shift.body._id,
+          thursday: shift.body._id,
+          friday: shift.body._id,
+          saturday: null,
+          sunday: null,
+        },
       });
-    expect(branchAssignment.status).toBe(201);
+    expect(branchSchedule.status).toBe(200);
 
     return {
       shiftId: shift.body._id as string,
       privilegeId: privilege.body._id as string,
       breakTypeId: breakType.body._id as string,
       breakSubtypeId: breakSubtype.body._id as string,
-      templateId: template.body._id as string,
-      branchAssignmentId: branchAssignment.body._id as string,
+      templateId: branchSchedule.body.schedule?.current?.templateId
+        ?? branchSchedule.body.schedule?.upcoming?.templateId
+        ?? '',
+      branchAssignmentId: branchSchedule.body.schedule?.current?.assignmentId
+        ?? branchSchedule.body.schedule?.upcoming?.assignmentId
+        ?? '',
     };
   };
 
@@ -3007,6 +2999,79 @@ describe('Attendance endpoints e2e', () => {
     expect(checkoutBeforeCheckIn.status).toBe(409);
   });
 
+  it('finalizes absent snapshots for staff and manager with no events, and skips present days', async () => {
+    const seed = await seedUsers();
+    const adminToken = await login('admin');
+    await createAttendanceSetup(adminToken, seed);
+
+    const firstFinalize = await request(app)
+      .post('/api/attendance/jobs/finalize-daily-snapshots')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        branchId: seed.branchId,
+        date: '2099-05-05',
+      });
+
+    expect(firstFinalize.status).toBe(200);
+    expect(firstFinalize.body.createdSnapshots).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          employee: seed.staffId,
+          status: 'absent',
+          generatedBy: 'scheduled_job',
+        }),
+        expect.objectContaining({
+          employee: seed.managerId,
+          status: 'absent',
+          generatedBy: 'scheduled_job',
+        }),
+      ]),
+    );
+
+    const staffToken = await login('staff-one');
+    const checkIn = await request(app)
+      .post('/api/attendance/events/check-in')
+      .set('Authorization', `Bearer ${staffToken}`)
+      .send({
+        ...validAttendanceLocation,
+        timestamp: '2099-05-06T05:00:00.000Z',
+      });
+    expect(checkIn.status).toBe(201);
+    const checkOut = await request(app)
+      .post('/api/attendance/events/check-out')
+      .set('Authorization', `Bearer ${staffToken}`)
+      .send({
+        ...validAttendanceLocation,
+        timestamp: '2099-05-06T13:00:00.000Z',
+      });
+    expect(checkOut.status).toBe(201);
+    expect(checkOut.body.snapshot.status).toBe('present');
+
+    const secondFinalize = await request(app)
+      .post('/api/attendance/jobs/finalize-daily-snapshots')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        branchId: seed.branchId,
+        date: '2099-05-06',
+      });
+    expect(secondFinalize.status).toBe(200);
+    expect(
+      secondFinalize.body.createdSnapshots.some(
+        (snapshot: { employee: string; status: string }) =>
+          snapshot.employee === seed.staffId,
+      ),
+    ).toBe(false);
+    expect(secondFinalize.body.createdSnapshots).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          employee: seed.managerId,
+          status: 'absent',
+          generatedBy: 'scheduled_job',
+        }),
+      ]),
+    );
+  });
+
   it('generates missing checkout snapshots and requires admin correction', async () => {
     const seed = await seedUsers();
     const adminToken = await login('admin');
@@ -3044,8 +3109,14 @@ describe('Attendance endpoints e2e', () => {
       ])
     );
 
+    const missingCheckoutSnapshot = finalize.body.createdSnapshots.find(
+      (snapshot: { employee: string; status: string }) =>
+        snapshot.employee === seed.staffId && snapshot.status === 'missing_checkout',
+    );
+    expect(missingCheckoutSnapshot).toBeTruthy();
+
     const staffCorrectionAttempt = await request(app)
-      .post(`/api/attendance/daily-snapshots/${finalize.body.createdSnapshots[0]._id}/corrections/checkout`)
+      .post(`/api/attendance/daily-snapshots/${missingCheckoutSnapshot._id}/corrections/checkout`)
       .set('Authorization', `Bearer ${staffToken}`)
       .send({
         checkoutTime: '17:30',
@@ -3055,7 +3126,7 @@ describe('Attendance endpoints e2e', () => {
     expect(staffCorrectionAttempt.status).toBe(403);
 
     const adminCorrection = await request(app)
-      .post(`/api/attendance/daily-snapshots/${finalize.body.createdSnapshots[0]._id}/corrections/checkout`)
+      .post(`/api/attendance/daily-snapshots/${missingCheckoutSnapshot._id}/corrections/checkout`)
       .set('Authorization', `Bearer ${adminToken}`)
       .send({
         checkoutTime: '17:30',

@@ -3570,20 +3570,12 @@ export const finalizeDailySnapshots = ok(async (req, res) => {
     if (!branch) throw new AppError('Branch not found', 404);
     const date = String(req.body.date ?? branchLocalParts(new Date(), branch.timezone).date);
     assertDate(date, 'date');
-    const staffIds = (branch.staffs ?? []) as Types.ObjectId[];
-    const createdSnapshots = [];
-    for (const employeeId of staffIds) {
-        const existing = await AttendanceDailySnapshot.findOne({ employee: employeeId, date });
-        if (existing && !['missing_checkout', 'open_break', 'incomplete'].includes(existing.status)) continue;
-        const snapshot = await generateDailySnapshot({
-            employeeId,
-            branchId,
-            dateString: date,
-            generatedBy: 'scheduled_job',
-        });
-        createdSnapshots.push(snapshot);
-    }
-    res.status(200).json({ createdSnapshots });
+    const { finalizeBranchDailySnapshots } = await import('../../services/attendance-finalize-daily');
+    const result = await finalizeBranchDailySnapshots({
+        branchId,
+        date,
+    });
+    res.status(200).json({ createdSnapshots: result.snapshots });
 });
 
 export const correctCheckout = ok(async (req, res) => {
@@ -3814,4 +3806,21 @@ export async function regenerateAttendanceDailySnapshot(params: {
         generatedBy: 'manual',
         recalculateBasis: true,
     });
+}
+
+export async function generateAttendanceDailySnapshotForScheduledJob(params: {
+    employeeId: Types.ObjectId;
+    branchId: Types.ObjectId;
+    dateString: string;
+}) {
+    return generateDailySnapshot({
+        employeeId: params.employeeId,
+        branchId: params.branchId,
+        dateString: params.dateString,
+        generatedBy: 'scheduled_job',
+    });
+}
+
+export function attendanceLocalDateString(date: Date, timezone: string): string {
+    return branchLocalParts(date, timezone).date;
 }
