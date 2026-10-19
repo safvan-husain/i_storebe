@@ -34,6 +34,7 @@ import AttendanceDailySnapshot, {
 import AttendanceMonthlySummary from '../../models/AttendanceMonthlySummary';
 import { hasFaceEnrollment } from '../../services/face-enrollment-service';
 import { getCurrentBranchIdForUser } from '../../services/branch-context';
+import { buildAttendanceWorkbook, EXCEL_MIME, ReportSnapshot } from '../../services/attendance-report-export';
 
 type GeneratedBy = 'event' | 'checkout' | 'scheduled_job' | 'correction' | 'manual';
 type Actor = Pick<Request, 'userId' | 'privilege' | 'secondPrivilege'>;
@@ -3702,7 +3703,55 @@ export const getMonthlySummary = ok(async (req, res) => {
     res.status(200).json(summary);
 });
 
-export const getAttendanceRangeSummary = ok(async (req, res) => {
+function summarizeAttendancePerson(
+    person: AttendanceSummaryPersonScope,
+    personSnapshots: Array<Pick<ReportSnapshot, 'status' | 'firstCheckIn' | 'firstCheckInAt' | 'productiveWorkMinutes'>>,
+) {
+    let punchedInDays = 0;
+    let presentDays = 0;
+    let absentDays = 0;
+    let productiveWorkMinutes = 0;
+    let missingCheckoutDays = 0;
+    let excludedIncompleteDays = 0;
+
+    for (const snapshot of personSnapshots) {
+        if (snapshot.firstCheckInAt || snapshot.firstCheckIn) {
+            punchedInDays += 1;
+        }
+        if (snapshot.status === 'present') {
+            presentDays += 1;
+            productiveWorkMinutes += snapshot.productiveWorkMinutes ?? 0;
+            continue;
+        }
+        if (snapshot.status === 'absent') {
+            absentDays += 1;
+            continue;
+        }
+        if (snapshot.status === 'missing_checkout') {
+            missingCheckoutDays += 1;
+            continue;
+        }
+        if (snapshot.status === 'incomplete' || snapshot.status === 'open_break') {
+            excludedIncompleteDays += 1;
+        }
+    }
+
+    return {
+        employeeId: person.employeeId,
+        employeeName: person.employeeName,
+        branchId: person.branchId,
+        branchName: person.branchName,
+        punchedInDays,
+        presentDays,
+        absentDays,
+        productiveWorkMinutes,
+        missingCheckoutDays,
+        excludedIncompleteDays,
+    };
+
+}
+
+async function loadAttendanceRangeReport(req: Request) {
     requireAdminOrHr(req);
     const from = assertDateString(req.query.from, 'from');
     const to = assertDateString(req.query.to, 'to');
@@ -3730,7 +3779,7 @@ export const getAttendanceRangeSummary = ok(async (req, res) => {
     const snapshots = employeeObjectIds.length === 0
         ? []
         : await AttendanceDailySnapshot.find(snapshotQuery)
-            .select('employee status productiveWorkMinutes')
+            .select('employee status productiveWorkMinutes firstCheckIn firstCheckInAt')
             .lean();
 
     const snapshotsByEmployee = new Map<string, typeof snapshots>();
@@ -3746,52 +3795,115 @@ export const getAttendanceRangeSummary = ok(async (req, res) => {
             if (employeeId || !excludeWithoutSnapshots) return true;
             return (snapshotsByEmployee.get(person.employeeId) ?? []).length > 0;
         })
-        .map((person) => {
-            const personSnapshots = snapshotsByEmployee.get(person.employeeId) ?? [];
-            let presentDays = 0;
-            let absentDays = 0;
-            let productiveWorkMinutes = 0;
-            let missingCheckoutDays = 0;
-            let excludedIncompleteDays = 0;
+        .map(person => summarizeAttendancePerson(person, snapshotsByEmployee.get(person.employeeId) ?? []));
 
-            for (const snapshot of personSnapshots) {
-                if (snapshot.status === 'present') {
-                    presentDays += 1;
-                    productiveWorkMinutes += snapshot.productiveWorkMinutes ?? 0;
-                    continue;
-                }
-                if (snapshot.status === 'absent') {
-                    absentDays += 1;
-                    continue;
-                }
-                if (snapshot.status === 'missing_checkout') {
-                    missingCheckoutDays += 1;
-                    continue;
-                }
-                if (snapshot.status === 'incomplete' || snapshot.status === 'open_break') {
-                    excludedIncompleteDays += 1;
-                }
-            }
-
-            return {
-                employeeId: person.employeeId,
-                employeeName: person.employeeName,
-                branchId: person.branchId,
-                branchName: person.branchName,
-                presentDays,
-                absentDays,
-                productiveWorkMinutes,
-                missingCheckoutDays,
-                excludedIncompleteDays,
-            };
-        });
-
-    res.status(200).json({
+    return { snapshots, summary: {
         from,
         to,
         branchId: branchId ?? null,
         people: peopleSummaries,
-    });
+    } };
+}
+
+
+export const getAttendanceRangeSummary = ok(async (req, res) => {
+    const report = await loadAttendanceRangeReport(req);
+    res.status(200).json(report.summary);
+});
+
+/** Export uses recorded attendance branches; legacy JSON keeps its current-member policy. */
+async function loadHistoricalAttendanceExport(req: Request) {
+    const from = assertDateString(req.query.from, 'from');
+    const to = assertDateString(req.query.to, 'to');
+    if (from > to) throw new AppError('from must be on or before to', 400);
+    const employeeId = typeof req.query.employeeId === 'string' ? req.query.employeeId : undefined;
+    const branchId = typeof req.query.branchId === 'string' ? req.query.branchId : undefined;
+    const selectedBranch = branchId ? await Branch.findById(branchId).lean() : undefined;
+    if (branchId && !selectedBranch) throw new AppError('Branch not found', 404);
+    const snapshots = await AttendanceDailySnapshot.find({
+        date: { $gte: from, $lte: to },
+        ...(employeeId ? { employee: toObjectId(employeeId, 'employeeId') } : {}),
+        ...(branchId ? { branch: toObjectId(branchId, 'branchId') } : {}),
+    }).select('employee branch date branchTimezone status requiredWorkMinutes productiveWorkMinutes firstCheckIn firstCheckInAt lastCheckOut lastCheckOutAt totalBreakMinutes overtimeMinutes undertimeMinutes breakOvertimeMinutes breakUndertimeMinutes breakSessions breakTotals generatedBy notes')
+        .sort({ date: 1, branch: 1, _id: 1 }).lean();
+    let current: AttendanceSummaryPersonScope[] = [];
+    if (employeeId) {
+        const user = await User.findById(employeeId).select('_id username').lean();
+        if (!user && snapshots.length === 0) throw new AppError('Employee not found', 404);
+        if (user) current = await resolveAttendanceSummaryPeople({ employeeId });
+    } else if (!selectedBranch || selectedBranch.isActive) {
+        current = await resolveAttendanceSummaryPeople({ branchId });
+    }
+    const ids = [...new Set([...current.map(p => p.employeeId), ...snapshots.map(s => String(s.employee))])];
+    const users = await User.find({ _id: { $in: ids } }).select('_id username').lean();
+    const names = new Map(users.map(user => [String(user._id), user.username]));
+    const branchIds = [...new Set(snapshots.map(s => String(s.branch)))];
+    const branches = await Branch.find({ _id: { $in: branchIds } }).select('_id name').lean();
+    const branchNames = new Map(branches.map(branch => [String(branch._id), branch.name]));
+    const groups = new Map<string, typeof snapshots>();
+    for (const snapshot of snapshots) {
+        const id = String(snapshot.employee);
+        const list = groups.get(id) ?? [];
+        list.push(snapshot); groups.set(id, list);
+    }
+    const currentById = new Map(current.map(person => [person.employeeId, person]));
+    const exclude = req.query.excludeWithoutSnapshots === 'true';
+    const people = ids.filter(id => employeeId || !exclude || groups.has(id)).map(id => {
+        const records = groups.get(id) ?? [];
+        const fallback = currentById.get(id);
+        const historicalNames = [...new Set(records.map(s => branchNames.get(String(s.branch)) ??
+            'Unavailable branch (' + String(s.branch) + ')'))];
+        const scope = {
+            employeeId: id,
+            employeeName: names.get(id) ?? 'Unavailable employee (' + id + ')',
+            branchName: historicalNames.length ? historicalNames.join(', ') : fallback?.branchName,
+            branchId: records.length ? undefined : fallback?.branchId,
+        };
+        return { ...summarizeAttendancePerson(scope, records), branchNames: historicalNames };
+    }).sort((a, b) => (a.branchName ?? '').localeCompare(b.branchName ?? '') ||
+        a.employeeName.localeCompare(b.employeeName) || a.employeeId.localeCompare(b.employeeId));
+    const namedSnapshots = snapshots.map(snapshot => ({
+        ...snapshot,
+        branchName: branchNames.get(String(snapshot.branch)) ?? 'Unavailable branch (' + String(snapshot.branch) + ')',
+    }));
+    return { summary: { from, to, branchId: branchId ?? null, people }, snapshots: namedSnapshots };
+}
+
+export const exportAttendanceReport = ok(async (req, res) => {
+    requireAdminOrHr(req);
+    for (const field of ['from', 'to'] as const) {
+        if (typeof req.query[field] !== 'string') throw new AppError(field + ' must use YYYY-MM-DD format', 400);
+        const value = assertDateString(req.query[field], field);
+        const parsed = new Date(value + 'T00:00:00Z');
+        if (!Number.isFinite(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== value) {
+            throw new AppError(field + ' must be a valid calendar date', 400);
+        }
+    }
+    for (const field of ['employeeId', 'branchId'] as const) {
+        if (req.query[field] !== undefined) toObjectId(req.query[field], field);
+    }
+    if (req.query.excludeWithoutSnapshots !== undefined &&
+        (typeof req.query.excludeWithoutSnapshots !== 'string' || !['true', 'false'].includes(req.query.excludeWithoutSnapshots))) {
+        throw new AppError('excludeWithoutSnapshots must be true or false', 400);
+    }
+    const { summary, snapshots } = await loadHistoricalAttendanceExport(req);
+    const ids = summary.people.map(person => toObjectId(person.employeeId, 'employeeId'));
+    const eventFrom = new Date(summary.from + 'T00:00:00Z');
+    const eventTo = new Date(summary.to + 'T00:00:00Z');
+    eventFrom.setUTCDate(eventFrom.getUTCDate() - 1);
+    eventTo.setUTCDate(eventTo.getUTCDate() + 1);
+    const events = ids.length ? await AttendanceEvent.find({
+        employee: { $in: ids },
+        branchLocalDate: { $gte: eventFrom.toISOString().slice(0, 10), $lte: eventTo.toISOString().slice(0, 10) },
+        type: { $in: ['break_start', 'break_end'] },
+        ...(summary.branchId ? { branch: toObjectId(summary.branchId, 'branchId') } : {}),
+    }).select('_id employee branch branchLocalDate type timestamp breakType breakSubtype')
+        .sort({ timestamp: 1, _id: 1 }).lean() : [];
+    const bytes = await buildAttendanceWorkbook(summary, snapshots, events);
+    res.setHeader('Content-Type', EXCEL_MIME);
+    res.setHeader('Content-Disposition', 'attachment; filename="attendance_report_' + summary.from + '_' + summary.to + '.xlsx"');
+    res.setHeader('Cache-Control', 'no-store');
+    res.status(200).send(bytes);
 });
 
 export async function regenerateAttendanceDailySnapshot(params: {

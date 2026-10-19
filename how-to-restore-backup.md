@@ -5,7 +5,7 @@ This restore flow is only for the local Docker development MongoDB. Do not use i
 The backup archive is expected at:
 
 ```text
-/Users/safvanhusain/code/hashqubes/istore/mongodb-backup-2026-07-12T16-00-18-359687.archive.gz
+/Users/safvanhusain/code/hashqubes/istore/mongodb-backup-2026-10-15T11-08-27-973640.archive.gz
 ```
 
 ## First Boot Default
@@ -40,6 +40,8 @@ This command:
 - reads the backup archive as read-only from `/backup/archive.gz`
 - restores only `i-store-db.*`
 - uses `--drop`, so matching local Docker collections are deleted and recreated from the backup
+
+Restarting MongoDB does not refresh an existing volume. Run the explicit restore above when switching archives. Both Compose mounts must point to the same archive.
 
 ## 3. Verify The Restore
 
@@ -78,3 +80,34 @@ http://localhost:4000/
 ## Production Warning
 
 Do not use this Docker setup in production. Production should continue to use the PM2 deployment flow with `npm run build`, `pm2`, and `ecosystem.config.js`.
+
+
+## Attendance Excel HTTP export
+
+An authenticated admin or HR user can download:
+
+```text
+GET /api/attendance/reports/export?from=2026-10-01&to=2026-10-15
+Authorization: Bearer <token>
+```
+
+Optional filters: `employeeId`, `branchId`, and `excludeWithoutSnapshots=true`.
+The response is an XLSX attachment with Summary and Daily details sheets.
+Export reads existing snapshots and events; it does not finalize or regenerate attendance.
+
+For restored-production-data verification, run the imported Express app in `NODE_ENV=test`
+with an explicit local MongoDB connection and development JWT secret. This skips the normal
+bootstrap, scheduled jobs and outbound messaging; do not run background jobs using restored
+production contacts. Do not point the test runner at a production URI.
+
+## Flutter export and historical branches
+
+The Flutter export dialog starts with the current browsing filters, but edits affect only
+the downloaded workbook. Both export entry points use the backend endpoint; local Flutter
+workbook builders are deprecated. Existing JSON endpoints remain active for old apps.
+
+Excel branch selection follows stored daily snapshots, including former staff and inactive
+historical branches. Summary lists all branches in the range; Daily details includes the
+branch recorded for each day. Current members without snapshots remain as explicitly empty
+rows unless excluded. The legacy on-screen JSON summary retains its current-membership
+policy, so a branch Excel export may include historical staff absent from that screen.

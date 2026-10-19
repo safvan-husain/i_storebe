@@ -3527,6 +3527,7 @@ describe('Attendance endpoints e2e', () => {
         ...snapshotFields,
         employee: seed.staffId,
         date: '2099-06-01',
+        firstCheckIn: '09:00',
         status: 'present',
         productiveWorkMinutes: 400,
         grossMinutes: 480,
@@ -3535,6 +3536,7 @@ describe('Attendance endpoints e2e', () => {
         ...snapshotFields,
         employee: seed.staffId,
         date: '2099-06-02',
+        firstCheckInAt: new Date('2099-06-02T05:00:00.000Z'),
         status: 'present',
         productiveWorkMinutes: 380,
         grossMinutes: 460,
@@ -3550,6 +3552,7 @@ describe('Attendance endpoints e2e', () => {
         ...snapshotFields,
         employee: seed.staffId,
         date: '2099-06-04',
+        firstCheckIn: '09:00',
         status: 'missing_checkout',
         productiveWorkMinutes: 250,
       },
@@ -3557,6 +3560,7 @@ describe('Attendance endpoints e2e', () => {
         ...snapshotFields,
         employee: seed.staffId,
         date: '2099-06-05',
+        firstCheckIn: '09:00',
         status: 'open_break',
         productiveWorkMinutes: 100,
       },
@@ -3564,6 +3568,7 @@ describe('Attendance endpoints e2e', () => {
         ...snapshotFields,
         employee: seed.staffId,
         date: '2099-06-06',
+        firstCheckIn: '09:00',
         status: 'incomplete',
         productiveWorkMinutes: 90,
       },
@@ -3579,6 +3584,7 @@ describe('Attendance endpoints e2e', () => {
         ...snapshotFields,
         employee: seed.managerId,
         date: '2099-06-01',
+        firstCheckIn: '09:00',
         status: 'present',
         productiveWorkMinutes: 420,
       },
@@ -3607,6 +3613,7 @@ describe('Attendance endpoints e2e', () => {
     expect(personSummary.body.people[0]).toMatchObject({
       employeeId: seed.staffId,
       employeeName: 'staff-one',
+      punchedInDays: 5,
       presentDays: 2,
       absentDays: 1,
       productiveWorkMinutes: 780,
@@ -3629,6 +3636,7 @@ describe('Attendance endpoints e2e', () => {
       hrSummary.body.people.map((person: { employeeName: string }) => [person.employeeName, person]),
     );
     expect(byName['staff-one']).toMatchObject({
+      punchedInDays: 5,
       presentDays: 2,
       absentDays: 1,
       productiveWorkMinutes: 780,
@@ -3636,6 +3644,7 @@ describe('Attendance endpoints e2e', () => {
       excludedIncompleteDays: 2,
     });
     expect(byName['manager-a']).toMatchObject({
+      punchedInDays: 1,
       presentDays: 1,
       absentDays: 0,
       productiveWorkMinutes: 420,
